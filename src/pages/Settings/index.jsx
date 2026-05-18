@@ -674,7 +674,7 @@ export default function SettingsPage() {
             <div className="space-y-4 text-sm text-gray-600">
               <div>
                 <h2 className="section-title">บันทึกรายรับ-รายจ่ายร้านค้า</h2>
-                <p>Multi-Shop Edition · ข้อมูลเก็บแยกตามร้านในเครื่องนี้</p>
+                <p>Multi-Shop Edition · รองรับ Cloud Sync ผ่าน Supabase</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border border-gray-200 p-4">

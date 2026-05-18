@@ -130,7 +130,7 @@ export default function HomeSidebar({ open, onClose }) {
         <div className="border-t border-gray-100 px-4 py-3">
           <p className="text-xs text-gray-400 text-center">
             บันทึกรายรับ-รายจ่ายร้านค้า<br />
-            ข้อมูลเก็บในเครื่องนี้เท่านั้น
+            รองรับ Cloud Sync · Multi-Shop Edition
           </p>
         </div>
       </aside>

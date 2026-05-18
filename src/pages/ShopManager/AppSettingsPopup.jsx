@@ -179,7 +179,7 @@ export default function AppSettingsPopup({ shops, latestShop, onClose }) {
             <div className="space-y-4 text-sm text-gray-600">
               <div>
                 <h3 className="section-title">บันทึกรายรับ-รายจ่ายร้านค้า</h3>
-                <p>Multi-Shop Edition · ข้อมูลเก็บแยกตามร้านในเครื่องนี้</p>
+                <p>Multi-Shop Edition · รองรับ Cloud Sync ผ่าน Supabase</p>
               </div>
               <div className="rounded-lg border border-gray-200 p-3">
                 <p className="font-medium text-gray-800">แนวทาง sync ข้อมูล</p>

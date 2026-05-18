@@ -176,7 +176,7 @@ export default function ShopManager() {
           <h1 className="text-2xl font-bold text-gray-900">🏪 ร้านค้าทั้งหมด</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {currentUser?.shopAccess === null || isAdminRole(currentUser?.role)
-              ? `พบข้อมูล ${shops.length} ร้านในเครื่องนี้ · ข้อมูลแต่ละร้านถูกเก็บแยกกัน`
+              ? `พบข้อมูล ${shops.length} ร้าน · ข้อมูลแต่ละร้านถูกเก็บแยกกัน`
               : `คุณมีสิทธิ์เข้าถึง ${accessibleShops.length} จาก ${shops.length} ร้าน`
             }
           </p>
@@ -200,7 +200,7 @@ export default function ShopManager() {
                 ⚠️ พบข้อมูลร้านที่ยังไม่ได้อยู่ในรายชื่อ
               </h2>
               <p className="text-xs text-amber-700 mt-1">
-                พบข้อมูลเก่า {orphans.length} ชุดในเครื่องนี้ สามารถกู้คืนเป็นร้านใหม่ได้
+                พบข้อมูลเก่า {orphans.length} ชุด สามารถกู้คืนเป็นร้านใหม่ได้
               </p>
             </div>
             <button className="btn btn-warning text-sm" onClick={() => handleRecoverOrphan(orphans[0])}>
@@ -244,7 +244,7 @@ export default function ShopManager() {
           <div className="text-5xl mb-4">🏪</div>
           {shops.length === 0 ? (
             <>
-              <h2 className="text-lg font-semibold text-gray-900">ยังไม่มีร้านในเครื่องนี้</h2>
+              <h2 className="text-lg font-semibold text-gray-900">ยังไม่มีร้านในระบบ</h2>
               <p className="text-gray-500 text-sm mt-2 max-w-sm mx-auto">สร้างร้านแรกเพื่อเริ่มบันทึกรายรับรายจ่าย</p>
               {canCreateShop && (
                 <button className="btn btn-primary px-8 py-3 text-base mt-6" onClick={() => setCreateOpen(true)}>

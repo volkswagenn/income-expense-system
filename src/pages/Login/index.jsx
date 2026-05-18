@@ -346,7 +346,7 @@ export default function LoginPage() {
               ['📊', 'จัดการหลายร้านในที่เดียว'],
               ['💰', 'บันทึกรายรับ-รายจ่ายง่าย'],
               ['📈', 'รายงานสรุปครบถ้วน'],
-              ['🔒', 'ข้อมูลเก็บในเครื่องปลอดภัย'],
+              ['☁️', 'รองรับ Cloud Sync หลายเครื่อง'],
             ].map(([icon, text]) => (
               <div key={text} className="flex items-center gap-3 text-blue-100 text-sm bg-white/10 rounded-xl px-4 py-2.5">
                 <span className="text-base">{icon}</span>
@@ -356,7 +356,7 @@ export default function LoginPage() {
           </div>
         </div>
         <div className="px-12 py-6 border-t border-white/10 text-center">
-          <p className="text-blue-300 text-xs">ข้อมูลทั้งหมดเก็บในเครื่องนี้เท่านั้น ไม่ผ่านอินเทอร์เน็ต</p>
+          <p className="text-blue-300 text-xs">ข้อมูลเก็บในเครื่อง · รองรับ Cloud Sync ผ่าน Supabase</p>
         </div>
       </div>
 
@@ -413,7 +413,7 @@ export default function LoginPage() {
           </div>
 
           <p className="text-center text-xs text-gray-400 mt-5">
-            บันทึกรายรับ-รายจ่ายร้านค้า · ข้อมูลเก็บในเครื่องนี้
+            บันทึกรายรับ-รายจ่ายร้านค้า · Multi-Shop Edition
           </p>
         </div>
       </div>

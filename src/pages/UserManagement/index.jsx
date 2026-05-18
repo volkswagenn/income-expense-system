@@ -107,7 +107,10 @@ function SecretField({ label, value, emptyText = 'ไม่มีข้อมู
           {visible ? 'ซ่อน' : 'ดู'}
         </button>
       </div>
-      {!value && <p className="text-xs text-amber-600 mt-1">ข้อมูลเก่าบางบัญชีถูกเก็บเป็น hash จึงดูรหัสเดิมไม่ได้ ต้องตั้งรหัสใหม่ก่อน</p>}
+      {value
+        ? <p className="text-xs text-amber-600 mt-1">⚠️ ข้อมูลนี้มองเห็นได้เฉพาะผู้มีสิทธิ์ VIEW_USER_SECRET เท่านั้น</p>
+        : <p className="text-xs text-gray-400 mt-1">บัญชีนี้ไม่มีข้อมูลรหัสแบบข้อความ — ต้องตั้งรหัสใหม่</p>
+      }
     </div>
   )
 }
@@ -202,7 +205,13 @@ function UserModal({ user, currentUser, roles, shops, canViewSecrets, onClose, o
               <input className="input" value={form.displayName} onChange={(e) => setField('displayName', e.target.value)} placeholder="เช่น สมชาย ใจดี" />
               {errors.displayName && <p className="text-red-500 text-xs mt-1">{errors.displayName}</p>}
             </div>
-            {!isEdit && (
+            {isEdit ? (
+              <div>
+                <label className="label">ชื่อผู้ใช้</label>
+                <input className="input bg-gray-50 text-gray-500" value={user?.username ?? ''} readOnly />
+                <p className="text-xs text-gray-400 mt-1">ไม่สามารถเปลี่ยนชื่อผู้ใช้ได้หลังสร้างบัญชีแล้ว</p>
+              </div>
+            ) : (
               <div>
                 <label className="label">ชื่อผู้ใช้ <span className="text-red-500">*</span></label>
                 <input className="input" value={form.username} onChange={(e) => setField('username', e.target.value.replace(/\s/g, ''))} placeholder="ไม่มีเว้นวรรค เช่น somchai" />
@@ -736,12 +745,8 @@ export default function UserManagementPage() {
 
           {/* Credentials info */}
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-            <p className="font-semibold mb-1">ℹ️ ข้อมูลเริ่มต้น (เปลี่ยนทันทีหลังเข้าใช้งาน)</p>
-            <div className="flex flex-wrap gap-4 text-xs text-amber-700">
-              <span>Username: <code className="font-mono bg-amber-100 px-1 rounded">admin</code></span>
-              <span>Password: <code className="font-mono bg-amber-100 px-1 rounded">admin</code></span>
-              <span>PIN: <code className="font-mono bg-amber-100 px-1 rounded">000000</code></span>
-            </div>
+            <p className="font-semibold mb-1">⚠️ ความปลอดภัย — เปลี่ยนรหัสผ่านเริ่มต้นทันที</p>
+            <p className="text-xs text-amber-700">บัญชี <code className="font-mono bg-amber-100 px-1 rounded">admin</code> ใช้รหัสผ่านเริ่มต้นที่คาดเดาได้ง่าย กรุณาเปลี่ยนรหัสผ่านและ PIN ทันทีเพื่อความปลอดภัย</p>
           </div>
 
           {/* User list */}
