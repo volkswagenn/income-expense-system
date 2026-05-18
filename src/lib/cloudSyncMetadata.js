@@ -126,6 +126,12 @@ export function enqueueCloudChange(tableName, recordId, action, payload, options
   }
   const queue = readQueue(options.shopId)
   writeQueue([...queue, item], options.shopId)
+  // แจ้ง useAutoSync ให้ push ทันที
+  try {
+    window.dispatchEvent(new CustomEvent('zuzoo:queue-updated', {
+      detail: { shopId: item.shopId },
+    }))
+  } catch { /* ignore in non-browser env */ }
   return item
 }
 

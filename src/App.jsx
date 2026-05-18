@@ -5,12 +5,16 @@ import useAuthStore from './store/useAuthStore'
 import Navbar from './components/layout/Navbar'
 import Sidebar from './components/layout/Sidebar'
 import { endCurrentShopSession, heartbeatShopSession } from './lib/shopSessions'
+import { useAutoSync } from './hooks/useAutoSync'
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarPinned, setSidebarPinned] = useState(false)
   const activeShopId = useShopStore((s) => s.activeShopId)
   const currentUser = useAuthStore((s) => s.currentUser)
+
+  // auto push + pull ตลอดเวลาที่อยู่ในร้าน
+  useAutoSync(activeShopId)
 
   const handleClose = useCallback(() => setSidebarOpen(false), [])
 
