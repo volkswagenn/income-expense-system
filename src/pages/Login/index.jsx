@@ -311,19 +311,25 @@ export default function LoginPage() {
   const { users, initUsers, isAuthenticated } = useAuthStore((s) => s)
   const initRoles = useRoleStore((s) => s.initRoles)
   const [tab, setTab] = useState(TAB_PW)
-  const [initing, setIniting] = useState(false)
+  const [initing, setIniting] = useState(true)
+  const [initMsg, setInitMsg] = useState('กำลังโหลดระบบ...')
   const [blockedPopup, setBlockedPopup] = useState('')
 
   useEffect(() => {
     initRoles()
     const bootstrap = async () => {
       setIniting(true)
-      // ดึง users + roles จาก cloud ก่อน (ไม่ต้องการ login)
-      await fetchAuthBootstrap()
-      // ถ้ายังไม่มี users เลย (cloud ว่างหรือไม่มี config) → สร้าง default admin
+      setInitMsg('กำลังดึงข้อมูลผู้ใช้จาก cloud...')
+      const result = await fetchAuthBootstrap()
+      // ถ้า cloud ได้ข้อมูลมา ไม่ต้องสร้าง default
       if (useAuthStore.getState().users.length === 0) {
+        setInitMsg('ไม่พบข้อมูลบน cloud — โหลดค่าเริ่มต้น...')
         await initUsers()
+      } else if (result.ok) {
+        setInitMsg(`พร้อมใช้งาน — พบ ${result.users} บัญชีจาก cloud`)
       }
+      // หน่วง 600ms ให้ user เห็นข้อความก่อนหาย
+      await new Promise((r) => setTimeout(r, 600))
       setIniting(false)
     }
     bootstrap()
@@ -404,7 +410,7 @@ export default function LoginPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
                   </svg>
-                  <p className="text-sm">กำลังโหลดระบบ...</p>
+                  <p className="text-sm text-center leading-relaxed">{initMsg}</p>
                 </div>
               ) : tab === TAB_PW ? (
                 <PasswordTab onSuccess={handleSuccess} onBlocked={setBlockedPopup} />

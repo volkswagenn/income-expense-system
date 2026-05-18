@@ -25,6 +25,7 @@ import {
   fetchShopsFromCloud,
   pushShopToCloud,
 } from '../../services/cloud/shopSync'
+import { fetchAuthBootstrap } from '../../services/cloud/authSync'
 
 function sortShops(list, summaries, sortBy) {
   return [...list].sort((a, b) => {
@@ -68,9 +69,12 @@ export default function ShopManager() {
   const canViewOwnMonitor = checkPermission(roles, currentUser?.role, P.VIEW_OWN_SHOP_SESSIONS)
   const canManageOwnMonitor = checkPermission(roles, currentUser?.role, P.MANAGE_OWN_SHOP_SESSIONS)
 
-  // ดึงรายชื่อร้านจาก cloud เมื่อ login แล้วเข้าหน้านี้
+  // ดึง users + shops ล่าสุดจาก cloud ทันทีที่เข้าหน้าเลือกร้าน
   useEffect(() => {
-    fetchShopsFromCloud().catch(console.warn)
+    Promise.all([
+      fetchAuthBootstrap(),   // ตรวจสอบ user/permission ล่าสุด
+      fetchShopsFromCloud(),  // ตรวจสอบรายชื่อร้านล่าสุด
+    ]).catch(console.warn)
   }, [])
 
   const getFirstAllowedShopRoute = () => {
@@ -97,13 +101,20 @@ export default function ShopManager() {
     return sortShops(filtered, summaries, sortBy)
   }, [query, accessibleShops, sortBy, summaries])
 
-  const handleSelect = (shopId) => {
+  const handleSelect = async (shopId) => {
+    setSelectError('')
+
+    // ดึง user/permission ล่าสุดจาก cloud ก่อนตรวจสิทธิ์
+    // ป้องกันกรณี permission ถูกแก้บนเครื่องอื่นแต่ยังไม่ sync
+    await fetchAuthBootstrap().catch(console.warn)
+
+    // ตรวจสิทธิ์หลังได้ข้อมูลล่าสุดจาก cloud แล้ว
     const destination = getFirstAllowedShopRoute()
     if (!destination) {
       setSelectError('บัญชีนี้มีสิทธิ์เห็นร้าน แต่ยังไม่มีสิทธิ์ใช้งานเมนูภายในร้าน กรุณาเพิ่มสิทธิ์ Dashboard หรือบันทึกรายรับ-รายจ่ายให้ Role นี้')
       return
     }
-    setSelectError('')
+
     const shop = shops.find((item) => item.id === shopId)
     const sessionResult = startShopSession(shopId, shop?.name ?? '', currentUser, sessionSettings)
     if (!sessionResult.ok) {

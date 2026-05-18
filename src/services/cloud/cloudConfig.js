@@ -62,6 +62,9 @@ export function getSupabaseAnonKey() {
 }
 
 export function isCloudEnabled() {
+  // Auto-enable เมื่อ env vars ถูกฝังมาจาก Vercel (ไม่ต้องตั้งค่าเอง)
+  if (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY) return true
+  // Fallback: ตรวจสอบ manual config จาก Settings
   const config = getCloudConfig()
   return Boolean(config.enabled && (config.supabaseUrl || config.apiBaseUrl) && config.supabaseAnonKey)
 }
