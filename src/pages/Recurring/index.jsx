@@ -1,0 +1,389 @@
+import { useState, useEffect, useMemo } from 'react'
+import { format } from 'date-fns'
+import { th } from 'date-fns/locale'
+import useRecurringStore from '../../store/useRecurringStore'
+import useTransactionStore from '../../store/useTransactionStore'
+import usePendingStore from '../../store/usePendingStore'
+import useLogStore from '../../store/useLogStore'
+import { buildLogEntry } from '../../lib/logBuilder'
+import { deductWallet, addToWallet, willGoNegative } from '../../lib/walletEngine'
+import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import RecurringEntryCard from './RecurringEntryCard'
+import RecurringItemForm from './RecurringItemForm'
+import PayEntryPopup from './PayEntryPopup'
+
+const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+
+function monthKey(year, month) {
+  return `${year}-${String(month + 1).padStart(2, '0')}`
+}
+
+export default function RecurringPage() {
+  const now = new Date()
+  const [viewYear, setViewYear] = useState(now.getFullYear())
+  const [viewMonth, setViewMonth] = useState(now.getMonth())
+  const [showForm, setShowForm] = useState(false)
+  const [editItem, setEditItem] = useState(null)
+  const [payTarget, setPayTarget] = useState(null) // { entry, item }
+  const [deleteItemId, setDeleteItemId] = useState(null)
+  const [undoTarget, setUndoTarget] = useState(null)
+  const [negativeWarn, setNegativeWarn] = useState(null) // { amount, method, proceed }
+  const [showItemList, setShowItemList] = useState(false)
+
+  const {
+    items, entries, addItem, updateItem, toggleItem, deleteItem,
+    generateEntries, updateEntry, markSkipped, getPendingCountCurrentMonth,
+    syncEntryFromTransaction,
+  } = useRecurringStore()
+  const { addTransaction, deleteTransaction } = useTransactionStore()
+  const { addPending, deletePending } = usePendingStore()
+  const { addLog } = useLogStore()
+
+  const month = monthKey(viewYear, viewMonth)
+
+  // auto-generate entries when month changes
+  useEffect(() => {
+    generateEntries(month)
+  }, [month])
+
+  const navigateMonth = (delta) => {
+    let m = viewMonth + delta
+    let y = viewYear
+    if (m < 0) { m = 11; y-- }
+    if (m > 11) { m = 0; y++ }
+    setViewMonth(m)
+    setViewYear(y)
+  }
+
+  // entries for current view month, merged with item data
+  const monthEntries = useMemo(() => {
+    const monthItems = items.filter((it) => it.enabled || entries.some((e) => e.recurringId === it.id && e.month === month))
+    return entries
+      .filter((e) => e.month === month)
+      .map((e) => ({ entry: e, item: items.find((it) => it.id === e.recurringId) }))
+      .filter((x) => x.item)
+      .sort((a, b) => a.item.billingDay - b.item.billingDay)
+  }, [entries, items, month])
+
+  const summary = useMemo(() => {
+    const paid = monthEntries.filter((x) => x.entry.status === 'paid')
+    const pending = monthEntries.filter((x) => x.entry.status === 'pending')
+    return {
+      paidCount: paid.length,
+      paidTotal: paid.reduce((s, x) => s + (x.entry.amount || 0), 0),
+      pendingCount: pending.length,
+      pendingTotal: pending.reduce((s, x) => s + (x.entry.amount || 0), 0),
+    }
+  }, [monthEntries])
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+
+  const handleAddItem = (data) => {
+    const item = addItem(data)
+    addLog(buildLogEntry({ activityType: 'RECURRING_CREATE', description: `สร้างรายการประจำ "${data.name}"` }))
+    generateEntries(month)
+    setShowForm(false)
+  }
+
+  const handleUpdateItem = (data) => {
+    updateItem(editItem.id, data)
+    addLog(buildLogEntry({ activityType: 'RECURRING_UPDATE', description: `แก้ไขรายการประจำ "${data.name}"` }))
+    setEditItem(null)
+  }
+
+  const handleDeleteItem = () => {
+    const it = items.find((i) => i.id === deleteItemId)
+    deleteItem(deleteItemId)
+    addLog(buildLogEntry({ activityType: 'RECURRING_DELETE', description: `ลบรายการประจำ "${it?.name}"` }))
+    setDeleteItemId(null)
+  }
+
+  const handlePay = (entry, item) => setPayTarget({ entry, item })
+
+  const executeMarkPaid = (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd')) => {
+    let tx = null
+
+    let pendingPaymentId = null
+    if (paidMethod === 'pending') {
+      const p = addPending({
+        description: item.name,
+        itemName: item.name,
+        amount,
+        dueDate: entry.dueDate,
+        category: item.category,
+        vendor: item.vendor,
+        note: item.note,
+        recurringEntryId: entry.id,
+      })
+      pendingPaymentId = p.id
+    } else {
+      tx = addTransaction({
+        type: 'expense',
+        date: paidDate,
+        amount,
+        category: item.category,
+        method: paidMethod,
+        itemName: item.name,
+        vendor: item.vendor,
+        note: item.note,
+        recurringEntryId: entry.id,
+      })
+      deductWallet(paidMethod, amount, {
+        activityType: 'RECURRING_PAID',
+        description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
+      })
+    }
+
+    updateEntry(entry.id, {
+      status: 'paid',
+      amount,
+      paidMethod,
+      paidAt: new Date(`${paidDate}T12:00:00`).toISOString(),
+      transactionId: tx?.id ?? null,
+      pendingPaymentId,
+    })
+
+    if (paidMethod !== 'pending') {
+      addLog(buildLogEntry({
+        activityType: 'RECURRING_PAID',
+        description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท (${paidMethod === 'cash' ? 'เงินสด' : 'โอนเงิน'})`,
+        walletEffect: { target: paidMethod, delta: -amount },
+      }))
+    }
+
+    setPayTarget(null)
+  }
+
+  const handlePayConfirm = (amount, paidMethod, paidDate) => {
+    const { entry, item } = payTarget
+    if (paidMethod !== 'pending' && willGoNegative(paidMethod, amount)) {
+      setNegativeWarn({ amount, paidMethod, paidDate, entry, item })
+      setPayTarget(null)
+      return
+    }
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate)
+  }
+
+  const handleNegativeConfirm = () => {
+    const { entry, item, amount, paidMethod, paidDate } = negativeWarn
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate)
+    setNegativeWarn(null)
+  }
+
+  const handleSaveEntryAmount = (amount) => {
+    const { entry, item } = payTarget
+    updateEntry(entry.id, { amount, amountUpdatedAt: new Date().toISOString() })
+    addLog(buildLogEntry({
+      activityType: 'RECURRING_UPDATE',
+      description: `บันทึกยอดรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
+      newValue: { recurringEntryId: entry.id, recurringId: item.id, amount },
+    }))
+    setPayTarget(null)
+  }
+
+  const handleUndoPay = (entry) => setUndoTarget(entry)
+
+  const executeUndoPay = () => {
+    const entry = undoTarget
+    const item = items.find((it) => it.id === entry.recurringId)
+
+    if (entry.transactionId) deleteTransaction(entry.transactionId)
+    if (entry.pendingPaymentId) deletePending(entry.pendingPaymentId)
+    if (entry.paidMethod && entry.paidMethod !== 'pending') {
+      addToWallet(entry.paidMethod, entry.amount, {
+        activityType: 'RECURRING_UNPAID',
+        description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${entry.amount.toLocaleString()} บาท`,
+      })
+    }
+
+    updateEntry(entry.id, {
+      status: 'pending',
+      paidAt: null,
+      paidMethod: null,
+      transactionId: null,
+      pendingPaymentId: null,
+      amount: item?.amountType === 'fixed' ? (item.fixedAmount ?? 0) : 0,
+    })
+
+    addLog(buildLogEntry({
+      activityType: 'RECURRING_UNPAID',
+      description: `ยกเลิกการจ่ายรายการประจำ "${item?.name}"`,
+    }))
+    setUndoTarget(null)
+  }
+
+  const handleSkip = (entryId) => {
+    const e = entries.find((x) => x.id === entryId)
+    if (e?.status === 'skipped') {
+      updateEntry(entryId, { status: 'pending' })
+    } else {
+      markSkipped(entryId)
+      addLog(buildLogEntry({ activityType: 'RECURRING_SKIPPED', description: `ข้ามรายการประจำเดือน ${month}` }))
+    }
+  }
+
+  const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth()
+
+  return (
+    <div className="space-y-4">
+      {/* Month navigator */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <button className="btn btn-secondary w-8 h-8 p-0 flex items-center justify-center" onClick={() => navigateMonth(-1)}>‹</button>
+          <span className="text-sm font-semibold text-gray-800 min-w-[120px] text-center">
+            {THAI_MONTHS[viewMonth]} {viewYear + 543}
+            {isCurrentMonth && <span className="ml-1 text-xs text-blue-500 font-normal">(เดือนนี้)</span>}
+          </span>
+          <button className="btn btn-secondary w-8 h-8 p-0 flex items-center justify-center" onClick={() => navigateMonth(1)}>›</button>
+        </div>
+        <button className="btn btn-primary text-sm" onClick={() => setShowForm(true)}>+ เพิ่มรายการ</button>
+      </div>
+
+      {/* Summary */}
+      {monthEntries.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
+            <p className="text-xs text-gray-500 mb-0.5">จ่ายแล้ว</p>
+            <p className="text-base font-bold text-emerald-600">{summary.paidTotal.toLocaleString('th-TH')}</p>
+            <p className="text-xs text-emerald-500">{summary.paidCount} รายการ</p>
+          </div>
+          <div className="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
+            <p className="text-xs text-gray-500 mb-0.5">รอจ่าย</p>
+            <p className="text-base font-bold text-amber-600">{summary.pendingTotal.toLocaleString('th-TH')}</p>
+            <p className="text-xs text-amber-500">{summary.pendingCount} รายการ</p>
+          </div>
+          <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-200">
+            <p className="text-xs text-gray-500 mb-0.5">รวมทั้งหมด</p>
+            <p className="text-base font-bold text-gray-800">{(summary.paidTotal + summary.pendingTotal).toLocaleString('th-TH')}</p>
+            <p className="text-xs text-gray-400">{monthEntries.length} รายการ</p>
+          </div>
+        </div>
+      )}
+
+      {/* Entry list */}
+      {monthEntries.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <p className="text-4xl mb-3">🔁</p>
+          <p className="text-sm">ยังไม่มีรายการประจำเดือนนี้</p>
+          <p className="text-xs mt-1">กด "เพิ่มรายการ" เพื่อสร้างรายจ่ายประจำ</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {monthEntries.map(({ entry, item }) => (
+            <RecurringEntryCard
+              key={entry.id}
+              entry={entry}
+              item={item}
+              onPay={handlePay}
+              onUndoPay={handleUndoPay}
+              onSkip={handleSkip}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Template list (collapsible) */}
+      {items.length > 0 && (
+        <div className="border-t border-gray-100 pt-4">
+          <button
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
+            onClick={() => setShowItemList((v) => !v)}
+          >
+            <span>{showItemList ? '▾' : '▸'}</span>
+            <span>จัดการรายการทั้งหมด ({items.length} รายการ)</span>
+          </button>
+
+          {showItemList && (
+            <div className="mt-3 space-y-2">
+              {items.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-white">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${item.enabled ? 'bg-emerald-400' : 'bg-gray-300'}`} />
+                      <span className="text-sm font-medium text-gray-800 truncate">{item.name}</span>
+                      {item.amountType === 'fixed' && (
+                        <span className="text-xs text-gray-500 tabular-nums">{(item.fixedAmount ?? 0).toLocaleString('th-TH')} บาท</span>
+                      )}
+                      {item.amountType === 'variable' && (
+                        <span className="text-xs text-gray-400 italic">ยอดเปลี่ยนแปลง</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 ml-4">ทุกวันที่ {item.billingDay} ของเดือน</p>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => toggleItem(item.id)}
+                      className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
+                        item.enabled
+                          ? 'border-gray-200 text-gray-500 hover:border-gray-300'
+                          : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                      }`}
+                    >
+                      {item.enabled ? 'ปิด' : 'เปิด'}
+                    </button>
+                    <button
+                      onClick={() => setEditItem(item)}
+                      className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-blue-500 hover:bg-blue-50"
+                    >
+                      แก้
+                    </button>
+                    <button
+                      onClick={() => setDeleteItemId(item.id)}
+                      className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-red-400 hover:bg-red-50"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modals */}
+      {showForm && (
+        <RecurringItemForm onSave={handleAddItem} onClose={() => setShowForm(false)} />
+      )}
+      {editItem && (
+        <RecurringItemForm item={editItem} onSave={handleUpdateItem} onClose={() => setEditItem(null)} />
+      )}
+      {payTarget && (
+        <PayEntryPopup
+          entry={payTarget.entry}
+          item={payTarget.item}
+          onConfirm={handlePayConfirm}
+          onSaveAmount={handleSaveEntryAmount}
+          onClose={() => setPayTarget(null)}
+        />
+      )}
+      <ConfirmPopup
+        open={!!undoTarget}
+        title="ยกเลิกการจ่าย"
+        message={`ยกเลิกการจ่าย "${items.find((i) => i.id === undoTarget?.recurringId)?.name}"?\nระบบจะคืนเงินและลบรายการบันทึกที่เกี่ยวข้อง`}
+        onConfirm={executeUndoPay}
+        onCancel={() => setUndoTarget(null)}
+        confirmLabel="ยืนยัน"
+        danger
+      />
+      <ConfirmPopup
+        open={!!deleteItemId}
+        title="ลบรายการประจำ"
+        message={`ลบ "${items.find((i) => i.id === deleteItemId)?.name}"?\nรายการที่ยังไม่จ่ายจะถูกลบด้วย แต่รายการที่จ่ายแล้วยังคงอยู่`}
+        onConfirm={handleDeleteItem}
+        onCancel={() => setDeleteItemId(null)}
+        confirmLabel="ลบ"
+        danger
+      />
+      <ConfirmPopup
+        open={!!negativeWarn}
+        title="ยอดเงินไม่เพียงพอ"
+        message={`${negativeWarn?.paidMethod === 'cash' ? 'เงินสด' : 'เงินโอน'}ไม่เพียงพอ ต้องการจ่ายต่อไปหรือไม่?\nยอดจะติดลบ`}
+        onConfirm={handleNegativeConfirm}
+        onCancel={() => setNegativeWarn(null)}
+        confirmLabel="จ่ายต่อไป"
+        danger
+      />
+    </div>
+  )
+}

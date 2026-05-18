@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(npm install *)",
+      "Bash(node -e \"const f=require\\('fs'\\); ['src/main.jsx','public/SettingApp.txt','electron/main.cjs','electron/preload.cjs'].forEach\\(p=>{ const t=f.readFileSync\\(p,'utf8'\\); const lines=t.split\\('\\\\n'\\).filter\\(l=>l.trim\\(\\)\\); console.log\\('---',p,'\\(',lines.length,'lines\\)'\\); }\\)\")",
+      "Bash(node -e \"const f=require\\('fs'\\); const t=f.readFileSync\\('src/main.jsx','utf8'\\); const line=t.split\\('\\\\n'\\).find\\(l=>l.includes\\('SettingApp'\\)\\); console.log\\('main.jsx fetch:', line?.trim\\(\\)\\); const v=f.readFileSync\\('public/SettingApp.txt','utf8'\\); console.log\\('SettingApp.txt:', v.trim\\(\\)\\)\")",
+      "Bash(node -e \"const f=require\\('fs'\\); const t=f.readFileSync\\('src/pages/Transactions/ExpenseForm.jsx','utf8'\\); const lines=t.split\\('\\\\n'\\).filter\\(l=>l.includes\\('createdAt'\\)\\); lines.forEach\\(l=>console.log\\(l.trim\\(\\)\\)\\)\")",
+      "Bash(node -e \"const f=require\\('fs'\\); const t=f.readFileSync\\('src/pages/History/index.jsx','utf8'\\); const line=t.split\\('\\\\n'\\).find\\(l=>l.includes\\('TX_TYPES'\\)\\); console.log\\('TX_TYPES:', line?.trim\\(\\)\\)\")",
+      "Bash(node -e \"const f=require\\('fs'\\); const t=f.readFileSync\\('src/lib/walletEngine.js','utf8'\\); const lines=t.split\\('\\\\n'\\).filter\\(l=>l.includes\\('newValue'\\)\\); lines.forEach\\(l=>console.log\\(l.trim\\(\\)\\)\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(npx vite *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Folk\\\\Claude\\\\Project\\\\ZZ\\\\src\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "PowerShell(head -100)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Folk\\\\Claude\\\\Project\\\\ZZ\\\\src\\\\pages\\\\Reports\" -Recurse)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Folk\\\\Claude\\\\Project\\\\ZZ\\\\src\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(move \"src\\\\hooks\\\\useFormDraft.js\" \"src\\\\hooks\\\\useFormDraft.jsx\")",
+      "PowerShell(Rename-Item \"C:\\\\Users\\\\lenovo\\\\Folk\\\\Claude\\\\Project\\\\ZZ\\\\src\\\\hooks\\\\useFormDraft.js\" \"useFormDraft.jsx\")",
+      "Bash(node \"c:\\\\Users\\\\lenovo\\\\Folk\\\\Claude\\\\Project\\\\ZZ\\\\scripts\\\\sync-version.cjs\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Folk\\\\Claude\\\\Project\\\\ZZ\\\\src\\\\\" -Recurse -Directory)",
+      "Bash(Get-ChildItem -Force)",
+      "Bash(Select-Object Mode, LastWriteTime, Length, Name)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell($py = \"C:\\\\Users\\\\lenovo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe\"; & $py -c \"import reportlab; print\\('reportlab', reportlab.Version\\)\" 2>&1; & $py -c \"import fpdf; print\\('fpdf2 OK'\\)\" 2>&1)",
+      "PowerShell([Environment]::GetFolderPath\\(\"Desktop\"\\); ls \"$env:USERPROFILE\" | Select-Object Name | Select-Object -First 15)",
+      "PowerShell($f = Get-Item \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Manual-บันทึกรายรับรายจ่าย.pdf\"; \"Size: $\\([math]::Round\\($f.Length/1KB, 1\\)\\) KB\"; \"Created: $\\($f.LastWriteTime\\)\")",
+      "PowerShell(Start-Process \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Manual-???????????????????.pdf\")",
+      "Bash(grep -r \"badge\" \"C:\\\\\\\\!Project\\\\\\\\1.Project Offline\\\\\\\\2.Demo app\\\\\\\\income-expense-system-app\\\\\\\\src\\\\\\\\components\" --include=\"*.jsx\" -i)",
+      "Bash(grep -r \"className.*badge\" \"C:\\\\\\\\!Project\\\\\\\\1.Project Offline\\\\\\\\2.Demo app\\\\\\\\income-expense-system-app\\\\\\\\src\" --include=\"*.jsx\")",
+      "Bash(find \"C:\\\\\\\\!Project\\\\\\\\1.Project Offline\\\\\\\\2.Demo app\\\\\\\\income-expense-system-app\" -type f \\\\\\( -name \"*.css\" -o -name \"tailwind.config.js\" -o -name \"index.css\" \\\\\\))"
+    ]
+  }
+}

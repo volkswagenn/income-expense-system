@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+
+backend/node_modules/
+backend/dist/
+
+.env
+.env.local
+backend/.env
+
+.vite/
+.codex-chrome-profile*/
+*.log

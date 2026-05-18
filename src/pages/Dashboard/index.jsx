@@ -1,0 +1,51 @@
+import { useState } from 'react'
+import { format, startOfMonth, endOfMonth } from 'date-fns'
+import FilterBar from './FilterBar'
+import FinancialStatus from './FinancialStatus'
+import CalendarView from './CalendarView'
+import ChartFiltered from './ChartFiltered'
+import TrendChart6M from './TrendChart6M'
+import SectionCard from '../../components/shared/SectionCard'
+
+export default function Dashboard() {
+  const [filter, setFilter] = useState('month')
+  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
+        <FilterBar
+          filter={filter} setFilter={setFilter}
+          startDate={startDate} endDate={endDate}
+          setStartDate={setStartDate} setEndDate={setEndDate}
+        />
+      </div>
+
+      <SectionCard title="สถานะการเงินปัจจุบัน">
+        <FinancialStatus />
+      </SectionCard>
+
+      {/* Calendar + Sidebar */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+        <div className="xl:col-span-2">
+          <CalendarView
+            filter={filter} setFilter={setFilter}
+            startDate={startDate} endDate={endDate}
+            setStartDate={setStartDate} setEndDate={setEndDate}
+          />
+        </div>
+
+        <div className="space-y-5">
+          <SectionCard title="รายรับ-รายจ่ายตามช่วงเวลา">
+            <ChartFiltered startDate={startDate} endDate={endDate} />
+          </SectionCard>
+          <SectionCard title="แนวโน้ม 6 เดือนย้อนหลัง">
+            <TrendChart6M />
+          </SectionCard>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,125 @@
+import { useState } from 'react'
+import { format } from 'date-fns'
+
+const METHOD_OPTIONS = [
+  { value: 'cash', label: '💵 เงินสด' },
+  { value: 'transfer', label: '🏦 โอนเงิน' },
+  { value: 'pending', label: '📋 ค้างชำระ' },
+]
+
+export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, onClose }) {
+  const isVariable = item.amountType === 'variable'
+  const [amount, setAmount] = useState(entry.amount > 0 ? String(entry.amount) : '')
+  const [method, setMethod] = useState('')
+  const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [error, setError] = useState('')
+
+  const parsedAmount = parseFloat(amount)
+  const canSaveAmount = !isNaN(parsedAmount) && parsedAmount > 0
+  const canSubmit = method && paidDate && canSaveAmount
+
+  const handleSaveAmount = () => {
+    if (!canSaveAmount) { setError('กรุณากรอกยอดเงินที่ถูกต้อง'); return }
+    onSaveAmount(parsedAmount)
+  }
+
+  const handleConfirm = () => {
+    if (!method) { setError('กรุณาเลือกวิธีชำระ'); return }
+    if (!parsedAmount || parsedAmount <= 0) { setError('กรุณากรอกยอดเงินที่ถูกต้อง'); return }
+    if (!paidDate) { setError('กรุณาเลือกวันที่จ่ายเงิน'); return }
+    onConfirm(parsedAmount, method, paidDate)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-base text-gray-900">บันทึกการจ่าย</h3>
+            <p className="text-sm text-gray-500">{item.name}</p>
+          </div>
+          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Amount */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              ยอดเงิน (บาท) {isVariable && <span className="text-red-500">*</span>}
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className="input w-full text-right text-lg font-bold"
+              value={amount}
+              onChange={(e) => { setAmount(e.target.value); setError('') }}
+              placeholder="0.00"
+              autoFocus={isVariable}
+            />
+            {!isVariable && (
+              <p className="text-xs text-gray-400 mt-1">ยอดคงที่จาก template แก้ไขได้หากจำเป็น</p>
+            )}
+          </div>
+
+          {/* Method */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              วิธีชำระ <span className="text-red-500">*</span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {METHOD_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => { setMethod(opt.value); setError('') }}
+                  className={`py-2.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                    method === opt.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Paid date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              วันที่จ่ายเงิน <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              className="input w-full"
+              value={paidDate}
+              onChange={(e) => { setPaidDate(e.target.value); setError('') }}
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+        </div>
+
+        <div className="px-5 pb-5 grid grid-cols-3 gap-2">
+          <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
+          {isVariable && (
+            <button
+              className="btn btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSaveAmount}
+              disabled={!canSaveAmount}
+            >
+              บันทึกยอด
+            </button>
+          )}
+          <button
+            className={`btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed ${!isVariable ? 'col-span-2' : ''}`}
+            onClick={handleConfirm}
+            disabled={!canSubmit}
+          >
+            ✓ จ่ายแล้ว
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

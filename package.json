@@ -1,0 +1,81 @@
+{
+  "name": "cashflow-app",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "node scripts/sync-version.cjs && vite build && electron-builder --win",
+    "electron:preview": "vite build && electron .",
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:build": "npm --prefix backend run build",
+    "backend:prisma:generate": "npm --prefix backend run prisma:generate",
+    "create-patch": "node scripts/create-patch.cjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.0",
+    "date-fns": "^3.6.0",
+    "html2canvas": "^1.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "recharts": "^2.12.7",
+    "uuid": "^10.0.0",
+    "xlsx": "^0.18.5",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
+    "electron": "^41.4.0",
+    "electron-builder": "^26.8.1",
+    "postcss": "^8.4.45",
+    "tailwindcss": "^3.4.11",
+    "vite": "^5.4.8",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.cashflow.app",
+    "productName": "บันทึกรายรับ-รายจ่าย",
+    "copyright": "ZuZoo Pet Shop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "public/SettingApp.txt"
+    ],
+    "extraResources": [
+      {
+        "from": "public/SettingApp.txt",
+        "to": "SettingApp.txt"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "บันทึกรายรับ-รายจ่าย"
+    }
+  }
+}

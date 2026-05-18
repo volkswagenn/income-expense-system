@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model CloudAccount {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  displayName  String
+  passwordHash String
+  role         String   @default("owner")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships  ShopMember[]
+  refreshTokens RefreshToken[]
+}
+
+model Shop {
+  id        String   @id
+  code      String?
+  name      String
+  ownerId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  members     ShopMember[]
+  records     SyncRecord[]
+  syncLogs    SyncLog[]
+  devices     Device[]
+  attachments AttachmentObject[]
+  backups     BackupSnapshot[]
+}
+
+model ShopMember {
+  id        String   @id @default(cuid())
+  shopId    String
+  accountId String
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+
+  shop    Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  account CloudAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, accountId])
+  @@index([accountId])
+}
+
+model SyncRecord {
+  id        String   @id @default(cuid())
+  shopId    String
+  tableName String
+  recordId  String
+  payload   Json
+  deviceId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  deletedAt DateTime?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, tableName, recordId])
+  @@index([shopId, updatedAt])
+  @@index([shopId, tableName, updatedAt])
+  @@index([shopId, deletedAt])
+}
+
+model SyncLog {
+  id        String   @id @default(cuid())
+  shopId    String
+  deviceId  String
+  tableName String
+  recordId  String
+  action    String
+  syncedAt  DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, syncedAt])
+  @@index([shopId, action, syncedAt])
+  @@index([shopId, tableName, recordId])
+}
+
+model Device {
+  deviceId  String   @id
+  shopId    String
+  label     String?
+  updatedAt DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+}
+
+model AttachmentObject {
+  id          String   @id @default(cuid())
+  shopId      String
+  recordTable String
+  recordId    String
+  path        String
+  storageKey  String?
+  mimeType    String?
+  sizeBytes   Int?
+  checksum    String?
+  uploadedBy  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, recordTable, recordId])
+}
+
+model BackupSnapshot {
+  id         String   @id @default(cuid())
+  shopId     String
+  fileName   String
+  storageKey String?
+  sizeBytes  Int?
+  manifest   Json?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  accountId String
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  account CloudAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([expiresAt])
+}
