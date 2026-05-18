@@ -1,0 +1,6 @@
+backend/
+electron/
+release/
+patch/
+scripts/
+*.asar
