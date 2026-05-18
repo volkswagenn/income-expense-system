@@ -6,6 +6,7 @@ import { getRoleInfo, canManageRole, isAdminRole, checkPermission, P } from '../
 import RoleManagementPage from '../RoleManagement'
 import useGlobalLogStore from '../../store/useGlobalLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
+import { deleteUserFromCloud, pushUserToCloud } from '../../services/cloud/authSync'
 
 const AVATAR_COLORS = [
   'bg-blue-500', 'bg-emerald-500', 'bg-purple-500',
@@ -635,6 +636,7 @@ export default function UserManagementPage() {
         description: `สร้างผู้ใช้งาน "${payload.displayName}" (@${payload.username}) Role: ${payload.role}`,
         newValue: { username: payload.username, displayName: payload.displayName, role: payload.role },
       }))
+      pushUserToCloud(result.user).catch(console.warn)
       return {}
     }
     return result
@@ -651,6 +653,9 @@ export default function UserManagementPage() {
         oldValue: target ? { displayName: target.displayName, role: target.role } : null,
         newValue: { displayName: payload.displayName, role: payload.role },
       }))
+      // ดึง user ที่อัปเดตแล้วจาก store เพื่อ push ขึ้น cloud
+      const updated = useAuthStore.getState().users.find((u) => u.id === modal.id)
+      if (updated) pushUserToCloud(updated).catch(console.warn)
       return {}
     }
     return result
@@ -665,6 +670,7 @@ export default function UserManagementPage() {
         description: `ลบผู้ใช้งาน "${toDelete.displayName}" (@${toDelete.username})`,
         oldValue: { username: toDelete.username, displayName: toDelete.displayName, role: toDelete.role },
       }))
+      deleteUserFromCloud(toDelete.id).catch(console.warn)
       setToDelete(null)
     } else { showAlert(`⚠️ ${result.error}`); setToDelete(null) }
   }
@@ -679,6 +685,8 @@ export default function UserManagementPage() {
         description: `${isUnblock ? 'ปลดบล็อก' : 'บล็อก'}ผู้ใช้งาน "${toBlock.displayName}" (@${toBlock.username})${!isUnblock && reason ? ` — ${reason}` : ''}`,
         newValue: { username: toBlock.username, reason: isUnblock ? null : reason },
       }))
+      const updated = useAuthStore.getState().users.find((u) => u.id === toBlock.id)
+      if (updated) pushUserToCloud(updated).catch(console.warn)
       setToBlock(null)
     } else {
       showAlert(`⚠️ ${result.error}`)

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useShopStore from '../../store/useShopStore'
 import useAuthStore from '../../store/useAuthStore'
@@ -19,6 +19,12 @@ import useRoleStore from '../../store/useRoleStore'
 import ShopCard from './ShopCard'
 import CreateShopPopup from './CreateShopPopup'
 import EditShopPopup from './EditShopPopup'
+import {
+  deleteShopFromCloud,
+  fetchShopDataFromCloud,
+  fetchShopsFromCloud,
+  pushShopToCloud,
+} from '../../services/cloud/shopSync'
 
 function sortShops(list, summaries, sortBy) {
   return [...list].sort((a, b) => {
@@ -61,6 +67,11 @@ export default function ShopManager() {
   const canManageSystemMonitor = checkPermission(roles, currentUser?.role, P.MANAGE_SHOP_SESSIONS)
   const canViewOwnMonitor = checkPermission(roles, currentUser?.role, P.VIEW_OWN_SHOP_SESSIONS)
   const canManageOwnMonitor = checkPermission(roles, currentUser?.role, P.MANAGE_OWN_SHOP_SESSIONS)
+
+  // ดึงรายชื่อร้านจาก cloud เมื่อ login แล้วเข้าหน้านี้
+  useEffect(() => {
+    fetchShopsFromCloud().catch(console.warn)
+  }, [])
 
   const getFirstAllowedShopRoute = () => {
     const candidates = [
@@ -109,6 +120,8 @@ export default function ShopManager() {
       newValue: { shopId, shopName: shop?.name ?? null, shopCode: shop ? getShopCode(shop, shops) : null, sessionMode: sessionResult.mode },
     })
     navigate(destination)
+    // ดึงข้อมูลร้านจาก cloud ใน background (local data แสดงก่อน ไม่ blocking)
+    fetchShopDataFromCloud(shopId).catch(console.warn)
   }
 
   const handleForceEndSession = (sessionId) => {
@@ -124,6 +137,7 @@ export default function ShopManager() {
       description: `สร้างร้าน "${shop.name}"`,
       newValue: shop,
     })
+    pushShopToCloud(shop).catch(console.warn)
     handleSelect(shop.id)
   }
 
@@ -136,6 +150,7 @@ export default function ShopManager() {
     })
     deleteShop(shopId)
     shopDataKeys(shopId).forEach((key) => localStorage.removeItem(key))
+    deleteShopFromCloud(shopId).catch(console.warn)
   }
 
   const handleBackup = (shop) => {
@@ -160,12 +175,14 @@ export default function ShopManager() {
   const handleUpdateShop = (id, changes) => {
     const oldShop = shops.find((shop) => shop.id === id)
     updateShop(id, changes)
+    const updated = { ...oldShop, ...changes }
     appendShopAuditLog(id, {
       activityType: 'SHOP_UPDATE',
       description: `แก้ไขร้าน "${oldShop?.name ?? id}"`,
       oldValue: oldShop,
-      newValue: { ...oldShop, ...changes },
+      newValue: updated,
     })
+    pushShopToCloud(updated).catch(console.warn)
   }
 
   return (

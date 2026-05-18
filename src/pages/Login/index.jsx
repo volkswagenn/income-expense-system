@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../../store/useAuthStore'
 import useRoleStore from '../../store/useRoleStore'
+import { fetchAuthBootstrap } from '../../services/cloud/authSync'
 
 const PIN_LENGTH = 6
 const TAB_PW = 'pw'
@@ -307,7 +308,7 @@ function PinTab({ onSuccess, onBlocked }) {
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { users, initUsers, isAuthenticated } = useAuthStore()
+  const { users, initUsers, isAuthenticated } = useAuthStore((s) => s)
   const initRoles = useRoleStore((s) => s.initRoles)
   const [tab, setTab] = useState(TAB_PW)
   const [initing, setIniting] = useState(false)
@@ -315,10 +316,17 @@ export default function LoginPage() {
 
   useEffect(() => {
     initRoles()
-    if (users.length === 0) {
+    const bootstrap = async () => {
       setIniting(true)
-      initUsers().finally(() => setIniting(false))
+      // ดึง users + roles จาก cloud ก่อน (ไม่ต้องการ login)
+      await fetchAuthBootstrap()
+      // ถ้ายังไม่มี users เลย (cloud ว่างหรือไม่มี config) → สร้าง default admin
+      if (useAuthStore.getState().users.length === 0) {
+        await initUsers()
+      }
+      setIniting(false)
     }
+    bootstrap()
   }, [])
 
   useEffect(() => {
