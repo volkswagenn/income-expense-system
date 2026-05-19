@@ -114,7 +114,7 @@ export default function ShopCard({
                     <button className="w-full px-3 py-2 text-left hover:bg-gray-50" onClick={() => { setMenuOpen(false); onBackup(shop) }}>
                       สำรองร้านนี้
                     </button>
-                    {canDeleteShop && !isOnly && (
+                    {canDeleteShop && (
                       <button className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}>
                         ลบร้าน
                       </button>
