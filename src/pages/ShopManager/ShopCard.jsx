@@ -42,6 +42,8 @@ export default function ShopCard({
   canViewMonitor = false,
   canManageMonitor = false,
   onForceEndSession,
+  canEditShop = false,
+  canDeleteShop = false,
 }) {
   const color = SHOP_COLORS.find((c) => c.id === shop.colorId) ?? SHOP_COLORS[0]
   const shopCode = getShopCode(shop, shops)
@@ -104,13 +106,15 @@ export default function ShopCard({
 
                 {menuOpen && (
                   <div className="absolute right-0 top-9 z-10 w-44 rounded-lg border border-gray-200 bg-white shadow-lg py-1 text-sm">
-                    <button className="w-full px-3 py-2 text-left hover:bg-gray-50" onClick={() => { setMenuOpen(false); onEdit(shop) }}>
-                      แก้ไขร้าน
-                    </button>
+                    {canEditShop && (
+                      <button className="w-full px-3 py-2 text-left hover:bg-gray-50" onClick={() => { setMenuOpen(false); onEdit(shop) }}>
+                        แก้ไขร้าน
+                      </button>
+                    )}
                     <button className="w-full px-3 py-2 text-left hover:bg-gray-50" onClick={() => { setMenuOpen(false); onBackup(shop) }}>
                       สำรองร้านนี้
                     </button>
-                    {!isOnly && (
+                    {canDeleteShop && !isOnly && (
                       <button className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}>
                         ลบร้าน
                       </button>

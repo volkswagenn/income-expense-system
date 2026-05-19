@@ -68,6 +68,8 @@ export default function ShopManager() {
   const canManageSystemMonitor = checkPermission(roles, currentUser?.role, P.MANAGE_SHOP_SESSIONS)
   const canViewOwnMonitor = checkPermission(roles, currentUser?.role, P.VIEW_OWN_SHOP_SESSIONS)
   const canManageOwnMonitor = checkPermission(roles, currentUser?.role, P.MANAGE_OWN_SHOP_SESSIONS)
+  const canEditShop = isAdminRole(currentUser?.role) || checkPermission(roles, currentUser?.role, P.MANAGE_SHOP_EDIT)
+  const canDeleteShop = isAdminRole(currentUser?.role) || checkPermission(roles, currentUser?.role, P.MANAGE_SHOP_DELETE)
 
   // ดึง users + shops ล่าสุดจาก cloud ทันทีที่เข้าหน้าเลือกร้าน
   useEffect(() => {
@@ -311,6 +313,8 @@ export default function ShopManager() {
               canViewMonitor={canViewSystemMonitor || canViewOwnMonitor}
               canManageMonitor={canManageSystemMonitor || canManageOwnMonitor}
               onForceEndSession={handleForceEndSession}
+              canEditShop={canEditShop}
+              canDeleteShop={canDeleteShop}
             />
           ))}
         </section>

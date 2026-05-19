@@ -1,6 +1,8 @@
 // ─── Permission keys ──────────────────────────────────────────
 export const P = {
   VIEW_SHOPS:          'view_shops',
+  MANAGE_SHOP_EDIT:    'manage_shop_edit',
+  MANAGE_SHOP_DELETE:  'manage_shop_delete',
   MANAGE_USERS:        'manage_users',
   MANAGE_ROLES:        'manage_roles',
   MANAGE_USER_BLOCK:   'manage_user_block',
@@ -39,6 +41,8 @@ export const P = {
 // ─── Permission metadata (label + group) ──────────────────────
 export const PERMISSION_LABELS = {
   [P.VIEW_SHOPS]:          { label: 'ดูรายการร้านค้า',        group: 'หน้าหลัก',   icon: '🏪' },
+  [P.MANAGE_SHOP_EDIT]:   { label: 'แก้ไขข้อมูลร้านค้า',     group: 'หน้าหลัก',   icon: '✏️', parent: P.VIEW_SHOPS, kind: 'detail' },
+  [P.MANAGE_SHOP_DELETE]: { label: 'ลบร้านค้า',               group: 'หน้าหลัก',   icon: '🗑️', parent: P.VIEW_SHOPS, kind: 'detail' },
   [P.MANAGE_USERS]:        { label: 'จัดการผู้ใช้งานระบบหลัก', group: 'หน้าหลัก',   icon: '👥' },
   [P.MANAGE_ROLES]:        { label: 'จัดการ Role',            group: 'หน้าหลัก',   icon: '🎭', parent: P.MANAGE_USERS, kind: 'detail' },
   [P.MANAGE_USER_BLOCK]:   { label: 'บล็อก/ปลดบล็อกผู้ใช้',  group: 'หน้าหลัก',   icon: '⛔', parent: P.MANAGE_USERS, kind: 'detail' },
