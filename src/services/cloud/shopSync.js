@@ -96,6 +96,7 @@ export async function pushAllShopsToCloud() {
   const now = new Date().toISOString()
   const rows = shops.map((s) => ({
     id: s.id,
+    name: s.name ?? s.id,   // Bug fix: shops table มี name NOT NULL
     payload: { ...s, updatedAt: now },
     updated_at: now,
     deleted_at: null,

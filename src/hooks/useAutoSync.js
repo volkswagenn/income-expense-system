@@ -3,7 +3,7 @@ import { isCloudEnabled } from '../services/cloud/cloudConfig'
 import { pushShopQueue } from '../services/cloud/syncApi'
 import { pullAndApplyShop } from '../services/cloud/pullApply'
 import { getPendingCloudQueueItems } from '../lib/cloudSyncMetadata'
-import { connectWs, disconnectWs, isWsConnected } from '../services/cloud/wsClient'
+import { connectRealtime, disconnectRealtime, isRealtimeConnected } from '../services/cloud/realtimeClient'
 import useTransactionStore from '../store/useTransactionStore'
 import useWalletStore from '../store/useWalletStore'
 import useCategoryStore from '../store/useCategoryStore'
@@ -25,7 +25,7 @@ async function rehydrateShopStores() {
   ])
 }
 
-const FALLBACK_POLL_MS = 5 * 60 * 1000
+const FALLBACK_POLL_MS = 60 * 1000
 const PUSH_DEBOUNCE_MS = 1500
 
 export function useAutoSync(shopId) {
@@ -72,7 +72,7 @@ export function useAutoSync(shopId) {
   const startFallbackPoll = useCallback(() => {
     if (pollTimerRef.current) return
     pollTimerRef.current = setInterval(() => {
-      if (isWsConnected()) {
+      if (isRealtimeConnected()) {
         clearInterval(pollTimerRef.current)
         pollTimerRef.current = null
         return
@@ -91,13 +91,12 @@ export function useAutoSync(shopId) {
 
     doSync()
 
-    connectWs(shopId, () => {
+    connectRealtime(shopId, () => {
       doPull(shopIdRef.current)
-      stopFallbackPoll()
     })
 
     const fallbackCheckTimer = setTimeout(() => {
-      if (!isWsConnected()) startFallbackPoll()
+      if (!isRealtimeConnected()) startFallbackPoll()
     }, 5_000)
 
     const handleQueueUpdated = (event) => {
@@ -107,28 +106,28 @@ export function useAutoSync(shopId) {
 
     const handleOnline = () => {
       doSync()
-      if (!isWsConnected()) startFallbackPoll()
+      if (!isRealtimeConnected()) startFallbackPoll()
     }
     window.addEventListener('online', handleOnline)
 
-    const handleWsStatus = (event) => {
-      if (event.detail?.status === 'open') {
-        doPull(shopIdRef.current)
+    const handleRealtimeStatus = (event) => {
+      const { status } = event.detail ?? {}
+      if (status === 'SUBSCRIBED') {
         stopFallbackPoll()
-        return
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        startFallbackPoll()
       }
-      startFallbackPoll()
     }
-    window.addEventListener('zuzoo:sync-ws-status', handleWsStatus)
+    window.addEventListener('zuzoo:realtime-status', handleRealtimeStatus)
 
     return () => {
-      disconnectWs()
+      disconnectRealtime()
       stopFallbackPoll()
       clearTimeout(fallbackCheckTimer)
       clearTimeout(pushTimerRef.current)
       window.removeEventListener('zuzoo:queue-updated', handleQueueUpdated)
       window.removeEventListener('online', handleOnline)
-      window.removeEventListener('zuzoo:sync-ws-status', handleWsStatus)
+      window.removeEventListener('zuzoo:realtime-status', handleRealtimeStatus)
     }
   }, [shopId, doSync, doPull, schedulePush, startFallbackPoll, stopFallbackPoll])
 }

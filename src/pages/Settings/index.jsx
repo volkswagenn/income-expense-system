@@ -320,7 +320,7 @@ function CloudSyncStatusPanel({ shops }) {
   const handleSaveCloudConfig = () => {
     const next = saveCloudConfig({
       enabled: Boolean(config.enabled),
-      supabaseUrl: String(config.supabaseUrl || config.apiBaseUrl || '').trim().replace(/\/+$/, ''),
+      supabaseUrl: String(config.supabaseUrl || '').trim().replace(/\/+$/, ''),
       supabaseAnonKey: String(config.supabaseAnonKey || '').trim(),
     })
     setConfig(next)
@@ -411,8 +411,8 @@ function CloudSyncStatusPanel({ shops }) {
             <label className="label">Supabase URL</label>
             <input
               className="input"
-              value={config.supabaseUrl || config.apiBaseUrl || ''}
-              onChange={(e) => setConfig((s) => ({ ...s, supabaseUrl: e.target.value, apiBaseUrl: e.target.value }))}
+              value={config.supabaseUrl || ''}
+              onChange={(e) => setConfig((s) => ({ ...s, supabaseUrl: e.target.value }))}
               placeholder="https://your-project.supabase.co"
             />
           </div>
@@ -437,7 +437,7 @@ function CloudSyncStatusPanel({ shops }) {
           <button className="btn btn-secondary" onClick={handleSaveCloudConfig}>
             บันทึกค่า
           </button>
-          <button className="btn btn-secondary" onClick={handleHealthCheck} disabled={testing || !(config.supabaseUrl || config.apiBaseUrl) || !config.supabaseAnonKey}>
+          <button className="btn btn-secondary" onClick={handleHealthCheck} disabled={testing || !config.supabaseUrl || !config.supabaseAnonKey}>
             {testing ? 'Testing...' : 'Test connection'}
           </button>
         </div>
@@ -471,14 +471,14 @@ function CloudSyncStatusPanel({ shops }) {
         <button
           className="btn btn-primary"
           onClick={handleManualPush}
-          disabled={syncing || shops.length === 0 || !config.enabled || !(config.supabaseUrl || config.apiBaseUrl) || !config.supabaseAnonKey}
+          disabled={syncing || shops.length === 0 || !config.enabled || !config.supabaseUrl || !config.supabaseAnonKey}
         >
           {syncing ? 'กำลัง Push...' : 'Push Queue ไป Cloud'}
         </button>
         <button
           className="btn btn-secondary"
           onClick={handleManualPull}
-          disabled={pulling || shops.length === 0 || !config.enabled || !(config.supabaseUrl || config.apiBaseUrl) || !config.supabaseAnonKey}
+          disabled={pulling || shops.length === 0 || !config.enabled || !config.supabaseUrl || !config.supabaseAnonKey}
         >
           {pulling ? 'กำลัง Pull...' : 'Pull จาก Cloud'}
         </button>
