@@ -368,11 +368,23 @@ const useAuthStore = create(
       name: 'zuzoo_auth_v2',
       partialize: (s) => ({
         users: s.users,
+        currentUser: s.currentUser,
+        isAuthenticated: s.isAuthenticated,
         maxLoginAttempts: s.maxLoginAttempts,
         maxPinLoginAttempts: s.maxPinLoginAttempts,
         pinFailCount: s.pinFailCount,
         pinLocked: s.pinLocked,
       }),
+      merge: (persistedState, currentState) => {
+        const next = { ...currentState, ...persistedState }
+        if (next.currentUser) {
+          next.currentUser = makeSession(next.currentUser)
+          next.isAuthenticated = true
+        } else {
+          next.isAuthenticated = false
+        }
+        return next
+      },
     }
   )
 )
