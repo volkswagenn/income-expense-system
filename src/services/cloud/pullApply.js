@@ -53,7 +53,7 @@ async function hasLocalPending(shopId, tableName, recordId) {
   )
 }
 
-async function applyArrayUpsert(shopId, tableName, payload) {
+export async function applyArrayUpsert(shopId, tableName, payload) {
   const target = TABLE_TARGETS[tableName]
   if (!target || !payload?.id) return { applied: false, reason: 'unsupported' }
   if (await hasLocalPending(shopId, tableName, payload.id)) return { applied: false, reason: 'local-pending' }
@@ -73,7 +73,7 @@ async function applyArrayUpsert(shopId, tableName, payload) {
   return { applied: true }
 }
 
-async function applyArrayDelete(shopId, tableName, recordId) {
+export async function applyArrayDelete(shopId, tableName, recordId) {
   const target = TABLE_TARGETS[tableName]
   if (!target || !recordId) return { applied: false, reason: 'unsupported' }
   if (await hasLocalPending(shopId, tableName, recordId)) return { applied: false, reason: 'local-pending' }
@@ -88,7 +88,7 @@ async function applyArrayDelete(shopId, tableName, recordId) {
   return { applied: true }
 }
 
-async function applyWalletState(shopId, payload) {
+export async function applyWalletState(shopId, payload) {
   if (!payload?.id) return { applied: false, reason: 'invalid-wallet' }
   if (await hasLocalPending(shopId, 'wallet_state', payload.id)) return { applied: false, reason: 'local-pending' }
   const key = persistedKey(shopId, 'wallet_main')
@@ -113,7 +113,7 @@ async function applyWalletState(shopId, payload) {
   return { applied: true }
 }
 
-function rowToPayload(row) {
+export function rowToPayload(row) {
   return {
     ...(row.payload ?? {}),
     id: row.payload?.id ?? row.id,

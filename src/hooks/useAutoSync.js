@@ -89,9 +89,14 @@ export function useAutoSync(shopId) {
   useEffect(() => {
     if (!shopId || !isCloudEnabled()) return
 
+    // Initial sync เมื่อเข้าร้าน: push queue ที่ค้างอยู่ + pull ข้อมูลล่าสุด
     doSync()
 
+    // connectRealtime:
+    //   - postgres_changes → apply ข้อมูลตรงๆ ไม่ต้อง pull (path หลัก ~200-400ms)
+    //   - onFallback → broadcast fallback กรณี postgres_changes ไม่ได้เปิดใน Supabase
     connectRealtime(shopId, () => {
+      // broadcast fallback: trigger pull รอบเดียว
       doPull(shopIdRef.current)
     })
 
@@ -114,6 +119,9 @@ export function useAutoSync(shopId) {
       const { status } = event.detail ?? {}
       if (status === 'SUBSCRIBED') {
         stopFallbackPoll()
+        // Catch-up pull: ดึงข้อมูลที่อาจพลาดระหว่างช่วงกำลัง subscribe
+        // (postgres_changes จะไม่ยิง event ที่เกิดขึ้นก่อน subscribe)
+        doPull(shopIdRef.current)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         startFallbackPoll()
       }
