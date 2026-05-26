@@ -14,11 +14,13 @@ import {
   getShopSessionSummary,
   pruneExpiredShopSessions,
   startShopSession,
+  SESSION_MODE,
 } from '../../lib/shopSessions'
 import useRoleStore from '../../store/useRoleStore'
 import ShopCard from './ShopCard'
 import CreateShopPopup from './CreateShopPopup'
 import EditShopPopup from './EditShopPopup'
+import ReadOnlyConfirmPopup from './ReadOnlyConfirmPopup'
 import {
   deleteShopFromCloud,
   fetchShopDataFromCloud,
@@ -58,6 +60,9 @@ export default function ShopManager() {
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState('recent')
   const [sessionRefresh, setSessionRefresh] = useState(0)
+  // popup ยืนยันเข้าโหมดอ่านอย่างเดียว
+  // null = ไม่แสดง, object = { shopId, shop, editors, destination }
+  const [readOnlyConfirm, setReadOnlyConfirm] = useState(null)
   const navigate = useNavigate()
   const sessionSettings = useMemo(() => {
     sessionRefresh
@@ -103,6 +108,28 @@ export default function ShopManager() {
     return sortShops(filtered, summaries, sortBy)
   }, [query, accessibleShops, sortBy, summaries])
 
+  // ฟังก์ชันกลาง: เข้าร้านจริง (เรียกหลังผ่าน permission check + popup confirm แล้ว)
+  const doEnterShop = async (shopId, shop, destination) => {
+    const settings = getShopSessionSettings()
+    const sessionResult = startShopSession(shopId, shop?.name ?? '', currentUser, settings)
+    if (!sessionResult.ok) {
+      setSelectError('ร้านนี้มีผู้ใช้งานครบตามจำนวนที่ตั้งไว้แล้ว กรุณารอสักครู่หรือให้ผู้ดูแลปล่อย session')
+      setSessionRefresh((v) => v + 1)
+      return
+    }
+    switchToShop(shopId)
+    setActiveShop(shopId)
+    const shopLabel = shop ? `${getShopCode(shop, shops)} - ${shop.name}` : 'ร้านที่ไม่ทราบชื่อ'
+    appendShopAuditLog(shopId, {
+      activityType: 'SHOP_SELECT',
+      description: `เข้าใช้งานร้าน "${shopLabel}" (โหมด: ${sessionResult.mode === SESSION_MODE.READ ? 'อ่านอย่างเดียว' : 'แก้ไข'})`,
+      newValue: { shopId, shopName: shop?.name ?? null, shopCode: shop ? getShopCode(shop, shops) : null, sessionMode: sessionResult.mode },
+    })
+    navigate(destination)
+    // ดึงข้อมูลร้านจาก cloud ใน background (local data แสดงก่อน ไม่ blocking)
+    fetchShopDataFromCloud(shopId).catch(console.warn)
+  }
+
   const handleSelect = async (shopId) => {
     setSelectError('')
 
@@ -118,23 +145,32 @@ export default function ShopManager() {
     }
 
     const shop = shops.find((item) => item.id === shopId)
-    const sessionResult = startShopSession(shopId, shop?.name ?? '', currentUser, sessionSettings)
-    if (!sessionResult.ok) {
-      setSelectError('ร้านนี้มีผู้ใช้งานครบตามจำนวนที่ตั้งไว้แล้ว กรุณารอสักครู่หรือให้ผู้ดูแลปล่อย session')
-      setSessionRefresh((v) => v + 1)
+    const settings = getShopSessionSettings()
+
+    // ตรวจสอบ session ก่อนเข้า — ถ้าจะได้ read-only mode ให้แสดง popup ยืนยันก่อน
+    pruneExpiredShopSessions(settings)
+    const summary = getShopSessionSummary(shopId, settings)
+    const willBeReadOnly = !summary.canEdit && settings.overflowMode === 'readonly' && summary.canRead
+
+    if (willBeReadOnly) {
+      // editors เต็ม → แสดง popup ให้ผู้ใช้ยืนยันก่อนเข้าโหมดอ่าน
+      setReadOnlyConfirm({ shopId, shop, editors: summary.editors, destination, settings })
       return
     }
-    switchToShop(shopId)
-    setActiveShop(shopId)
-    const shopLabel = shop ? `${getShopCode(shop, shops)} - ${shop.name}` : 'ร้านที่ไม่ทราบชื่อ'
-    appendShopAuditLog(shopId, {
-      activityType: 'SHOP_SELECT',
-      description: `เข้าใช้งานร้าน "${shopLabel}"`,
-      newValue: { shopId, shopName: shop?.name ?? null, shopCode: shop ? getShopCode(shop, shops) : null, sessionMode: sessionResult.mode },
-    })
-    navigate(destination)
-    // ดึงข้อมูลร้านจาก cloud ใน background (local data แสดงก่อน ไม่ blocking)
-    fetchShopDataFromCloud(shopId).catch(console.warn)
+
+    // เข้าปกติ (edit mode หรือ blocked ทั้งหมด)
+    await doEnterShop(shopId, shop, destination)
+  }
+
+  // ผู้ใช้กด "เข้าสู่โหมดอ่าน" ใน popup ยืนยัน
+  const handleConfirmReadOnly = async () => {
+    const { shopId, shop, destination } = readOnlyConfirm
+    setReadOnlyConfirm(null)
+    await doEnterShop(shopId, shop, destination)
+  }
+
+  const handleCancelReadOnly = () => {
+    setReadOnlyConfirm(null)
   }
 
   const handleForceEndSession = (sessionId) => {
@@ -332,6 +368,16 @@ export default function ShopManager() {
           shop={editingShop}
           onClose={() => setEditingShop(null)}
           onSave={handleUpdateShop}
+        />
+      )}
+
+      {readOnlyConfirm && (
+        <ReadOnlyConfirmPopup
+          shopName={readOnlyConfirm.shop?.name ?? readOnlyConfirm.shopId}
+          editors={readOnlyConfirm.editors ?? []}
+          maxEditors={readOnlyConfirm.settings?.maxEditors ?? sessionSettings.maxEditors}
+          onConfirm={handleConfirmReadOnly}
+          onCancel={handleCancelReadOnly}
         />
       )}
     </div>
