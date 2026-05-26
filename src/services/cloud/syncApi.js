@@ -9,7 +9,7 @@ import {
   resetStuckCloudQueueItems,
 } from '../../lib/cloudSyncMetadata'
 import { supabaseSoftDeleteRows, supabaseUpsertRows } from './apiClient'
-import { isCloudEnabled, saveCloudConfig } from './cloudConfig'
+import { getApiBaseUrl, getCloudConfig, isCloudEnabled, saveCloudConfig } from './cloudConfig'
 
 function groupByTable(items) {
   return items.reduce((groups, item) => {
@@ -48,6 +48,25 @@ function toDeleteRow(item, shopId) {
     device_id: row.device_id,
     updated_at: timestamp,
     deleted_at: timestamp,
+  }
+}
+
+async function notifyBackend(shopId, deviceId, syncedAt) {
+  const baseUrl = getApiBaseUrl()
+  const config = getCloudConfig()
+  if (!baseUrl || !config.accessToken) return
+
+  try {
+    await fetch(`${baseUrl}/api/sync/notify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.accessToken}`,
+      },
+      body: JSON.stringify({ shopId, deviceId, syncedAt }),
+    })
+  } catch {
+    // Notification failure must not block a completed Supabase push.
   }
 }
 
@@ -92,6 +111,7 @@ export async function pushShopQueue(shopId, options = {}) {
     markCloudQueueItemsSynced(shopId, applied, syncedAt)
     pruneSyncedCloudQueueItems(shopId)
     saveCloudConfig({ lastSyncAt: syncedAt, lastSyncError: null })
+    await notifyBackend(shopId, getCloudDeviceId(), syncedAt)
 
     return { ok: true, applied, failed, syncedAt }
   } catch (err) {

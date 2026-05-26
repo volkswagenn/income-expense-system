@@ -3,14 +3,16 @@ import { isCloudEnabled } from '../services/cloud/cloudConfig'
 import { pushShopQueue } from '../services/cloud/syncApi'
 import { pullAndApplyShop } from '../services/cloud/pullApply'
 import { getPendingCloudQueueItems } from '../lib/cloudSyncMetadata'
+import { connectWs, disconnectWs, isWsConnected } from '../services/cloud/wsClient'
 
-const POLL_INTERVAL_MS = 30 * 1000   // pull ทุก 30 วินาที
-const PUSH_DEBOUNCE_MS = 1500        // หน่วงหลัง enqueue ก่อน push (รวมหลาย action)
+const FALLBACK_POLL_MS = 5 * 60 * 1000
+const PUSH_DEBOUNCE_MS = 1500
 
 export function useAutoSync(shopId) {
   const shopIdRef = useRef(shopId)
   shopIdRef.current = shopId
   const pushTimerRef = useRef(null)
+  const pollTimerRef = useRef(null)
   const isSyncingRef = useRef(false)
 
   const doPush = useCallback(async (id) => {
@@ -37,7 +39,6 @@ export function useAutoSync(shopId) {
     }
   }, [doPush, doPull])
 
-  // push ทันที (debounced) เมื่อมี item เข้า queue
   const schedulePush = useCallback(() => {
     clearTimeout(pushTimerRef.current)
     pushTimerRef.current = setTimeout(() => {
@@ -45,29 +46,66 @@ export function useAutoSync(shopId) {
     }, PUSH_DEBOUNCE_MS)
   }, [doPush])
 
-  useEffect(() => {
-    if (!shopId) return
+  const startFallbackPoll = useCallback(() => {
+    if (pollTimerRef.current) return
+    pollTimerRef.current = setInterval(() => {
+      if (isWsConnected()) {
+        clearInterval(pollTimerRef.current)
+        pollTimerRef.current = null
+        return
+      }
+      doSync()
+    }, FALLBACK_POLL_MS)
+  }, [doSync])
 
-    // sync ครั้งแรกเมื่อเข้าร้าน
+  const stopFallbackPoll = useCallback(() => {
+    clearInterval(pollTimerRef.current)
+    pollTimerRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (!shopId || !isCloudEnabled()) return
+
     doSync()
 
-    // poll ทุก 30s สำหรับ pull
-    const pollTimer = setInterval(doSync, POLL_INTERVAL_MS)
+    connectWs(shopId, () => {
+      doPull(shopIdRef.current)
+      stopFallbackPoll()
+    })
 
-    // push ทันทีเมื่อ enqueue มีข้อมูลใหม่
-    const handleQueueUpdated = (e) => {
-      if (e.detail?.shopId === shopId) schedulePush()
+    const fallbackCheckTimer = setTimeout(() => {
+      if (!isWsConnected()) startFallbackPoll()
+    }, 5_000)
+
+    const handleQueueUpdated = (event) => {
+      if (event.detail?.shopId === shopId) schedulePush()
     }
     window.addEventListener('zuzoo:queue-updated', handleQueueUpdated)
 
-    // push เมื่อกลับมา online
-    window.addEventListener('online', doSync)
+    const handleOnline = () => {
+      doSync()
+      if (!isWsConnected()) startFallbackPoll()
+    }
+    window.addEventListener('online', handleOnline)
+
+    const handleWsStatus = (event) => {
+      if (event.detail?.status === 'open') {
+        doPull(shopIdRef.current)
+        stopFallbackPoll()
+        return
+      }
+      startFallbackPoll()
+    }
+    window.addEventListener('zuzoo:sync-ws-status', handleWsStatus)
 
     return () => {
-      clearInterval(pollTimer)
+      disconnectWs()
+      stopFallbackPoll()
+      clearTimeout(fallbackCheckTimer)
       clearTimeout(pushTimerRef.current)
       window.removeEventListener('zuzoo:queue-updated', handleQueueUpdated)
-      window.removeEventListener('online', doSync)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('zuzoo:sync-ws-status', handleWsStatus)
     }
-  }, [shopId, doSync, schedulePush])
+  }, [shopId, doSync, doPull, schedulePush, startFallbackPoll, stopFallbackPoll])
 }

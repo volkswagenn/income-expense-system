@@ -166,6 +166,20 @@ export async function syncRoutes(app: FastifyInstance) {
     }
   })
 
+  app.post('/notify', async (request, reply) => {
+    const input = z.object({
+      shopId: z.string().min(1),
+      deviceId: z.string().min(1).default('unknown-device'),
+      syncedAt: z.string().datetime().optional(),
+    }).parse(request.body)
+    if (!await requireShopAccess(request, reply, input.shopId)) return reply
+
+    const syncedAt = input.syncedAt ?? new Date().toISOString()
+    wsManager.notify(input.shopId, input.deviceId, syncedAt)
+
+    return { ok: true, syncedAt }
+  })
+
   app.get('/status', async (request, reply) => {
     const query = z.object({ shopId: z.string().min(1) }).parse(request.query)
     if (!await requireShopAccess(request, reply, query.shopId)) return reply
@@ -186,4 +200,3 @@ export async function syncRoutes(app: FastifyInstance) {
     }
   })
 }
-
