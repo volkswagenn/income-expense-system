@@ -17,7 +17,7 @@ export function useAutoSync(shopId) {
 
   const doPush = useCallback(async (id) => {
     if (!id || !isCloudEnabled()) return
-    const pending = getPendingCloudQueueItems(id, 1)
+    const pending = await getPendingCloudQueueItems(id, 1)
     if (pending.length === 0) return
     await pushShopQueue(id).catch(console.warn)
   }, [])

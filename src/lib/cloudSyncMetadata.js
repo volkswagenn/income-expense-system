@@ -1,3 +1,4 @@
+import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { activeShopId } from './activeShop'
 
 const DEVICE_KEY = 'zuzoo_cloud_device_id'
@@ -36,28 +37,35 @@ export function getCloudQueueKey(shopId = activeShopId) {
   return `${getCloudShopId(shopId)}_${QUEUE_SUFFIX}`
 }
 
-function readQueue(shopId = activeShopId) {
+async function readQueue(shopId = activeShopId) {
+  const key = getCloudQueueKey(shopId)
   try {
-    const raw = localStorage.getItem(getCloudQueueKey(shopId))
-    const queue = raw ? JSON.parse(raw) : []
-    return Array.isArray(queue) ? queue : []
+    const queue = await idbGet(key)
+    if (Array.isArray(queue)) return queue
+
+    const raw = localStorage.getItem(key)
+    const migratedQueue = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(migratedQueue)) return []
+    if (migratedQueue.length > 0) await idbSet(key, migratedQueue)
+    if (raw) localStorage.removeItem(key)
+    return migratedQueue
   } catch {
     return []
   }
 }
 
-function writeQueue(queue, shopId = activeShopId) {
+async function writeQueue(queue, shopId = activeShopId) {
   try {
-    localStorage.setItem(getCloudQueueKey(shopId), JSON.stringify(queue))
+    await idbSet(getCloudQueueKey(shopId), queue)
   } catch {
     // Cloud queue is a sidecar. Never interrupt the offline/local workflow.
   }
 }
 
-function updateQueueItems(shopId, updater) {
-  const queue = readQueue(shopId)
+async function updateQueueItems(shopId, updater) {
+  const queue = await readQueue(shopId)
   const next = queue.map(updater)
-  writeQueue(next, shopId)
+  await writeQueue(next, shopId)
   return next
 }
 
@@ -108,7 +116,7 @@ export function makeCloudDeletePayload(record, tableName, options = {}) {
   }
 }
 
-export function enqueueCloudChange(tableName, recordId, action, payload, options = {}) {
+export async function enqueueCloudChange(tableName, recordId, action, payload, options = {}) {
   if (!recordId) return null
   const timestamp = options.timestamp ?? nowIso()
   const item = {
@@ -124,9 +132,8 @@ export function enqueueCloudChange(tableName, recordId, action, payload, options
     createdAt: timestamp,
     updatedAt: timestamp,
   }
-  const queue = readQueue(options.shopId)
-  writeQueue([...queue, item], options.shopId)
-  // แจ้ง useAutoSync ให้ push ทันที
+  const queue = await readQueue(options.shopId)
+  await writeQueue([...queue, item], options.shopId)
   try {
     window.dispatchEvent(new CustomEvent('zuzoo:queue-updated', {
       detail: { shopId: item.shopId },
@@ -144,8 +151,8 @@ export function enqueueCloudDelete(tableName, record, options = {}) {
   return enqueueCloudChange(tableName, record?.id, 'delete', payload, options)
 }
 
-export function getCloudQueueSummary(shopId = activeShopId) {
-  const queue = readQueue(shopId)
+export async function getCloudQueueSummary(shopId = activeShopId) {
+  const queue = await readQueue(shopId)
   return queue.reduce(
     (summary, item) => {
       summary.total += 1
@@ -160,8 +167,8 @@ export function getCloudQueueItems(shopId = activeShopId) {
   return readQueue(shopId)
 }
 
-export function getPendingCloudQueueItems(shopId = activeShopId, limit = 50) {
-  return readQueue(shopId)
+export async function getPendingCloudQueueItems(shopId = activeShopId, limit = 50) {
+  return (await readQueue(shopId))
     .filter((item) => item.status === CLOUD_SYNC_STATUS.PENDING || item.status === CLOUD_SYNC_STATUS.FAILED)
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
     .slice(0, limit)
@@ -210,8 +217,8 @@ export function resetStuckCloudQueueItems(shopId = activeShopId) {
   )
 }
 
-export function pruneSyncedCloudQueueItems(shopId = activeShopId, keepLatest = 100) {
-  const queue = readQueue(shopId)
+export async function pruneSyncedCloudQueueItems(shopId = activeShopId, keepLatest = 100) {
+  const queue = await readQueue(shopId)
   const synced = queue.filter((item) => item.status === CLOUD_SYNC_STATUS.SYNCED)
   const keepSyncedIds = new Set(
     synced
@@ -220,12 +227,12 @@ export function pruneSyncedCloudQueueItems(shopId = activeShopId, keepLatest = 1
       .map((item) => item.id)
   )
   const next = queue.filter((item) => item.status !== CLOUD_SYNC_STATUS.SYNCED || keepSyncedIds.has(item.id))
-  writeQueue(next, shopId)
+  await writeQueue(next, shopId)
   return { before: queue.length, after: next.length, removed: queue.length - next.length }
 }
 
-export function compactCloudQueue(shopId = activeShopId) {
-  const queue = readQueue(shopId)
+export async function compactCloudQueue(shopId = activeShopId) {
+  const queue = await readQueue(shopId)
   const compacted = []
   const indexByRecord = new Map()
 
@@ -260,16 +267,16 @@ export function compactCloudQueue(shopId = activeShopId) {
     }
   }
 
-  writeQueue(compacted, shopId)
+  await writeQueue(compacted, shopId)
   return { before: queue.length, after: compacted.length, removed: Math.max(0, queue.length - compacted.length) }
 }
 
-export function buildCloudQueueReport(shops = []) {
+export async function buildCloudQueueReport(shops = []) {
   const deviceId = getCloudDeviceId()
   const generatedAt = nowIso()
-  const shopReports = shops.map((shop) => {
-    const items = readQueue(shop.id)
-    const summary = getCloudQueueSummary(shop.id)
+  const shopReports = await Promise.all(shops.map(async (shop) => {
+    const items = await readQueue(shop.id)
+    const summary = await getCloudQueueSummary(shop.id)
     const byTable = items.reduce((acc, item) => {
       acc[item.tableName] = acc[item.tableName] ?? { total: 0, pending: 0, failed: 0, dead: 0, delete: 0, upsert: 0 }
       acc[item.tableName].total += 1
@@ -287,7 +294,7 @@ export function buildCloudQueueReport(shops = []) {
       byTable,
       latestQueuedAt: items.map((item) => item.updatedAt || item.createdAt).filter(Boolean).sort().at(-1) ?? null,
     }
-  })
+  }))
 
   return {
     reportType: 'cloud-upload-readiness',
@@ -315,5 +322,24 @@ export function buildCloudQueueReport(shops = []) {
       'Wallet state requires extra reconciliation before multi-device writes.',
       'Dead-letter and conflict handling are not active yet.',
     ],
+  }
+}
+
+export async function migrateQueueFromLocalStorage(shopIds = []) {
+  for (const shopId of shopIds) {
+    const key = getCloudQueueKey(shopId)
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) continue
+      const existing = await idbGet(key)
+      if (existing) continue
+      const queue = JSON.parse(raw)
+      if (Array.isArray(queue) && queue.length > 0) {
+        await idbSet(key, queue)
+      }
+      localStorage.removeItem(key)
+    } catch {
+      // Cloud queue migration must not block local usage.
+    }
   }
 }

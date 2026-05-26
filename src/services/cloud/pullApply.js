@@ -45,18 +45,18 @@ function isNewer(incoming, local) {
   return new Date(incoming.updatedAt).getTime() > new Date(local.updatedAt).getTime()
 }
 
-function hasLocalPending(shopId, tableName, recordId) {
-  return getCloudQueueItems(shopId).some((item) =>
+async function hasLocalPending(shopId, tableName, recordId) {
+  return (await getCloudQueueItems(shopId)).some((item) =>
     item.tableName === tableName &&
     item.recordId === recordId &&
     ['pending', 'syncing', 'failed'].includes(item.status)
   )
 }
 
-function applyArrayUpsert(shopId, tableName, payload) {
+async function applyArrayUpsert(shopId, tableName, payload) {
   const target = TABLE_TARGETS[tableName]
   if (!target || !payload?.id) return { applied: false, reason: 'unsupported' }
-  if (hasLocalPending(shopId, tableName, payload.id)) return { applied: false, reason: 'local-pending' }
+  if (await hasLocalPending(shopId, tableName, payload.id)) return { applied: false, reason: 'local-pending' }
 
   const key = persistedKey(shopId, target.keyBase)
   const persisted = readPersisted(key)
@@ -73,10 +73,10 @@ function applyArrayUpsert(shopId, tableName, payload) {
   return { applied: true }
 }
 
-function applyArrayDelete(shopId, tableName, recordId) {
+async function applyArrayDelete(shopId, tableName, recordId) {
   const target = TABLE_TARGETS[tableName]
   if (!target || !recordId) return { applied: false, reason: 'unsupported' }
-  if (hasLocalPending(shopId, tableName, recordId)) return { applied: false, reason: 'local-pending' }
+  if (await hasLocalPending(shopId, tableName, recordId)) return { applied: false, reason: 'local-pending' }
 
   const key = persistedKey(shopId, target.keyBase)
   const persisted = readPersisted(key)
@@ -88,9 +88,9 @@ function applyArrayDelete(shopId, tableName, recordId) {
   return { applied: true }
 }
 
-function applyWalletState(shopId, payload) {
+async function applyWalletState(shopId, payload) {
   if (!payload?.id) return { applied: false, reason: 'invalid-wallet' }
-  if (hasLocalPending(shopId, 'wallet_state', payload.id)) return { applied: false, reason: 'local-pending' }
+  if (await hasLocalPending(shopId, 'wallet_state', payload.id)) return { applied: false, reason: 'local-pending' }
   const key = persistedKey(shopId, 'wallet_main')
   const persisted = readPersisted(key)
   const state = persisted.state ?? {}
@@ -159,14 +159,16 @@ export async function pullAndApplyShop(shopId, options = {}) {
       }
 
       if (row.deleted_at) {
-        recordResult(stats, applyArrayDelete(shopId, tableName, row.id))
+        // eslint-disable-next-line no-await-in-loop
+        recordResult(stats, await applyArrayDelete(shopId, tableName, row.id))
         continue
       }
 
       const payload = rowToPayload(row)
+      // eslint-disable-next-line no-await-in-loop
       const result = tableName === 'wallet_state'
-        ? applyWalletState(shopId, payload)
-        : applyArrayUpsert(shopId, tableName, payload)
+        ? await applyWalletState(shopId, payload)
+        : await applyArrayUpsert(shopId, tableName, payload)
       recordResult(stats, result)
     }
   }

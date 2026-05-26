@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useShopStore from '../../store/useShopStore'
 import useAppStore from '../../store/useAppStore'
 import useAuthStore from '../../store/useAuthStore'
@@ -257,6 +257,7 @@ function StatBox({ label, value, tone = 'gray' }) {
 
 function CloudSyncStatusPanel({ shops }) {
   const [refreshKey, setRefreshKey] = useState(0)
+  const [rows, setRows] = useState([])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [testing, setTesting] = useState(false)
@@ -265,15 +266,25 @@ function CloudSyncStatusPanel({ shops }) {
   const [config, setConfig] = useState(() => getCloudConfig())
   const deviceId = getCloudDeviceId()
 
-  const rows = useMemo(() => shops.map((shop) => {
-    const summary = getCloudQueueSummary(shop.id)
-    const items = getCloudQueueItems(shop.id)
-    return {
-      shop,
-      summary,
-      latestQueuedAt: items.map((item) => item.updatedAt || item.createdAt).filter(Boolean).sort().at(-1) ?? null,
+  useEffect(() => {
+    let cancelled = false
+    const loadRows = async () => {
+      const nextRows = await Promise.all(shops.map(async (shop) => {
+        const summary = await getCloudQueueSummary(shop.id)
+        const items = await getCloudQueueItems(shop.id)
+        return {
+          shop,
+          summary,
+          latestQueuedAt: items.map((item) => item.updatedAt || item.createdAt).filter(Boolean).sort().at(-1) ?? null,
+        }
+      }))
+      if (!cancelled) setRows(nextRows)
     }
-  }), [shops, refreshKey])
+    loadRows()
+    return () => {
+      cancelled = true
+    }
+  }, [shops, refreshKey])
 
   const totals = rows.reduce(
     (acc, row) => {
@@ -286,23 +297,23 @@ function CloudSyncStatusPanel({ shops }) {
     { total: 0, pending: 0, failed: 0, dead: 0 }
   )
 
-  const handleCompactAll = () => {
-    const results = shops.map((shop) => ({ shop, result: compactCloudQueue(shop.id) }))
+  const handleCompactAll = async () => {
+    const results = await Promise.all(shops.map(async (shop) => ({ shop, result: await compactCloudQueue(shop.id) })))
     const removed = results.reduce((sum, item) => sum + item.result.removed, 0)
     setRefreshKey((v) => v + 1)
     setMessage(`จัดระเบียบ queue แล้ว ลดรายการซ้ำได้ ${removed.toLocaleString('th-TH')} รายการ`)
     setTimeout(() => setMessage(''), 3500)
   }
 
-  const handleResetStuckAll = () => {
-    shops.forEach((shop) => resetStuckCloudQueueItems(shop.id))
+  const handleResetStuckAll = async () => {
+    await Promise.all(shops.map((shop) => resetStuckCloudQueueItems(shop.id)))
     setRefreshKey((v) => v + 1)
     setMessage('Reset stuck queue items to pending.')
     setTimeout(() => setMessage(''), 3500)
   }
 
-  const handleDownloadReport = () => {
-    const report = buildCloudQueueReport(shops)
+  const handleDownloadReport = async () => {
+    const report = await buildCloudQueueReport(shops)
     downloadJson(report, `cloud_readiness_${new Date().toISOString().slice(0, 10)}.json`)
   }
 

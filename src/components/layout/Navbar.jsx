@@ -46,9 +46,9 @@ export default function Navbar({ setSidebarOpen, sidebarPinned, setSidebarPinned
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [cloudEnabled, setCloudEnabled] = useState(() => isCloudEnabled())
   const [syncState, setSyncState] = useState({ status: 'idle', message: '', error: '' })
+  const [queueSummary, setQueueSummary] = useState({ pending: 0, failed: 0 })
 
   const activeShopId = activeShop?.id
-  const queueSummary = activeShopId ? getCloudQueueSummary(activeShopId) : { pending: 0, failed: 0 }
   const pendingCount = (queueSummary.pending || 0) + (queueSummary.failed || 0)
 
   useEffect(() => () => clearTimeout(clickTimerRef.current), [])
@@ -71,6 +71,24 @@ export default function Navbar({ setSidebarOpen, sidebarPinned, setSidebarPinned
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [userMenuOpen])
+
+  useEffect(() => {
+    let cancelled = false
+    const refreshQueueSummary = async () => {
+      const summary = activeShopId ? await getCloudQueueSummary(activeShopId) : { pending: 0, failed: 0 }
+      if (!cancelled) setQueueSummary(summary)
+    }
+
+    refreshQueueSummary()
+    const handleQueueUpdated = (event) => {
+      if (!activeShopId || event.detail?.shopId === activeShopId) refreshQueueSummary()
+    }
+    window.addEventListener('zuzoo:queue-updated', handleQueueUpdated)
+    return () => {
+      cancelled = true
+      window.removeEventListener('zuzoo:queue-updated', handleQueueUpdated)
+    }
+  }, [activeShopId])
 
   const handleSidebarClick = () => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
@@ -121,6 +139,7 @@ export default function Navbar({ setSidebarOpen, sidebarPinned, setSidebarPinned
     try {
       const pushResult = await pushShopQueue(activeShopId, { limit: 200 })
       const pullResult = await pullAndApplyShop(activeShopId)
+      setQueueSummary(await getCloudQueueSummary(activeShopId))
       setSyncState({
         status: 'success',
         message: `Cloud sync complete: pushed ${pushResult.applied?.length ?? 0}, pulled ${pullResult.applied ?? 0}`,

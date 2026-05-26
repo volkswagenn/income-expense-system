@@ -75,13 +75,13 @@ export async function pushShopQueue(shopId, options = {}) {
     return { ok: false, skipped: true, message: 'Cloud sync is disabled' }
   }
 
-  resetStuckCloudQueueItems(shopId)
-  const changes = getPendingCloudQueueItems(shopId, options.limit ?? 50)
+  await resetStuckCloudQueueItems(shopId)
+  const changes = await getPendingCloudQueueItems(shopId, options.limit ?? 50)
   if (changes.length === 0) {
     return { ok: true, applied: [], failed: [], message: 'No pending sync items' }
   }
 
-  markCloudQueueItemsSyncing(shopId, changes.map((item) => item.id))
+  await markCloudQueueItemsSyncing(shopId, changes.map((item) => item.id))
 
   const applied = []
   const failed = []
@@ -108,20 +108,20 @@ export async function pushShopQueue(shopId, options = {}) {
       }
     }
 
-    markCloudQueueItemsSynced(shopId, applied, syncedAt)
-    pruneSyncedCloudQueueItems(shopId)
+    await markCloudQueueItemsSynced(shopId, applied, syncedAt)
+    await pruneSyncedCloudQueueItems(shopId)
     saveCloudConfig({ lastSyncAt: syncedAt, lastSyncError: null })
     await notifyBackend(shopId, getCloudDeviceId(), syncedAt)
 
     return { ok: true, applied, failed, syncedAt }
   } catch (err) {
     const appliedSet = new Set(applied)
-    changes
+    await Promise.all(changes
       .filter((item) => !appliedSet.has(item.id))
-      .forEach((item) => {
+      .map(async (item) => {
         failed.push({ id: item.id, message: err.message })
-        markCloudQueueItemFailed(shopId, item.id, err.message)
-      })
+        await markCloudQueueItemFailed(shopId, item.id, err.message)
+      }))
     saveCloudConfig({ lastSyncError: err.message })
     throw err
   }
