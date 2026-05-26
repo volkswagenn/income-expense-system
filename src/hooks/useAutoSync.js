@@ -4,6 +4,26 @@ import { pushShopQueue } from '../services/cloud/syncApi'
 import { pullAndApplyShop } from '../services/cloud/pullApply'
 import { getPendingCloudQueueItems } from '../lib/cloudSyncMetadata'
 import { connectWs, disconnectWs, isWsConnected } from '../services/cloud/wsClient'
+import useTransactionStore from '../store/useTransactionStore'
+import useWalletStore from '../store/useWalletStore'
+import useCategoryStore from '../store/useCategoryStore'
+import usePendingStore from '../store/usePendingStore'
+import useRecurringStore from '../store/useRecurringStore'
+import useLogStore from '../store/useLogStore'
+
+// หลัง pullAndApplyShop เขียนข้อมูลลง localStorage แล้ว
+// ต้องบอก Zustand ให้โหลดข้อมูลใหม่จาก storage เข้า memory
+// ไม่งั้น UI จะยังแสดงข้อมูลเก่าอยู่แม้ pull สำเร็จ
+async function rehydrateShopStores() {
+  await Promise.all([
+    useTransactionStore.persist.rehydrate(),
+    useWalletStore.persist.rehydrate(),
+    useCategoryStore.persist.rehydrate(),
+    usePendingStore.persist.rehydrate(),
+    useRecurringStore.persist.rehydrate(),
+    useLogStore.persist.rehydrate(),
+  ])
+}
 
 const FALLBACK_POLL_MS = 5 * 60 * 1000
 const PUSH_DEBOUNCE_MS = 1500
@@ -25,6 +45,9 @@ export function useAutoSync(shopId) {
   const doPull = useCallback(async (id) => {
     if (!id || !isCloudEnabled()) return
     await pullAndApplyShop(id).catch(console.warn)
+    // Bug fix: บอก Zustand ให้โหลดข้อมูลจาก storage ใหม่เข้า memory
+    // pullAndApplyShop เขียนลง localStorage โดยตรง Zustand ไม่รู้ → UI ไม่อัปเดต
+    await rehydrateShopStores().catch(console.warn)
   }, [])
 
   const doSync = useCallback(async () => {

@@ -67,6 +67,7 @@ export async function pushShopToCloud(shop) {
   try {
     await supabaseUpsertRows('shops', [{
       id: shop.id,
+      name: shop.name ?? shop.id,   // Bug fix: shops table มี name NOT NULL
       payload: { ...shop, updatedAt: now },
       updated_at: now,
       deleted_at: null,
