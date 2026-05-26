@@ -30,6 +30,32 @@ function makeSession(user) {
   }
 }
 
+async function makeBuiltinAdmin() {
+  const [pwHash, pinHash] = await Promise.all([hashStr('admin'), hashStr('000000')])
+  return {
+    id: BUILTIN_ADMIN_ID,
+    username: BUILTIN_ADMIN_ID,
+    displayName: BUILTIN_ADMIN_DISPLAY,
+    passwordHash: pwHash,
+    pinHash,
+    passwordPlain: 'admin',
+    pinPlain: '000000',
+    role: 'superadmin',
+    shopAccess: null,
+    isBlocked: false,
+    blockedAt: null,
+    blockedBy: null,
+    blockedReason: null,
+    failedPasswordCount: 0,
+    lastFailedLoginAt: null,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function isBuiltinAdmin(user) {
+  return user?.id === BUILTIN_ADMIN_ID || user?.username === BUILTIN_ADMIN_ID
+}
+
 function normalizeUser(user) {
   if (!user) return user
   if (user.id === BUILTIN_ADMIN_ID || user.username === BUILTIN_ADMIN_ID) {
@@ -46,6 +72,7 @@ function normalizeUser(user) {
       blockedReason: null,
       failedPasswordCount: 0,
       lastFailedLoginAt: null,
+      deletedAt: null,
       passwordPlain: 'admin',
       pinPlain: '000000',
     }
@@ -82,33 +109,17 @@ const useAuthStore = create(
 
       initUsers: async () => {
         const { users } = get()
+        const normalizedUsers = users.map(normalizeUser)
+        const hasBuiltinAdmin = normalizedUsers.some(isBuiltinAdmin)
 
-        if (users.length === 0) {
-          const [pwHash, pinHash] = await Promise.all([hashStr('admin'), hashStr('000000')])
+        if (!hasBuiltinAdmin) {
+          const builtinAdmin = await makeBuiltinAdmin()
           set({
-            users: [{
-              id: 'admin',
-              username: 'admin',
-              displayName: BUILTIN_ADMIN_DISPLAY,
-              passwordHash: pwHash,
-              pinHash,
-              passwordPlain: 'admin',
-              pinPlain: '000000',
-              role: 'superadmin',
-              shopAccess: null,
-              isBlocked: false,
-              blockedAt: null,
-              blockedBy: null,
-              blockedReason: null,
-              failedPasswordCount: 0,
-              lastFailedLoginAt: null,
-              createdAt: new Date().toISOString(),
-            }],
+            users: [builtinAdmin, ...normalizedUsers],
           })
           return
         }
 
-        const normalizedUsers = users.map(normalizeUser)
         const needsMigration = normalizedUsers.some((u, index) =>
           JSON.stringify(u) !== JSON.stringify(users[index])
         )

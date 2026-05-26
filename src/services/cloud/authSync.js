@@ -3,6 +3,8 @@ import { getSupabaseAnonKey, getSupabaseUrl, isCloudEnabled } from './cloudConfi
 import useAuthStore from '../../store/useAuthStore'
 import useRoleStore from '../../store/useRoleStore'
 
+const BUILTIN_ADMIN_ID = 'admin'
+
 function hasCloudConfig() {
   return Boolean(getSupabaseUrl() && getSupabaseAnonKey())
 }
@@ -22,12 +24,10 @@ function mergeById(local, cloud) {
       map.set(cloudItem.id, cloudItem)
     }
   }
-  // ลบ user ที่ cloud ส่ง deletedAt มา (ถูกลบบนเครื่องอื่น)
-  // และลบ user ที่ไม่มีอยู่ใน cloud เลย (แปลว่าถูกลบก่อนช่วงเวลาที่ query ครอบคลุม)
-  const cloudIds = new Set(cloud.map((item) => item.id))
+  // Only an explicit deletedAt can delete local data. Missing rows are not proof of deletion.
   return Array.from(map.values()).filter((item) => {
+    if (item.id === BUILTIN_ADMIN_ID || item.username === BUILTIN_ADMIN_ID) return true
     if (item.deletedAt) return false          // มี deletedAt → ถูกลบแล้ว
-    if (cloudIds.size > 0 && !cloudIds.has(item.id)) return false  // ไม่มีใน cloud เลย → ถูกลบ
     return true
   })
 }
@@ -75,6 +75,7 @@ export async function fetchAuthBootstrap() {
     const current = useAuthStore.getState().users
     const merged = mergeById(current, cloudUsers)
     useAuthStore.setState({ users: merged })
+    await useAuthStore.getState().initUsers()
 
     const currentRoles = useRoleStore.getState().roles
     const systemRoles = currentRoles.filter((r) => r.isSystem)
@@ -112,6 +113,7 @@ export async function pushUserToCloud(user) {
 
 export async function deleteUserFromCloud(userId) {
   if (!isCloudEnabled()) return
+  if (userId === BUILTIN_ADMIN_ID) return
   const now = new Date().toISOString()
   try {
     const supabase = getSupabaseClient()
