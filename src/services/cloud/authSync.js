@@ -14,6 +14,7 @@ function isNewer(incoming, local) {
 }
 
 function mergeById(local, cloud) {
+  // เริ่มจาก local ก่อน แล้ว cloud จะ override ถ้าใหม่กว่า
   const map = new Map(local.map((item) => [item.id, item]))
   for (const cloudItem of cloud) {
     const localItem = map.get(cloudItem.id)
@@ -21,7 +22,14 @@ function mergeById(local, cloud) {
       map.set(cloudItem.id, cloudItem)
     }
   }
-  return Array.from(map.values()).filter((item) => !item.deletedAt)
+  // ลบ user ที่ cloud ส่ง deletedAt มา (ถูกลบบนเครื่องอื่น)
+  // และลบ user ที่ไม่มีอยู่ใน cloud เลย (แปลว่าถูกลบก่อนช่วงเวลาที่ query ครอบคลุม)
+  const cloudIds = new Set(cloud.map((item) => item.id))
+  return Array.from(map.values()).filter((item) => {
+    if (item.deletedAt) return false          // มี deletedAt → ถูกลบแล้ว
+    if (cloudIds.size > 0 && !cloudIds.has(item.id)) return false  // ไม่มีใน cloud เลย → ถูกลบ
+    return true
+  })
 }
 
 function sanitizeUser(user) {
@@ -40,9 +48,11 @@ export async function fetchAuthBootstrap() {
   const headers = { apikey: key, Authorization: `Bearer ${key}` }
 
   try {
+    // Bug fix: ดึงทั้ง active และ deleted users เพื่อให้ mergeById รู้ว่ามีการลบเกิดขึ้น
+    // ไม่กรอง deleted_at=is.null อีกต่อไป
     const [usersRes, rolesRes] = await Promise.all([
-      fetch(`${url}/rest/v1/app_users?select=*&deleted_at=is.null&order=updated_at.asc`, { headers }),
-      fetch(`${url}/rest/v1/app_roles?select=*&deleted_at=is.null&order=updated_at.asc`, { headers }),
+      fetch(`${url}/rest/v1/app_users?select=*&order=updated_at.asc`, { headers }),
+      fetch(`${url}/rest/v1/app_roles?select=*&order=updated_at.asc`, { headers }),
     ])
 
     if (!usersRes.ok || !rolesRes.ok) {
@@ -51,25 +61,31 @@ export async function fetchAuthBootstrap() {
 
     const [userRows, roleRows] = await Promise.all([usersRes.json(), rolesRes.json()])
 
-    const cloudUsers = userRows.map((r) => r.payload).filter(Boolean)
-    const cloudRoles = roleRows.map((r) => r.payload).filter(Boolean)
+    // Bug fix: map deleted_at จาก row เข้าไปใน payload
+    // เพราะ deleteUserFromCloud อัปเดตแค่ column deleted_at ของ row ไม่ได้อัปเดต payload JSON
+    const cloudUsers = userRows
+      .map((r) => r.payload ? { ...r.payload, deletedAt: r.deleted_at ?? r.payload.deletedAt ?? null } : null)
+      .filter(Boolean)
+    const cloudRoles = roleRows
+      .map((r) => r.payload ? { ...r.payload, deletedAt: r.deleted_at ?? r.payload.deletedAt ?? null } : null)
+      .filter(Boolean)
 
-    if (cloudUsers.length > 0) {
-      const current = useAuthStore.getState().users
-      const merged = mergeById(current, cloudUsers)
-      useAuthStore.setState({ users: merged })
-    }
+    // merge เสมอ ไม่ต้องรอว่า cloud จะมีข้อมูลหรือเปล่า
+    // เพราะถ้า cloud มีแค่ deleted records → local ต้องลบออกด้วย
+    const current = useAuthStore.getState().users
+    const merged = mergeById(current, cloudUsers)
+    useAuthStore.setState({ users: merged })
 
-    if (cloudRoles.length > 0) {
-      const current = useRoleStore.getState().roles
-      const systemRoles = current.filter((r) => r.isSystem)
-      const customLocal = current.filter((r) => !r.isSystem)
-      const customCloud = cloudRoles.filter((r) => !r.isSystem)
-      const mergedCustom = mergeById(customLocal, customCloud)
-      useRoleStore.setState({ roles: [...systemRoles, ...mergedCustom] })
-    }
+    const currentRoles = useRoleStore.getState().roles
+    const systemRoles = currentRoles.filter((r) => r.isSystem)
+    const customLocal = currentRoles.filter((r) => !r.isSystem)
+    const customCloud = cloudRoles.filter((r) => !r.isSystem)
+    const mergedCustom = mergeById(customLocal, customCloud)
+    useRoleStore.setState({ roles: [...systemRoles, ...mergedCustom] })
 
-    return { ok: true, users: cloudUsers.length, roles: cloudRoles.length }
+    const activeUsers = cloudUsers.filter((u) => !u.deletedAt)
+    const activeRoles = cloudRoles.filter((r) => !r.deletedAt)
+    return { ok: true, users: activeUsers.length, roles: activeRoles.length }
   } catch (err) {
     console.warn('[authSync] bootstrap failed:', err.message)
     return { ok: false, reason: 'error', error: err.message }
@@ -99,7 +115,20 @@ export async function deleteUserFromCloud(userId) {
   const now = new Date().toISOString()
   try {
     const supabase = getSupabaseClient()
-    await supabase.from('app_users').update({ deleted_at: now, updated_at: now }).eq('id', userId)
+    // Bug fix: อัปเดต payload.deletedAt ด้วย ไม่ใช่แค่ column deleted_at
+    // เพราะ fetchAuthBootstrap ดึง payload มา ถ้า payload ไม่มี deletedAt → Machine อื่นจะไม่รู้ว่าถูกลบ
+    const { data: existing } = await supabase
+      .from('app_users')
+      .select('payload')
+      .eq('id', userId)
+      .single()
+    const updatedPayload = existing?.payload
+      ? { ...existing.payload, deletedAt: now, updatedAt: now }
+      : { deletedAt: now, updatedAt: now }
+    await supabase
+      .from('app_users')
+      .update({ deleted_at: now, updated_at: now, payload: updatedPayload })
+      .eq('id', userId)
   } catch (err) {
     console.warn('[authSync] deleteUser failed:', err.message)
   }
@@ -125,7 +154,18 @@ export async function deleteRoleFromCloud(roleId) {
   const now = new Date().toISOString()
   try {
     const supabase = getSupabaseClient()
-    await supabase.from('app_roles').update({ deleted_at: now, updated_at: now }).eq('id', roleId)
+    const { data: existing } = await supabase
+      .from('app_roles')
+      .select('payload')
+      .eq('id', roleId)
+      .single()
+    const updatedPayload = existing?.payload
+      ? { ...existing.payload, deletedAt: now, updatedAt: now }
+      : { deletedAt: now, updatedAt: now }
+    await supabase
+      .from('app_roles')
+      .update({ deleted_at: now, updated_at: now, payload: updatedPayload })
+      .eq('id', roleId)
   } catch (err) {
     console.warn('[authSync] deleteRole failed:', err.message)
   }
