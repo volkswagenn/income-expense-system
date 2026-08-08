@@ -1,12 +1,20 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
+import TransferAccountPicker from './TransferAccountPicker'
+import DatePicker from './DatePicker'
+import useWalletStore from '../../store/useWalletStore'
 
 export default function PayPendingDatePopup({ open, item, method, danger = false, onConfirm, onCancel }) {
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  // ใช้บัญชีที่ผูกไว้ตอนเปิดบิล/ตั้งรายการประจำเป็นค่าเริ่มต้น
+  const [accountId, setAccountId] = useState(item?.defaultTransferAccountId ?? '')
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   if (!open || !item) return null
 
   const methodLabel = method === 'cash' ? 'เงินสด' : 'เงินโอน'
+  const needsAccount = method === 'transfer'
+  const resolvedAccountId = needsAccount ? resolveAccount(accountId) : null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -39,14 +47,13 @@ export default function PayPendingDatePopup({ open, item, method, danger = false
             </p>
           )}
 
+          {needsAccount && (
+            <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+          )}
+
           <div>
             <label className="label">วันที่จ่ายเงิน</label>
-            <input
-              type="date"
-              className="input"
-              value={paidDate}
-              onChange={(e) => setPaidDate(e.target.value)}
-            />
+            <DatePicker value={paidDate} onChange={setPaidDate} />
           </div>
         </div>
 
@@ -54,8 +61,8 @@ export default function PayPendingDatePopup({ open, item, method, danger = false
           <button className="btn btn-secondary flex-1" onClick={onCancel}>ยกเลิก</button>
           <button
             className={`btn flex-1 ${danger ? 'btn-danger' : 'btn-primary'} disabled:opacity-50 disabled:cursor-not-allowed`}
-            onClick={() => onConfirm(paidDate)}
-            disabled={!paidDate}
+            onClick={() => onConfirm(paidDate, resolvedAccountId)}
+            disabled={!paidDate || (needsAccount && !resolvedAccountId)}
           >
             ยืนยันชำระ
           </button>

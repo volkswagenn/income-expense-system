@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import MainWalletCard from './MainWalletCard'
 import LoanSummary from './LoanSummary'
 import SubWalletList from './SubWalletList'
+import TransferAccountList from './TransferAccountList'
 import SectionCard from '../../components/shared/SectionCard'
 import useWalletStore from '../../store/useWalletStore'
 import useRecurringStore from '../../store/useRecurringStore'
@@ -62,6 +63,7 @@ function RecurringSummaryCard() {
 
 export default function WalletPage() {
   const [collapsed, setCollapsed] = useState({
+    accounts: false,
     recurring: false,
     loans: false,
     sub: false,
@@ -72,11 +74,19 @@ export default function WalletPage() {
   const recurringPendingCount = useRecurringStore((s) => s.getPendingCountCurrentMonth())
   const loansCount = useWalletStore((s) => s.loans.filter((l) => !l.returned).length)
   const subCount = useWalletStore((s) => s.subWallets.length)
+  const accountCount = useWalletStore((s) => s.transferAccounts.length)
 
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-bold text-gray-900">กระเป๋าเงินหลัก</h1>
       <MainWalletCard />
+
+      <SectionCard
+        title={<>🏦 บัญชีเงินโอน{collapsed.accounts && <CountBadge count={accountCount} />}</>}
+        action={<CollapseBtn collapsed={collapsed.accounts} onToggle={() => toggle('accounts')} />}
+      >
+        {!collapsed.accounts && <TransferAccountList />}
+      </SectionCard>
 
       <SectionCard
         title={<>รายจ่ายประจำ{collapsed.recurring && <CountBadge count={recurringPendingCount} />}</>}

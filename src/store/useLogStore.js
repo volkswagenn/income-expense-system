@@ -1,9 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { v4 as uuid } from 'uuid'
-import { activeShopId } from '../lib/activeShop'
+import { createLogRecord } from '../lib/logBuilder'
 
 export const INITIAL = { logs: [] }
+
+// เพดานจำนวน log ที่เก็บใน localStorage (โควตาราว 5MB ต่อ origin)
+// log เก่าที่สุดจะถูกตัดทิ้งอัตโนมัติ — ดาวน์โหลดเก็บไว้ก่อนได้ที่หน้าสำรองข้อมูล
+export const MAX_LOGS = 5000
 
 const useLogStore = create(
   persist(
@@ -12,16 +15,8 @@ const useLogStore = create(
       _reset: () => set(INITIAL),
 
       addLog: (entry) => {
-        const log = {
-          id: uuid(),
-          timestamp: new Date().toISOString(),
-          status: 'success',
-          errorMessage: null,
-          deviceInfo: navigator.userAgent,
-          sessionId: sessionStorage.getItem('sessionId') ?? 'unknown',
-          ...entry,
-        }
-        set((s) => ({ logs: [log, ...s.logs] }))
+        const log = createLogRecord(entry)
+        set((s) => ({ logs: [log, ...s.logs].slice(0, MAX_LOGS) }))
         return log
       },
 
@@ -45,7 +40,7 @@ const useLogStore = create(
       getLogsByType: (type) => get().logs.filter((l) => l.activityType === type),
       getRecentLogs: (n = 50) => get().logs.slice(0, n),
     }),
-    { name: activeShopId ? `${activeShopId}_activity_log` : 'default_activity_log' }
+    { name: 'default_activity_log' }
   )
 )
 

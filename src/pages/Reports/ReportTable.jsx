@@ -26,7 +26,7 @@ function Td({ children, right, className = '', colSpan }) {
 }
 
 export default function ReportTable({ type, transactions, groupBy = 'day' }) {
-  const { getCategoryName } = useCategoryStore()
+  const { getCategoryPath } = useCategoryStore()
 
   if (!transactions || transactions.length === 0) {
     return <p className="text-center text-gray-400 py-8">ไม่มีข้อมูลในช่วงที่เลือก</p>
@@ -181,7 +181,7 @@ export default function ReportTable({ type, transactions, groupBy = 'day' }) {
           {expense.map((t) => (
             <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
               <Td className="whitespace-nowrap">{dateStr(t.date)}</Td>
-              {type === 'expense_by_cat' && <Td className="text-gray-600">{getCategoryName(t.category)}</Td>}
+              {type === 'expense_by_cat' && <Td className="text-gray-600">{getCategoryPath(t.category)}</Td>}
               <Td>{t.itemName ?? '—'}</Td>
               <Td right className="text-red-600 font-medium">{t.amount.toLocaleString()}</Td>
               <Td className="text-gray-500">{methodLabel(t.method)}</Td>

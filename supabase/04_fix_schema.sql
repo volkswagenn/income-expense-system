@@ -1,0 +1,91 @@
+-- ============================================================================
+-- JodFlow — เติมคอลัมน์ที่ schema เดิมตกหล่น
+--
+-- ที่มา: 01_schema.sql ถูกออกแบบจากเอกสาร ไม่ได้ไล่เทียบกับฟิลด์ที่หน้าจอเขียนจริง
+-- พอไล่โค้ดใน src/pages + src/components ทีละฟอร์มแล้วพบว่ามีฟิลด์ที่แอปใช้อยู่
+-- แต่ไม่มีคอลัมน์รองรับ ถ้าไม่เติมก่อน ข้อมูลจะหายเงียบๆ ตอนบันทึก
+-- (PostgREST ไม่รู้จักคีย์ที่ส่งมา = ปฏิเสธทั้ง request)
+--
+-- ปลอดภัยกับข้อมูลเดิม: ทุกคำสั่งเป็น add column if not exists
+-- รันซ้ำได้ไม่เสียหาย
+-- ============================================================================
+
+-- ── transactions ───────────────────────────────────────────────────────────
+-- detail            : รายละเอียดเพิ่มเติมใต้ชื่อรายการ (IncomeForm/ExpenseForm)
+-- other_income_type : ชื่อประเภทรายรับอื่นๆ ที่ผู้ใช้พิมพ์เอง เช่น "เงินทอน", "ขายเศษเหล็ก"
+-- tax_due_date      : กำหนดวันที่ต้องได้ใบกำกับภาษี (แยกจาก due_date ของตัวรายการ)
+-- document_*        : ไฟล์แนบใบแรกแบบเดิม ที่หน้าจอยังอ่านอยู่คู่กับ attachments jsonb
+
+alter table transactions add column if not exists detail            text;
+alter table transactions add column if not exists other_income_type text;
+alter table transactions add column if not exists tax_due_date      date;
+alter table transactions add column if not exists document_path     text;
+alter table transactions add column if not exists document_type     text;
+alter table transactions add column if not exists document_label    text;
+
+-- รายรับ "อื่นๆ" (เช่นยอดจากช่องทางที่ไม่เข้ากระเป๋าเงินสด/โอน) ใช้ method = 'other'
+-- ทั้งในหน้านำเข้าข้อมูลและหน้าบันทึกรายรับ — check เดิมไม่รับค่านี้ ต้องขยาย
+alter table transactions drop constraint if exists transactions_method_check;
+alter table transactions add  constraint transactions_method_check
+  check (method in ('cash', 'transfer', 'pending', 'other'));
+
+-- ── pending_payments (ค้างชำระ) ────────────────────────────────────────────
+-- description                  : ข้อความหัวการ์ด (แยกจาก item_name ที่เป็นชื่อสินค้า)
+-- open_date                    : วันที่เปิดบิล — ต่างจาก due_date ที่เป็นวันครบกำหนด
+-- missing_due_date             : true เมื่อผู้ใช้ไม่ได้ระบุวันครบกำหนด (ใช้เตือนบนการ์ด)
+-- default_method / default_transfer_account_id : วิธีจ่ายที่ตั้งไว้ล่วงหน้าจากรายการประจำ
+
+alter table pending_payments add column if not exists description      text;
+alter table pending_payments add column if not exists open_date        date;
+alter table pending_payments add column if not exists missing_due_date boolean not null default false;
+alter table pending_payments add column if not exists default_method   text;
+alter table pending_payments add column if not exists default_transfer_account_id uuid
+  references transfer_accounts(id) on delete set null;
+alter table pending_payments add column if not exists document_path    text;
+alter table pending_payments add column if not exists document_type    text;
+alter table pending_payments add column if not exists document_label   text;
+
+-- ── pending_incomes (รอรับเงิน) ────────────────────────────────────────────
+-- open_date         : วันที่เปิดบิล (หน้าจอส่งมาในชื่อ date)
+-- source            : 'main' = ยอดสด/โอน, 'other' = ยอดจากช่องทางอื่น
+-- other_income_type : ชื่อประเภทที่ผู้ใช้พิมพ์เอง
+-- default_transfer_account_id : บัญชีที่ผูกไว้ กดรับเงินโอนแล้วเข้าบัญชีนี้ทันที
+
+alter table pending_incomes add column if not exists open_date         date;
+alter table pending_incomes add column if not exists description       text;
+alter table pending_incomes add column if not exists source            text;
+alter table pending_incomes add column if not exists other_income_type text;
+alter table pending_incomes add column if not exists default_transfer_account_id uuid
+  references transfer_accounts(id) on delete set null;
+alter table pending_incomes add column if not exists document_path     text;
+alter table pending_incomes add column if not exists document_type     text;
+alter table pending_incomes add column if not exists document_label    text;
+
+-- ── tax_invoices (รอใบกำกับภาษี) ───────────────────────────────────────────
+-- due_date : กำหนดวันที่ต้องได้ใบกำกับ ใช้เรียงการ์ดและเตือนเมื่อเลยกำหนด
+
+alter table tax_invoices add column if not exists due_date       date;
+alter table tax_invoices add column if not exists document_path  text;
+alter table tax_invoices add column if not exists document_type  text;
+alter table tax_invoices add column if not exists document_label text;
+
+-- ── recurring_items (รายการประจำ) ──────────────────────────────────────────
+-- ตั้งวิธีจ่ายไว้ล่วงหน้า พอถึงรอบจะได้กดจ่ายรวดเดียวโดยไม่ต้องเลือกซ้ำทุกเดือน
+
+alter table recurring_items add column if not exists default_method text;
+alter table recurring_items add column if not exists default_transfer_account_id uuid
+  references transfer_accounts(id) on delete set null;
+
+-- ── ตรวจผล ─────────────────────────────────────────────────────────────────
+-- ควรได้ 28 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
+select table_name, column_name
+  from information_schema.columns
+ where table_schema = 'public'
+   and (
+     (table_name = 'transactions'     and column_name in ('detail','other_income_type','tax_due_date','document_path','document_type','document_label'))
+  or (table_name = 'pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
+  or (table_name = 'pending_incomes'  and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
+  or (table_name = 'tax_invoices'     and column_name in ('due_date','document_path','document_type','document_label'))
+  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id'))
+   )
+ order by table_name, column_name;

@@ -2,8 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import { getDaysInMonth } from 'date-fns'
-import { activeShopId } from '../lib/activeShop'
-import { enqueueCloudDelete, enqueueCloudUpsert, touchCloudMetadata, withCloudMetadata } from '../lib/cloudSyncMetadata'
+import { localMonthStr } from '../lib/dateUtils'
 
 export function computeDueDate(year, month, billingDay) {
   const lastDay = getDaysInMonth(new Date(year, month - 1))
@@ -22,51 +21,37 @@ const useRecurringStore = create(
       // ── Items (templates) ────────────────────────────────────────────────────
 
       addItem: (data) => {
-        const item = withCloudMetadata({
+        const item = {
           id: uuid(),
           enabled: true,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           ...data,
-        }, 'recurring_items')
+        }
         set((s) => ({ items: [...s.items, item] }))
-        enqueueCloudUpsert('recurring_items', item)
         return item
       },
 
       updateItem: (id, changes) =>
         set((s) => ({
-          items: s.items.map((it) => {
-            if (it.id !== id) return it
-            const updated = touchCloudMetadata({ ...it, ...changes, updatedAt: new Date().toISOString() }, 'recurring_items')
-            enqueueCloudUpsert('recurring_items', updated)
-            return updated
-          }),
+          items: s.items.map((it) =>
+            it.id === id ? { ...it, ...changes, updatedAt: new Date().toISOString() } : it
+          ),
         })),
 
       toggleItem: (id) =>
         set((s) => ({
-          items: s.items.map((it) => {
-            if (it.id !== id) return it
-            const updated = touchCloudMetadata({ ...it, enabled: !it.enabled, updatedAt: new Date().toISOString() }, 'recurring_items')
-            enqueueCloudUpsert('recurring_items', updated)
-            return updated
-          }),
+          items: s.items.map((it) =>
+            it.id === id ? { ...it, enabled: !it.enabled, updatedAt: new Date().toISOString() } : it
+          ),
         })),
 
       deleteItem: (id) =>
-        set((s) => {
-          const item = s.items.find((it) => it.id === id)
-          if (item) enqueueCloudDelete('recurring_items', item)
-          s.entries
-            .filter((e) => e.recurringId === id && e.status !== 'paid')
-            .forEach((e) => enqueueCloudDelete('recurring_entries', e))
-          return {
-            items: s.items.filter((it) => it.id !== id),
-            // keep paid entries for history, remove only pending/skipped
-            entries: s.entries.filter((e) => e.recurringId !== id || e.status === 'paid'),
-          }
-        }),
+        set((s) => ({
+          items: s.items.filter((it) => it.id !== id),
+          // keep paid entries for history, remove only pending/skipped
+          entries: s.entries.filter((e) => e.recurringId !== id || e.status === 'paid'),
+        })),
 
       // ── Entries (monthly records) ────────────────────────────────────────────
 
@@ -80,7 +65,7 @@ const useRecurringStore = create(
             (e) => e.recurringId === item.id && e.month === month
           )
           if (!exists) {
-            newEntries.push(withCloudMetadata({
+            newEntries.push({
               id: uuid(),
               recurringId: item.id,
               month,
@@ -92,33 +77,22 @@ const useRecurringStore = create(
               transactionId: null,
               pendingPaymentId: null,
               createdAt: new Date().toISOString(),
-            }, 'recurring_entries'))
+            })
           }
         })
         if (newEntries.length > 0) {
           set((s) => ({ entries: [...s.entries, ...newEntries] }))
-          newEntries.forEach((entry) => enqueueCloudUpsert('recurring_entries', entry))
         }
       },
 
       updateEntry: (id, changes) =>
         set((s) => ({
-          entries: s.entries.map((e) => {
-            if (e.id !== id) return e
-            const updated = touchCloudMetadata({ ...e, ...changes }, 'recurring_entries')
-            enqueueCloudUpsert('recurring_entries', updated)
-            return updated
-          }),
+          entries: s.entries.map((e) => (e.id === id ? { ...e, ...changes } : e)),
         })),
 
       markSkipped: (entryId) =>
         set((s) => ({
-          entries: s.entries.map((e) => {
-            if (e.id !== entryId) return e
-            const updated = touchCloudMetadata({ ...e, status: 'skipped' }, 'recurring_entries')
-            enqueueCloudUpsert('recurring_entries', updated)
-            return updated
-          }),
+          entries: s.entries.map((e) => (e.id === entryId ? { ...e, status: 'skipped' } : e)),
         })),
 
       // sync back when transaction deleted from History page
@@ -161,11 +135,11 @@ const useRecurringStore = create(
       },
 
       getPendingCountCurrentMonth: () => {
-        const month = new Date().toISOString().slice(0, 7)
+        const month = localMonthStr()
         return get().entries.filter((e) => e.month === month && e.status === 'pending').length
       },
     }),
-    { name: activeShopId ? `${activeShopId}_recurring_data` : 'default_recurring_data' }
+    { name: 'default_recurring_data' }
   )
 )
 

@@ -1,57 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
-import useShopStore from './store/useShopStore'
-import useAuthStore from './store/useAuthStore'
+import { useCallback, useState } from 'react'
+import { Outlet } from 'react-router-dom'
 import Navbar from './components/layout/Navbar'
 import Sidebar from './components/layout/Sidebar'
-import { endCurrentShopSession, heartbeatShopSession } from './lib/shopSessions'
-import { useAutoSync } from './hooks/useAutoSync'
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarPinned, setSidebarPinned] = useState(false)
-  const activeShopId = useShopStore((s) => s.activeShopId)
-  const currentUser = useAuthStore((s) => s.currentUser)
-
-  // auto push + pull ตลอดเวลาที่อยู่ในร้าน
-  useAutoSync(activeShopId)
-
   const handleClose = useCallback(() => setSidebarOpen(false), [])
 
-  useEffect(() => {
-    if (!activeShopId || !currentUser) return undefined
-    heartbeatShopSession(activeShopId, currentUser)
-    const timer = window.setInterval(() => heartbeatShopSession(activeShopId, currentUser), 30000)
-    const handleBeforeUnload = () => endCurrentShopSession('app_closed')
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
-  }, [activeShopId, currentUser])
-
-  if (!activeShopId) return <Navigate to="/" replace />
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar
-        setSidebarOpen={setSidebarOpen}
-        sidebarPinned={sidebarPinned}
-        setSidebarPinned={setSidebarPinned}
-      />
-      <Sidebar
-        open={sidebarOpen}
-        pinned={sidebarPinned}
-        onClose={handleClose}
-      />
+    <div className="min-h-screen bg-paper flex">
+      <Sidebar open={sidebarOpen} pinned={false} onClose={handleClose} />
 
-      <main className={`pt-14 transition-[margin] duration-200 ${
-        sidebarOpen ? 'ml-60' : 'ml-0'
-      } lg:ml-60`}>
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <Outlet />
-        </div>
-      </main>
+      {/* เนื้อหาเลื่อนไปทางขวาให้พ้น sidebar กว้าง 238px บนจอใหญ่ */}
+      <div className="flex-1 min-w-0 flex flex-col lg:ml-[238px]">
+        <Navbar setSidebarOpen={setSidebarOpen} />
+        <main className="flex-1 min-w-0 px-6 pt-5 pb-10">
+          <div className="max-w-[1080px] mx-auto">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

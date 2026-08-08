@@ -1,33 +1,27 @@
 import { useState } from 'react'
-import useShopStore from '../../store/useShopStore'
 import useLogStore from '../../store/useLogStore'
-import { downloadJson } from '../../lib/shopKeys'
-import { switchToShop } from '../../lib/shopSwitch'
+import { downloadJson } from '../../lib/appDataKeys'
 import { buildLogEntry } from '../../lib/logBuilder'
+import { localDateStr } from '../../lib/dateUtils'
 
 function readKey(key) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') } catch { return null }
 }
 
+const SETTING_KEYS = ['default_app_settings', 'default_categories_data']
+
 export default function BackupSettings() {
-  const { getActiveShop } = useShopStore()
   const { addLog } = useLogStore()
   const [errMsg, setErrMsg] = useState('')
 
-  const activeShop = getActiveShop()
-
-  const settingKeys = activeShop
-    ? [`${activeShop.id}_app_settings`, `${activeShop.id}_categories_data`]
-    : []
-
   const handleBackup = () => {
-    const data = { _type: 'settings_only', _shopId: activeShop?.id, _backupAt: new Date().toISOString() }
-    settingKeys.forEach((k) => { data[k] = readKey(k) })
-    downloadJson(data, `backup_settings_${new Date().toISOString().slice(0, 10)}.json`)
+    const data = { _type: 'settings_only', _backupAt: new Date().toISOString() }
+    SETTING_KEYS.forEach((k) => { data[k] = readKey(k) })
+    downloadJson(data, `backup_settings_${localDateStr()}.json`)
     addLog(buildLogEntry({
       activityType: 'SETTINGS_BACKUP',
-      description: `สำรองการตั้งค่าร้าน "${activeShop?.name ?? 'ไม่ทราบร้าน'}"`,
-      newValue: { shopId: activeShop?.id, keys: settingKeys },
+      description: 'สำรองการตั้งค่า',
+      newValue: { keys: SETTING_KEYS },
     }))
   }
 
@@ -42,20 +36,16 @@ export default function BackupSettings() {
           setErrMsg('ไฟล์นี้ไม่ใช่ backup settings กรุณาเลือกไฟล์ที่ถูกต้อง')
           return
         }
-        // Restore settings — remap to current shop ID if different
-        const srcShopId = data._shopId
-        settingKeys.forEach((destKey) => {
-          const srcKey = srcShopId ? destKey.replace(activeShop.id, srcShopId) : destKey
-          if (data[srcKey] != null) localStorage.setItem(destKey, JSON.stringify(data[srcKey]))
-          else if (data[destKey] != null) localStorage.setItem(destKey, JSON.stringify(data[destKey]))
+        SETTING_KEYS.forEach((key) => {
+          if (data[key] != null) localStorage.setItem(key, JSON.stringify(data[key]))
         })
-        if (activeShop) switchToShop(activeShop.id)
         addLog(buildLogEntry({
           activityType: 'SETTINGS_RESTORE',
-          description: `กู้คืนการตั้งค่าร้าน "${activeShop?.name ?? 'ไม่ทราบร้าน'}" จากไฟล์ ${file.name}`,
-          newValue: { shopId: activeShop?.id, fileName: file.name },
+          description: `กู้คืนการตั้งค่าจากไฟล์ ${file.name}`,
+          newValue: { fileName: file.name },
         }))
         setErrMsg('')
+        window.location.reload()
       } catch {
         setErrMsg('ไฟล์ไม่ถูกต้อง')
       }
@@ -67,7 +57,7 @@ export default function BackupSettings() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600">
-        บันทึกเฉพาะการตั้งค่าและหมวดหมู่ของร้านนี้ (ไม่รวมรายการบันทึก)
+        บันทึกเฉพาะการตั้งค่าและหมวดหมู่ (ไม่รวมรายการบันทึก)
       </p>
       <button className="btn btn-secondary w-full" onClick={handleBackup}>
         ⚙️ ดาวน์โหลด Backup Settings

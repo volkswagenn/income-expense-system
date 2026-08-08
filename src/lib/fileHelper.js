@@ -1,18 +1,11 @@
 /**
- * Save a generated file (reports, templates).
- * Electron: opens a Save dialog so the user chooses the location.
- * Browser dev: triggers a standard browser download.
+ * Save a generated file (reports, templates) by triggering a browser download.
  *
- * Returns { success, savedPath, verified, cancelled? }
+ * Returns { success, savedPath, verified }
  */
 export async function saveAppFile(data, folder, filename) {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
 
-  if (window.electronAPI?.downloadFile) {
-    return window.electronAPI.downloadFile(bytes, folder, filename)
-  }
-
-  // Browser dev fallback
   const blob = new Blob([bytes])
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

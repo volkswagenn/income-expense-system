@@ -1,130 +1,86 @@
-import { useState } from 'react'
-import { format, startOfMonth, endOfMonth } from 'date-fns'
-
 export const REPORT_TYPES = [
-  { key: 'daily_income', label: 'รายรับรวมตามรายวัน', importable: true },
-  { key: 'income_by_type', label: 'รายรับแยกประเภท', importable: true },
-  { key: 'expense', label: 'รายจ่าย', importable: false },
-  { key: 'expense_by_cat', label: 'รายจ่ายแยกประเภท', importable: false },
-  { key: 'summary', label: 'รายรับ-รายจ่ายรวม', importable: true },
+  {
+    key: 'daily_income',
+    label: 'รายรับรายวัน',
+    icon: '📥',
+    desc: 'ยอดรับแต่ละวัน แยกเงินสด / โอน / อื่นๆ',
+    tone: 'income',
+  },
+  {
+    key: 'income_by_type',
+    label: 'รายรับแยกประเภท',
+    icon: '🏷️',
+    desc: 'แยกตามช่องทางและประเภทรายรับ',
+    tone: 'income',
+  },
+  {
+    key: 'expense',
+    label: 'รายจ่ายทั้งหมด',
+    icon: '📤',
+    desc: 'รายการจ่ายพร้อมหมวดหมู่ ผู้ขาย ใบกำกับภาษี',
+    tone: 'expense',
+  },
+  {
+    key: 'expense_by_cat',
+    label: 'รายจ่ายแยกหมวดหมู่',
+    icon: '🗂️',
+    desc: 'สรุปว่าเงินออกไปกับหมวดไหนบ้าง',
+    tone: 'expense',
+  },
+  {
+    key: 'summary',
+    label: 'รายรับ-รายจ่ายรวม',
+    icon: '⚖️',
+    desc: 'เทียบรายรับกับรายจ่ายในช่วงเดียวกัน',
+    tone: 'neutral',
+  },
 ]
 
-const MONTHS_TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
-
-function isFullMonth(start, end) {
-  try {
-    const d = new Date(start + 'T00:00:00')
-    return (
-      start === format(startOfMonth(d), 'yyyy-MM-dd') &&
-      end === format(endOfMonth(d), 'yyyy-MM-dd')
-    )
-  } catch { return false }
+const TONE = {
+  income: {
+    on: 'border-emerald-400 bg-emerald-50 ring-1 ring-emerald-200',
+    icon: 'bg-emerald-100',
+    title: 'text-emerald-900',
+  },
+  expense: {
+    on: 'border-red-400 bg-red-50 ring-1 ring-red-200',
+    icon: 'bg-red-100',
+    title: 'text-red-900',
+  },
+  neutral: {
+    on: 'border-blue-400 bg-blue-50 ring-1 ring-blue-200',
+    icon: 'bg-blue-100',
+    title: 'text-blue-900',
+  },
 }
 
-export default function ReportSelector({ type, setType, startDate, endDate, setStartDate, setEndDate, groupBy, setGroupBy }) {
-  const currentYear = new Date().getFullYear()
-  const [yearView, setYearView] = useState(currentYear)
-
-  const selectedYearNum = parseInt(startDate.substring(0, 4))
-  const selectedMonthNum = isFullMonth(startDate, endDate) && selectedYearNum === yearView
-    ? parseInt(startDate.substring(5, 7))
-    : null
-
-  const selectMonth = (year, month) => {
-    const d = new Date(year, month - 1, 1)
-    setStartDate(format(startOfMonth(d), 'yyyy-MM-dd'))
-    setEndDate(format(endOfMonth(d), 'yyyy-MM-dd'))
-    setGroupBy('day')
-  }
-
-  const selectYear = (year) => {
-    setStartDate(`${year}-01-01`)
-    setEndDate(`${year}-12-31`)
-    setGroupBy('month')
-  }
-
+/** เลือกประเภทรายงานแบบการ์ด — เห็นชื่อพร้อมคำอธิบายว่ารายงานนั้นให้อะไร */
+export default function ReportSelector({ type, setType }) {
   return (
-    <div className="space-y-4">
-      {/* Report type */}
-      <div>
-        <label className="label">ประเภทรายงาน</label>
-        <div className="flex flex-wrap gap-2">
-          {REPORT_TYPES.map((r) => (
-            <button
-              key={r.key}
-              className={`btn text-sm ${type === r.key ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setType(r.key)}
-            >
-              {r.label}
-              {r.importable && <span className="ml-1 text-xs opacity-70">(import)</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Year selector */}
-      <div>
-        <label className="label">ปี</label>
-        <div className="flex gap-2 flex-wrap items-center">
-          {[currentYear - 1, currentYear].map((y) => (
-            <button
-              key={y}
-              className={`btn text-sm ${yearView === y ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setYearView(y)}
-            >
-              {y + 543}
-            </button>
-          ))}
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+      {REPORT_TYPES.map((r) => {
+        const active = type === r.key
+        const tone = TONE[r.tone]
+        return (
           <button
-            className="btn btn-secondary text-sm font-semibold"
-            onClick={() => selectYear(yearView)}
+            key={r.key}
+            onClick={() => setType(r.key)}
+            className={`text-left rounded-xl border p-3 transition-all ${
+              active ? tone.on : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+            }`}
           >
-            ทั้งปี {yearView + 543}
+            <div className="flex items-start gap-2.5">
+              <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active ? tone.icon : 'bg-gray-100'}`}>
+                {r.icon}
+              </span>
+              <div className="min-w-0">
+                <p className={`text-sm font-medium ${active ? tone.title : 'text-gray-800'}`}>{r.label}</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-snug">{r.desc}</p>
+              </div>
+            </div>
           </button>
-        </div>
-      </div>
-
-      {/* Month quick-select */}
-      <div>
-        <label className="label">เดือน</label>
-        <div className="flex gap-1.5 flex-wrap">
-          {MONTHS_TH.map((name, i) => (
-            <button
-              key={i}
-              className={`btn text-xs py-1 px-2.5 ${selectedMonthNum === i + 1 ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => selectMonth(yearView, i + 1)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* groupBy toggle */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <label className="label mb-0 mr-1">แสดงแบบ</label>
-        {[{ key: 'day', label: 'รายวัน' }, { key: 'month', label: 'รายเดือน' }].map(({ key, label }) => (
-          <button
-            key={key}
-            className={`btn text-sm ${groupBy === key ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setGroupBy(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Custom date range */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div>
-          <label className="label">ตั้งแต่</label>
-          <input type="date" className="input w-40" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">ถึง</label>
-          <input type="date" className="input w-40" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-      </div>
+        )
+      })}
     </div>
   )
 }

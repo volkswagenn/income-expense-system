@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import useCategoryStore from '../../store/useCategoryStore'
+import CategorySelect from '../../components/shared/CategorySelect'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 
 const EMPTY = {
   name: '',
@@ -10,12 +11,17 @@ const EMPTY = {
   vendor: '',
   note: '',
   enabled: true,
+  defaultMethod: '',            // ตั้งวิธีจ่ายไว้ล่วงหน้า
+  defaultTransferAccountId: '', // ถ้าจ่ายด้วยเงินโอน ตั้งบัญชีไว้เลย
 }
 
-export default function RecurringItemForm({ item, onSave, onClose }) {
-  const { getCategories } = useCategoryStore()
-  const expenseCategories = getCategories('expense')
+const METHOD_OPTIONS = [
+  { value: 'cash', label: '💵 เงินสด' },
+  { value: 'transfer', label: '🏦 โอนเงิน' },
+  { value: 'pending', label: '📋 ค้างชำระ' },
+]
 
+export default function RecurringItemForm({ item, onSave, onClose }) {
   const [form, setForm] = useState(
     item
       ? { ...item, fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '' }
@@ -48,6 +54,9 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
       fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : undefined,
       vendor: form.vendor.trim() || undefined,
       note: form.note.trim() || undefined,
+      defaultMethod: form.defaultMethod || undefined,
+      defaultTransferAccountId:
+        form.defaultMethod === 'transfer' ? (form.defaultTransferAccountId || undefined) : undefined,
     })
   }
 
@@ -78,16 +87,12 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
           {/* Category */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">หมวดหมู่ *</label>
-            <select
+            <CategorySelect
               className="input w-full"
               value={form.category}
-              onChange={(e) => set('category', e.target.value)}
-            >
-              <option value="">— เลือกหมวดหมู่ —</option>
-              {expenseCategories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              onChange={(v) => set('category', v)}
+              placeholder="— เลือกหมวดหมู่ —"
+            />
             {error.category && <p className="text-xs text-red-500 mt-1">{error.category}</p>}
           </div>
 
@@ -150,6 +155,41 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
             {error.billingDay && <p className="text-xs text-red-500 mt-1">{error.billingDay}</p>}
             <p className="text-xs text-gray-400 mt-1">ถ้าเดือนนั้นสั้นกว่า จะใช้วันสุดท้ายแทน</p>
           </div>
+
+          {/* วิธีจ่ายที่ตั้งไว้ล่วงหน้า — เมื่อกดจ่ายตามรอบจะใช้ค่านี้ทันที */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              วิธีจ่ายประจำ <span className="text-gray-400 font-normal">(ไม่บังคับ)</span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {METHOD_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => set('defaultMethod', form.defaultMethod === opt.value ? '' : opt.value)}
+                  className={`py-2 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                    form.defaultMethod === opt.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              ตั้งไว้แล้วเวลากดจ่ายตามรอบ ระบบจะเลือกให้อัตโนมัติ (เปลี่ยนตอนจ่ายได้)
+            </p>
+          </div>
+
+          {/* บัญชีที่จะตัดเงินเมื่อจ่ายด้วยเงินโอน */}
+          {form.defaultMethod === 'transfer' && (
+            <TransferAccountPicker
+              value={form.defaultTransferAccountId}
+              onChange={(v) => set('defaultTransferAccountId', v)}
+              label="ตัดจากบัญชี"
+            />
+          )}
 
           {/* Vendor */}
           <div>

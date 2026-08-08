@@ -3,6 +3,8 @@ import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import AmountDisplay from '../../components/shared/AmountDisplay'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import DatePicker from '../../components/shared/DatePicker'
 import { depositToSubWallet, withdrawFromSubWallet, transferBetweenSubWallets, borrowFromSubWallet } from '../../lib/walletEngine'
 import useWalletStore from '../../store/useWalletStore'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
@@ -32,9 +34,11 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
   const [fromMethod, setFromMethod] = useState('cash')
   const [toMethod, setToMethod] = useState('cash')
   const [targetWalletId, setTargetWalletId] = useState('')
+  const [accountId, setAccountId] = useState('')
   const [editName, setEditName] = useState(false)
   const [nameVal, setNameVal] = useState(wallet.name)
   const { subWallets } = useWalletStore()
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   const others = subWallets.filter((w) => w.id !== wallet.id)
   const { warning, check, proceed, cancel } = useNegativeConfirm()
@@ -50,17 +54,24 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
     if (!amt || amt <= 0) return
     const dl = ` (${dateLabel(date)})`
 
+    // ถ้าเงินเข้า-ออกทางเงินโอน ต้องระบุบัญชีธนาคาร
+    const usesTransfer =
+      (modal === 'deposit' && fromMethod === 'transfer') ||
+      ((modal === 'withdraw' || modal === 'borrow') && toMethod === 'transfer')
+    const acct = usesTransfer ? resolveAccount(accountId) : null
+    if (usesTransfer && !acct) return
+
     const execute = () => {
-      if (modal === 'deposit') depositToSubWallet(wallet.id, amt, fromMethod, { description: `ฝากเงินเข้า "${wallet.name}" ${amt.toLocaleString()} บาท${dl}` })
-      if (modal === 'withdraw') withdrawFromSubWallet(wallet.id, amt, toMethod, { description: `ถอนเงินจาก "${wallet.name}" ${amt.toLocaleString()} บาท${dl}` })
+      if (modal === 'deposit') depositToSubWallet(wallet.id, amt, fromMethod, { description: `ฝากเงินเข้า "${wallet.name}" ${amt.toLocaleString()} บาท${dl}` }, acct)
+      if (modal === 'withdraw') withdrawFromSubWallet(wallet.id, amt, toMethod, { description: `ถอนเงินจาก "${wallet.name}" ${amt.toLocaleString()} บาท${dl}` }, acct)
       if (modal === 'transfer' && targetWalletId) transferBetweenSubWallets(wallet.id, targetWalletId, amt)
-      if (modal === 'borrow') borrowFromSubWallet(wallet.id, amt, toMethod, wallet.name)
+      if (modal === 'borrow') borrowFromSubWallet(wallet.id, amt, toMethod, wallet.name, acct)
       setAmount('')
       setModal(null)
     }
 
     if (modal === 'deposit') {
-      check({ method: fromMethod, amount: amt, onConfirm: execute })
+      check({ method: fromMethod, amount: amt, accountId: acct, onConfirm: execute })
     } else if (modal === 'withdraw') {
       check({ subWalletId: wallet.id, amount: amt, onConfirm: execute })
     } else if (modal === 'transfer') {
@@ -74,7 +85,7 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
   const DateField = () => (
     <div>
       <label className="label">วันที่</label>
-      <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <DatePicker value={date} onChange={setDate} />
     </div>
   )
 
@@ -125,6 +136,9 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
                 <option value="transfer">🏦 กระเป๋าเงินโอน</option>
               </select>
             </div>
+            {fromMethod === 'transfer' && (
+              <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+            )}
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
               <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
@@ -148,6 +162,9 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
                 <option value="transfer">🏦 กระเป๋าเงินโอน</option>
               </select>
             </div>
+            {toMethod === 'transfer' && (
+              <TransferAccountPicker value={accountId} onChange={setAccountId} label="เข้าบัญชี" />
+            )}
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
               <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
@@ -194,6 +211,9 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
                 <option value="transfer">🏦 เงินโอน</option>
               </select>
             </div>
+            {toMethod === 'transfer' && (
+              <TransferAccountPicker value={accountId} onChange={setAccountId} label="เข้าบัญชี" />
+            )}
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
               <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />

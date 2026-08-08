@@ -5,7 +5,7 @@ import { processSummaryImport } from '../../lib/importProcessor'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet } from '../../lib/walletEngine'
+import { addToWallet, deductWallet } from '../../lib/walletEngine'
 import { saveAppFile } from '../../lib/fileHelper'
 import { parseImportFile } from '../../lib/importParser'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
@@ -88,6 +88,11 @@ export default function ImportFormSummary({ rows, setRows, startDate, endDate, s
         addToWallet('cash', tx.amount, {
           activityType: 'IMPORT_DATA',
           description: `นำเข้ารายรับ ${tx.amount.toLocaleString()} บาท (${tx.date})`,
+        })
+      } else if (tx.type === 'expense') {
+        deductWallet('cash', tx.amount, {
+          activityType: 'IMPORT_DATA',
+          description: `นำเข้ารายจ่าย ${tx.amount.toLocaleString()} บาท (${tx.date})`,
         })
       }
     })

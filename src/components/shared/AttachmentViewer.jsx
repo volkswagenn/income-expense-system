@@ -1,15 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 
 function fileNameFromPath(path = '') {
   return String(path).split(/[\\/]/).filter(Boolean).pop() || 'ไฟล์แนบ'
-}
-
-function isImagePath(path = '') {
-  return /\.(png|jpe?g|webp|gif|bmp)$/i.test(path)
-}
-
-function isPdfPath(path = '') {
-  return /\.pdf$/i.test(path)
 }
 
 export function getPrimaryAttachment(record) {
@@ -66,42 +58,8 @@ export function AttachmentButton({ attachment, attachments, compact = false }) {
 export default function AttachmentViewerPopup({ attachment, attachments, onClose }) {
   const attachmentList = attachments?.length ? attachments : (attachment?.path ? [attachment] : [])
   const [activeIndex, setActiveIndex] = useState(0)
-  const [preview, setPreview] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const activeAttachment = attachmentList[activeIndex] ?? attachmentList[0]
   const fileName = fileNameFromPath(activeAttachment?.path)
-  const canUseElectron = Boolean(window.electronAPI)
-
-  const canPreviewByPath = useMemo(
-    () => isImagePath(activeAttachment?.path) || isPdfPath(activeAttachment?.path),
-    [activeAttachment?.path]
-  )
-
-  useEffect(() => {
-    let cancelled = false
-    async function loadPreview() {
-      setPreview(null)
-      setError('')
-      if (!activeAttachment?.path || !window.electronAPI?.readFileDataUrl || !canPreviewByPath) return
-      setLoading(true)
-      const result = await window.electronAPI.readFileDataUrl(activeAttachment.path)
-      if (cancelled) return
-      setLoading(false)
-      if (result?.success) setPreview(result)
-      else setError(result?.error || 'ไม่สามารถโหลดไฟล์ตัวอย่างได้')
-    }
-    loadPreview()
-    return () => { cancelled = true }
-  }, [activeAttachment?.path, canPreviewByPath])
-
-  const openFile = async () => {
-    if (window.electronAPI?.openPath) await window.electronAPI.openPath(activeAttachment.path)
-  }
-
-  const openFolder = async () => {
-    if (window.electronAPI?.openContainingFolder) await window.electronAPI.openContainingFolder(activeAttachment.path)
-  }
 
   const go = (delta) => {
     setActiveIndex((index) => {
@@ -127,20 +85,13 @@ export default function AttachmentViewerPopup({ attachment, attachments, onClose
 
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
           <div className="rounded-xl border border-gray-200 bg-gray-50 min-h-80 flex items-center justify-center overflow-hidden">
-            {loading ? (
-              <p className="text-sm text-gray-400">กำลังโหลดตัวอย่างไฟล์...</p>
-            ) : preview?.dataUrl && preview.mimeType?.startsWith('image/') ? (
-              <img src={preview.dataUrl} alt={fileName} className="max-w-full max-h-[62vh] object-contain" />
-            ) : preview?.dataUrl && preview.mimeType === 'application/pdf' ? (
-              <iframe title={fileName} src={preview.dataUrl} className="w-full h-[62vh] bg-white" />
-            ) : (
-              <div className="text-center px-6 py-10">
-                <p className="text-5xl mb-3">📄</p>
-                <p className="font-semibold text-gray-700">{canPreviewByPath ? 'ยังไม่สามารถแสดงตัวอย่างได้' : 'ไฟล์นี้ไม่รองรับการ preview'}</p>
-                <p className="text-sm text-gray-400 mt-1">ใช้ปุ่มเปิดไฟล์หรือเปิดโฟลเดอร์ด้านล่าง</p>
-                {error && <p className="text-sm text-red-500 mt-3">{error}</p>}
-              </div>
-            )}
+            <div className="text-center px-6 py-10">
+              <p className="text-5xl mb-3">📄</p>
+              <p className="font-semibold text-gray-700">{fileName}</p>
+              <p className="text-sm text-gray-400 mt-1">
+                ไฟล์แนบถูกดาวน์โหลดเก็บไว้ในเครื่องของคุณ ระบบบันทึกไว้เฉพาะชื่อไฟล์
+              </p>
+            </div>
           </div>
 
           {attachmentList.length > 1 && (
@@ -166,15 +117,13 @@ export default function AttachmentViewerPopup({ attachment, attachments, onClose
           )}
 
           <div className="bg-gray-50 rounded-xl px-4 py-3">
-            <p className="text-xs text-gray-500 mb-1">ตำแหน่งไฟล์</p>
+            <p className="text-xs text-gray-500 mb-1">ชื่อไฟล์ที่บันทึกไว้</p>
             <p className="font-mono text-xs text-gray-600 break-all">{activeAttachment.path}</p>
           </div>
         </div>
 
         <div className="px-5 py-4 border-t bg-gray-50 flex flex-wrap gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onClose}>ปิด</button>
-          <button className="btn btn-secondary" onClick={openFolder} disabled={!canUseElectron}>📂 เปิดโฟลเดอร์</button>
-          <button className="btn btn-primary" onClick={openFile} disabled={!canUseElectron}>เปิดไฟล์</button>
+          <button className="btn btn-primary" onClick={onClose}>ปิด</button>
         </div>
       </div>
     </div>

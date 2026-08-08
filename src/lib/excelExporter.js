@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { saveAppFile } from './fileHelper'
-import { getActorLabel, stripActorFromLog } from './auditActor'
+import { localDateStr } from './dateUtils'
 
 function dateStr(d) {
   try { return format(new Date(d), 'dd/MM/yyyy', { locale: th }) } catch { return d ?? '' }
@@ -120,28 +120,24 @@ export async function exportSummary(transactions, categoryFn, dateRange) {
 }
 
 // Log
-export function exportLog(logs, fmt = 'json', options = {}) {
-  const canViewActor = Boolean(options.canViewActor)
-  const exportLogs = canViewActor ? logs : logs.map(stripActorFromLog)
-
+export function exportLog(logs, fmt = 'json') {
   if (fmt === 'json') {
-    const blob = new Blob([JSON.stringify(exportLogs, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `activity_log_${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `activity_log_${localDateStr()}.json`
     a.click()
     URL.revokeObjectURL(url)
     return
   }
-  const rows = exportLogs.map((l) => ({
+  const rows = logs.map((l) => ({
     เวลา: dtStr(l.timestamp),
     ประเภท: l.activityType,
     รายละเอียด: l.description,
-    ผู้ทำรายการ: canViewActor ? getActorLabel(l.actor) : 'ซ่อนตามสิทธิ์',
     สถานะ: l.status,
     เหตุผลแก้ไข: l.changeNote ?? '',
   }))
   const wb = buildWorkbook([{ name: 'Log', data: rows }])
-  download(wb, `activity_log_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  download(wb, `activity_log_${localDateStr()}.xlsx`)
 }

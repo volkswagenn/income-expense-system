@@ -1,4 +1,21 @@
-import { getCurrentActorSnapshot } from './auditActor'
+import { v4 as uuid } from 'uuid'
+
+/**
+ * เติมข้อมูลระบบให้ log entry จนกลายเป็น record ที่พร้อมเก็บ
+ * ใช้โดย useLogStore.addLog และโดยโค้ดที่ต้องเขียน log ลง localStorage ตรงๆ
+ * (เช่นตอนกู้คืน backup ซึ่งเรียก store ไม่ได้)
+ */
+export function createLogRecord(entry) {
+  return {
+    id: uuid(),
+    timestamp: new Date().toISOString(),
+    status: 'success',
+    errorMessage: null,
+    deviceInfo: navigator.userAgent,
+    sessionId: sessionStorage.getItem('sessionId') ?? 'unknown',
+    ...entry,
+  }
+}
 
 export function buildLogEntry({
   activityType,
@@ -9,7 +26,6 @@ export function buildLogEntry({
   walletEffect = null,
   status = 'success',
   errorMessage = null,
-  actor,
 }) {
   return {
     activityType,
@@ -20,7 +36,6 @@ export function buildLogEntry({
     walletEffect,
     status,
     errorMessage,
-    actor: actor === undefined ? getCurrentActorSnapshot() : actor,
   }
 }
 
@@ -35,6 +50,10 @@ export const ACTIVITY_LABELS = {
   CASH_DEPOSIT: 'ฝากเงินสด',
   TRANSFER_TO_WALLET: 'ย้ายเงินสด → เงินโอน',
   WITHDRAW_FROM_TRANSFER: 'ถอนเงินโอน → เงินสด',
+  TRANSFER_ACCOUNT_CREATE: 'สร้างบัญชีเงินโอน',
+  TRANSFER_ACCOUNT_UPDATE: 'แก้ไขบัญชีเงินโอน',
+  TRANSFER_ACCOUNT_DELETE: 'ลบบัญชีเงินโอน',
+  TRANSFER_ACCOUNT_MOVE: 'ย้ายเงินระหว่างบัญชี',
   SUB_CREATE: 'สร้างกระเป๋าตังค์',
   SUB_DELETE: 'ลบกระเป๋าตังค์',
   SUB_RENAME: 'เปลี่ยนชื่อกระเป๋า',
@@ -45,6 +64,7 @@ export const ACTIVITY_LABELS = {
   SUB_RETURN: 'คืนเงินกระเป๋า',
   RECEIVE_TAX_INVOICE: 'รับใบกำกับภาษี',
   IMPORT_DATA: 'นำเข้าข้อมูล',
+  BACKUP_DATA: 'สำรองข้อมูล',
   RESTORE_BACKUP: 'กู้คืนข้อมูล',
   ADD_INCOME_MAIN: 'รับเงิน',
   OPEN_BILL: 'เปิดบิลค้างชำระ',
@@ -55,15 +75,8 @@ export const ACTIVITY_LABELS = {
   DELETE_TAX_INVOICE: 'ยกเลิกรอใบกำกับภาษี',
   CREATE_PENDING: 'สร้างรายการค้างชำระ',
   DELETE_PENDING: 'ยกเลิกรายการค้างชำระ',
-  SHOP_CREATE: 'สร้างร้าน',
-  SHOP_SELECT: 'เข้าใช้งานร้าน',
-  SHOP_UPDATE: 'แก้ไขร้าน',
-  SHOP_DELETE: 'ลบร้าน',
-  SHOP_RECOVER: 'กู้คืนร้าน',
-  SHOP_BACKUP: 'สำรองข้อมูลร้าน',
   SETTINGS_BACKUP: 'สำรองการตั้งค่า',
   SETTINGS_RESTORE: 'กู้คืนการตั้งค่า',
-  SETTINGS_SYNC_ALL_SHOPS: 'ซิงก์การตั้งค่าทุกร้าน',
   LOG_EXPORT: 'ดาวน์โหลดประวัติ',
   LOG_CLEAR_OLD: 'ล้างประวัติเก่า',
   REPORT_EXPORT: 'ส่งออกรายงาน',
@@ -89,22 +102,4 @@ export const ACTIVITY_LABELS = {
   RECURRING_UNPAID: 'ยกเลิกการจ่ายรายการประจำ',
   RECURRING_SKIPPED: 'ข้ามรายการประจำ',
   RECURRING_GENERATE: 'สร้างรายการประจำรายเดือน',
-  // ─── System management (home system) ────────────────────────
-  SYS_USER_CREATE:    'สร้างผู้ใช้งาน (ระบบหลัก)',
-  SYS_USER_UPDATE:    'แก้ไขผู้ใช้งาน (ระบบหลัก)',
-  SYS_USER_DELETE:    'ลบผู้ใช้งาน (ระบบหลัก)',
-  SYS_USER_BLOCK:     'บล็อกผู้ใช้งาน (ระบบหลัก)',
-  SYS_USER_UNBLOCK:   'ปลดบล็อกผู้ใช้งาน (ระบบหลัก)',
-  SYS_ROLE_CREATE:    'สร้าง Role (ระบบหลัก)',
-  SYS_ROLE_UPDATE:    'แก้ไข Role (ระบบหลัก)',
-  SYS_ROLE_DELETE:    'ลบ Role (ระบบหลัก)',
-  // ─── Store management (in-store) ────────────────────────────
-  STORE_USER_CREATE:  'สร้างพนักงาน',
-  STORE_USER_UPDATE:  'แก้ไขพนักงาน',
-  STORE_USER_DELETE:  'ลบพนักงาน',
-  STORE_USER_BLOCK:   'บล็อกพนักงาน',
-  STORE_USER_UNBLOCK: 'ปลดบล็อกพนักงาน',
-  STORE_ROLE_CREATE:  'สร้าง Role (ร้านค้า)',
-  STORE_ROLE_UPDATE:  'แก้ไข Role (ร้านค้า)',
-  STORE_ROLE_DELETE:  'ลบ Role (ร้านค้า)',
 }

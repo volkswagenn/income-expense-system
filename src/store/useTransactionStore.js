@@ -1,12 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
-import { activeShopId } from '../lib/activeShop'
-import { getCurrentActorSnapshot } from '../lib/auditActor'
-import { enqueueCloudDelete, enqueueCloudUpsert, touchCloudMetadata, withCloudMetadata } from '../lib/cloudSyncMetadata'
-
-// lazy getter to avoid circular import at module load time
-const getRecurringStore = () => import('./useRecurringStore').then((m) => m.default.getState())
+import useRecurringStore from './useRecurringStore'
 
 export const INITIAL = { transactions: [] }
 
@@ -17,34 +12,25 @@ const useTransactionStore = create(
       _reset: () => set(INITIAL),
 
       addTransaction: (data) => {
-        const { actor, ...rest } = data
-        const tx = withCloudMetadata({
+        const tx = {
           id: uuid(),
           createdAt: new Date().toISOString(),
-          ...rest,
-          actor: actor === undefined ? getCurrentActorSnapshot() : actor,
-        }, 'transactions')
+          ...data,
+        }
         set((s) => ({ transactions: [tx, ...s.transactions] }))
-        enqueueCloudUpsert('transactions', tx)
         return tx
       },
 
       updateTransaction: (id, changes) =>
         set((s) => ({
-          transactions: s.transactions.map((t) => {
-            if (t.id !== id) return t
-            const updated = touchCloudMetadata({ ...t, ...changes }, 'transactions')
-            enqueueCloudUpsert('transactions', updated)
-            return updated
-          }),
+          transactions: s.transactions.map((t) => (t.id === id ? { ...t, ...changes } : t)),
         })),
 
       deleteTransaction: (id) => {
         const tx = get().transactions.find((t) => t.id === id)
-        if (tx) enqueueCloudDelete('transactions', tx)
         set((s) => ({ transactions: s.transactions.filter((t) => t.id !== id) }))
         if (tx?.recurringEntryId) {
-          getRecurringStore().then((store) => store.syncEntryFromTransaction(id))
+          useRecurringStore.getState().syncEntryFromTransaction(id)
         }
       },
 
@@ -62,12 +48,9 @@ const useTransactionStore = create(
         get().transactions.filter((t) => t.type === 'expense' && t.date === date),
 
       deleteByDate: (date) =>
-        set((s) => {
-          s.transactions.filter((t) => t.date === date).forEach((t) => enqueueCloudDelete('transactions', t))
-          return { transactions: s.transactions.filter((t) => t.date !== date) }
-        }),
+        set((s) => ({ transactions: s.transactions.filter((t) => t.date !== date) })),
     }),
-    { name: activeShopId ? `${activeShopId}_transactions` : 'default_transactions' }
+    { name: 'default_transactions' }
   )
 )
 

@@ -16,10 +16,13 @@ const TX_AUDIT_TYPES = new Set([
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function applyWalletTarget(ws, target, delta) {
+function applyWalletTarget(ws, target, delta, transferAccountId = null) {
   if (!target || delta === 0) return
   if (target === 'cash') delta > 0 ? ws.addCash(delta) : ws.deductCash(-delta)
-  else if (target === 'transfer') delta > 0 ? ws.addTransfer(delta) : ws.deductTransfer(-delta)
+  else if (target === 'transfer') {
+    // เงินโอนต้องกลับเข้าบัญชีธนาคารเดิมที่เคยเคลื่อนไหว
+    delta > 0 ? ws.addTransfer(delta, transferAccountId) : ws.deductTransfer(-delta, transferAccountId)
+  }
   else if (target?.startsWith('sub:')) ws.updateSubWallet(target.slice(4), delta)
 }
 
@@ -165,19 +168,20 @@ export default function SystemLogEditPopup({ log, onClose }) {
     const { activityType, walletEffect, newValue } = log
 
     if (walletEffect && !TX_AUDIT_TYPES.has(activityType)) {
-      const { target, delta } = walletEffect
-      applyWalletTarget(store, target, -delta)
+      const { target, delta, transferAccountId } = walletEffect
+      const acct = transferAccountId ?? newValue?.transferAccountId ?? null
+      applyWalletTarget(store, target, -delta, acct)
 
       if (activityType === 'TRANSFER_TO_WALLET')
-        applyWalletTarget(store, 'transfer', delta)
+        applyWalletTarget(store, 'transfer', delta, acct)
       else if (activityType === 'WITHDRAW_FROM_TRANSFER')
         applyWalletTarget(store, 'cash', delta)
       // SUB_DEPOSIT: refund main wallet (delta = +amount → main wallet lost +amount → restore +amount)
       else if (activityType === 'SUB_DEPOSIT' && newValue?.fromMethod)
-        applyWalletTarget(store, newValue.fromMethod, delta)
+        applyWalletTarget(store, newValue.fromMethod, delta, newValue?.transferAccountId)
       // SUB_WITHDRAW: deduct main wallet (delta = -amount → main wallet gained amount → take back)
       else if (activityType === 'SUB_WITHDRAW' && newValue?.toMethod)
-        applyWalletTarget(store, newValue.toMethod, delta)
+        applyWalletTarget(store, newValue.toMethod, delta, newValue?.transferAccountId)
       // SUB_TRANSFER: deduct destination sub wallet (delta = -amount → destination gained amount → take back)
       else if (activityType === 'SUB_TRANSFER' && newValue?.toId)
         store.updateSubWallet(newValue.toId, delta)
@@ -186,7 +190,7 @@ export default function SystemLogEditPopup({ log, onClose }) {
         const loan = store.loans.find((l) => l.id === newValue.loanId)
         if (loan) {
           if (loan.method === 'cash') store.deductCash(loan.amount)
-          else store.deductTransfer(loan.amount)
+          else store.deductTransfer(loan.amount, loan.transferAccountId)
         }
         store.deleteLoanById(newValue.loanId)
       }

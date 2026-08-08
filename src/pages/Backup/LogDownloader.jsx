@@ -1,21 +1,15 @@
 import { useState } from 'react'
-import useLogStore from '../../store/useLogStore'
-import useAuthStore from '../../store/useAuthStore'
-import useRoleStore from '../../store/useRoleStore'
+import useLogStore, { MAX_LOGS } from '../../store/useLogStore'
 import { exportLog } from '../../lib/excelExporter'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { P, checkPermission } from '../../lib/permissions'
 
 export default function LogDownloader() {
   const { logs, clearOldLogs, getLogsCount, addLog } = useLogStore()
-  const currentUser = useAuthStore((s) => s.currentUser)
-  const roles = useRoleStore((s) => s.roles)
-  const canViewActor = checkPermission(roles, currentUser?.role, P.VIEW_HISTORY_ACTOR)
   const [confirmClear, setConfirmClear] = useState(false)
 
   const handleExport = (format) => {
-    exportLog(logs, format, { canViewActor })
+    exportLog(logs, format)
     addLog(buildLogEntry({
       activityType: 'LOG_EXPORT',
       description: `ดาวน์โหลดประวัติการใช้งานเป็นไฟล์ ${format.toUpperCase()}`,
@@ -37,9 +31,12 @@ export default function LogDownloader() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-600">จำนวน log ทั้งหมด: <span className="font-semibold">{getLogsCount()}</span> รายการ</p>
-        {getLogsCount() > 1000 && (
-          <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">⚠️ log มาก แนะนำให้ download และลบเก่า</span>
+        <p className="text-sm text-gray-600">
+          จำนวน log ทั้งหมด: <span className="font-semibold">{getLogsCount()}</span> รายการ
+          <span className="text-xs text-gray-400"> (เก็บสูงสุด {MAX_LOGS.toLocaleString()} รายการ)</span>
+        </p>
+        {getLogsCount() > MAX_LOGS * 0.8 && (
+          <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">⚠️ ใกล้เต็ม log เก่าสุดจะถูกตัดทิ้งอัตโนมัติ — แนะนำให้ดาวน์โหลดเก็บไว้</span>
         )}
       </div>
       <div className="flex flex-wrap gap-2">

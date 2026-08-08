@@ -6,14 +6,9 @@ import useTransactionStore from '../../store/useTransactionStore'
 import useWalletStore from '../../store/useWalletStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
-import useAuthStore from '../../store/useAuthStore'
-import useRoleStore from '../../store/useRoleStore'
-import useShopStore from '../../store/useShopStore'
 import { ACTIVITY_LABELS } from '../../lib/logBuilder'
 import { cancelTransaction, describeTxCancelEffects } from '../../lib/transactionActions'
-import { P, checkPermission } from '../../lib/permissions'
-import { getActorLabel, getActorSearchText } from '../../lib/auditActor'
-import { getShopCode } from '../../lib/shopIdentity'
+import { localDateStr } from '../../lib/dateUtils'
 import SectionCard from '../../components/shared/SectionCard'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
 
@@ -40,10 +35,13 @@ const MONEY_LOG_TYPES = new Set([
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function applyWalletTarget(ws, target, delta) {
+function applyWalletTarget(ws, target, delta, transferAccountId = null) {
   if (!target || delta === 0) return
   if (target === 'cash') delta > 0 ? ws.addCash(delta) : ws.deductCash(-delta)
-  else if (target === 'transfer') delta > 0 ? ws.addTransfer(delta) : ws.deductTransfer(-delta)
+  else if (target === 'transfer') {
+    // เงินโอนต้องกลับเข้าบัญชีธนาคารเดิมที่เคยเคลื่อนไหว
+    delta > 0 ? ws.addTransfer(delta, transferAccountId) : ws.deductTransfer(-delta, transferAccountId)
+  }
   else if (target?.startsWith('sub:')) ws.updateSubWallet(target.slice(4), delta)
 }
 
@@ -90,19 +88,20 @@ function executeDeleteLog(log) {
   const { activityType, walletEffect, newValue } = log
 
   if (walletEffect) {
-    const { target, delta } = walletEffect
-    applyWalletTarget(ws, target, -delta)
-    if (activityType === 'TRANSFER_TO_WALLET') applyWalletTarget(ws, 'transfer', delta)
+    const { target, delta, transferAccountId } = walletEffect
+    const acct = transferAccountId ?? newValue?.transferAccountId ?? null
+    applyWalletTarget(ws, target, -delta, acct)
+    if (activityType === 'TRANSFER_TO_WALLET') applyWalletTarget(ws, 'transfer', delta, acct)
     else if (activityType === 'WITHDRAW_FROM_TRANSFER') applyWalletTarget(ws, 'cash', delta)
-    else if (activityType === 'SUB_DEPOSIT' && newValue?.fromMethod) applyWalletTarget(ws, newValue.fromMethod, delta)
-    else if (activityType === 'SUB_WITHDRAW' && newValue?.toMethod) applyWalletTarget(ws, newValue.toMethod, delta)
+    else if (activityType === 'SUB_DEPOSIT' && newValue?.fromMethod) applyWalletTarget(ws, newValue.fromMethod, delta, acct)
+    else if (activityType === 'SUB_WITHDRAW' && newValue?.toMethod) applyWalletTarget(ws, newValue.toMethod, delta, acct)
     else if (activityType === 'SUB_TRANSFER' && newValue?.toId) ws.updateSubWallet(newValue.toId, delta)
 
     if (activityType === 'SUB_BORROW' && newValue?.loanId) {
       const loan = ws.loans.find((l) => l.id === newValue.loanId)
       if (loan) {
         if (loan.method === 'cash') ws.deductCash(loan.amount)
-        else ws.deductTransfer(loan.amount)
+        else ws.deductTransfer(loan.amount, loan.transferAccountId)
       }
       ws.deleteLoanById(newValue.loanId)
     }
@@ -142,61 +141,9 @@ function typeColor(type) {
   return 'bg-gray-100 text-gray-600'
 }
 
-function useCanViewActor() {
-  const currentUser = useAuthStore((s) => s.currentUser)
-  const roles = useRoleStore((s) => s.roles)
-  return checkPermission(roles, currentUser?.role, P.VIEW_HISTORY_ACTOR)
-}
-
-function ActorMeta({ actor, canViewActor }) {
-  return (
-    <p className="text-xs text-gray-400 mt-1">
-      ผู้ทำรายการ: {canViewActor ? getActorLabel(actor) : 'ซ่อนตามสิทธิ์'}
-    </p>
-  )
-}
-
-function getShopLabel(shop, shops) {
-  if (!shop) return ''
-  return `${getShopCode(shop, shops)} - ${shop.name}`
-}
-
-function findShopFromEvent(event, shops) {
-  const explicitId =
-    event.newValue?.shopId ||
-    event.oldValue?.shopId ||
-    event.oldValue?.shop?.id ||
-    event.newValue?.shop?.id
-  if (explicitId) return shops.find((shop) => shop.id === explicitId)
-
-  const uuid = String(event.description ?? '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0]
-  return uuid ? shops.find((shop) => shop.id === uuid) : null
-}
-
-function getReadableDescription(event, shops) {
-  if (!event.activityType?.startsWith('SHOP_')) return event.description
-  const shop = findShopFromEvent(event, shops)
-  const label = getShopLabel(shop, shops) || event.newValue?.shopName || event.oldValue?.shop?.name
-  if (!label) return event.description
-
-  if (event.activityType === 'SHOP_SELECT') return `เข้าใช้งานร้าน "${label}"`
-  if (event.activityType === 'SHOP_CREATE') return `สร้างร้าน "${label}"`
-  if (event.activityType === 'SHOP_UPDATE') return `แก้ไขร้าน "${label}"`
-  if (event.activityType === 'SHOP_DELETE') return `ลบร้าน "${label}"`
-  if (event.activityType === 'SHOP_BACKUP') return `สำรองข้อมูลร้าน "${label}"`
-  if (event.activityType === 'SHOP_RECOVER') return `กู้คืนข้อมูลร้าน "${label}"`
-
-  return String(event.description ?? '').replace(
-    /"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/ig,
-    `"${label}"`
-  )
-}
-
 function AllTab() {
   const { logs } = useLogStore()
   const { transactions } = useTransactionStore()
-  const shops = useShopStore((s) => s.shops)
-  const canViewActor = useCanViewActor()
   const [filter, setFilter] = useState('month')
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
@@ -219,14 +166,14 @@ function AllTab() {
       label: tx.type === 'income' ? 'ธุรกรรมรายรับ' : 'ธุรกรรมรายจ่าย',
       description: `${tx.type === 'income' ? 'รายรับ' : 'รายจ่าย'} "${tx.itemName ?? 'ไม่ระบุ'}" ${Number(tx.amount || 0).toLocaleString()} บาท`,
       walletEffect: { delta: tx.type === 'income' ? Number(tx.amount || 0) : -Number(tx.amount || 0) },
-      actor: tx.actor,
     }))
 
   const systemEvents = logs
     .map((log) => ({
       ...log,
       id: `log:${log.id}`,
-      date: log.timestamp?.slice(0, 10),
+      // timestamp เป็น ISO/UTC — ต้องแปลงเป็นวันที่ท้องถิ่นก่อนเทียบกับช่วงวันที่ที่ผู้ใช้เลือก
+      date: localDateStr(log.timestamp),
       label: ACTIVITY_LABELS[log.activityType] ?? log.activityType,
     }))
 
@@ -240,16 +187,14 @@ function AllTab() {
 
   const events = [...transactionEvents, ...systemEvents]
     .filter((event) => {
-      const d = event.date ?? event.timestamp?.slice(0, 10)
+      const d = event.date || localDateStr(event.timestamp)
       if (d < startDate || d > endDate) return false
       if (typeFilter && event.activityType !== typeFilter) return false
       if (search) {
-        const displayDescription = getReadableDescription(event, shops)
         const haystack = [
-          displayDescription,
+          event.description,
           event.label,
           event.activityType,
-          canViewActor ? getActorSearchText(event.actor) : '',
         ]
           .filter(Boolean).join(' ').toLowerCase()
         if (!haystack.includes(search.toLowerCase())) return false
@@ -290,8 +235,7 @@ function AllTab() {
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor(event.activityType)}`}>
                   {event.label}
                 </span>
-                <p className="text-sm text-gray-700 mt-1 break-words">{getReadableDescription(event, shops)}</p>
-                <ActorMeta actor={event.actor} canViewActor={canViewActor} />
+                <p className="text-sm text-gray-700 mt-1 break-words">{event.description}</p>
               </div>
               {event.walletEffect?.delta != null && (
                 <span className={`text-xs font-semibold tabular-nums shrink-0 ${event.walletEffect.delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -308,7 +252,7 @@ function AllTab() {
 
 // ── MoneyTab ───────────────────────────────────────────────────────────────────
 
-function MoneyEventCard({ event, onCancel, canViewActor }) {
+function MoneyEventCard({ event, onCancel }) {
   const { getCategoryName } = useCategoryStore()
 
   if (event._kind === 'tx') {
@@ -331,7 +275,6 @@ function MoneyEventCard({ event, onCancel, canViewActor }) {
             {format(new Date(tx.date + 'T00:00:00'), 'd MMM yyyy', { locale: th })} · {methodLabel}
             {tx.category ? ` · ${getCategoryName(tx.category)}` : ''}
           </p>
-          <ActorMeta actor={tx.actor} canViewActor={canViewActor} />
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <span className={`text-sm font-bold tabular-nums ${isIncome ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -361,7 +304,6 @@ function MoneyEventCard({ event, onCancel, canViewActor }) {
           {ACTIVITY_LABELS[log.activityType] ?? log.activityType}
         </span>
         <p className="text-sm text-gray-700 mt-1 break-words">{log.description}</p>
-        <ActorMeta actor={log.actor} canViewActor={canViewActor} />
       </div>
       <div className="flex items-center gap-3 shrink-0">
         {delta != null && (
@@ -425,9 +367,8 @@ function MoneyTab() {
   const today = new Date()
   const { transactions } = useTransactionStore()
   const { logs } = useLogStore()
-  const { pendingPayments } = usePendingStore()
+  const { pendingPayments, taxInvoices, pendingIncomes } = usePendingStore()
   const loans = useWalletStore((s) => s.loans)
-  const canViewActor = useCanViewActor()
 
   const [filter, setFilter] = useState('month')
   const [startDate, setStartDate] = useState(format(startOfMonth(today), 'yyyy-MM-dd'))
@@ -448,7 +389,8 @@ function MoneyTab() {
     const logEvents = logs
       .filter((l) => {
         if (!MONEY_LOG_TYPES.has(l.activityType)) return false
-        const d = l.timestamp?.slice(0, 10) ?? ''
+        // แปลงเป็นวันที่ท้องถิ่นก่อนเทียบ ไม่งั้นรายการช่วง 00:00–07:00 จะตกไปเป็นของเมื่อวาน
+        const d = localDateStr(l.timestamp)
         return d >= startDate && d <= endDate
       })
       .map((log) => ({
@@ -472,7 +414,7 @@ function MoneyTab() {
   const handleCancelClick = (event) => {
     let effects
     if (event._kind === 'tx') {
-      effects = describeTxCancelEffects(event.tx, pendingPayments)
+      effects = describeTxCancelEffects(event.tx, { pendingPayments, taxInvoices, pendingIncomes })
     } else {
       effects = computeLogEffects(event.log, loans)
     }
@@ -520,7 +462,7 @@ function MoneyTab() {
       ) : (
         <div className="space-y-1.5">
           {filtered.map((event) => (
-            <MoneyEventCard key={event.id} event={event} onCancel={handleCancelClick} canViewActor={canViewActor} />
+            <MoneyEventCard key={event.id} event={event} onCancel={handleCancelClick} />
           ))}
         </div>
       )}
@@ -536,33 +478,13 @@ function MoneyTab() {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
+const TABS = [
+  { key: 'all',   label: '📋 ทั้งหมด' },
+  { key: 'money', label: '💰 รายการเงิน' },
+]
+
 export default function HistoryPage() {
-  const currentUser = useAuthStore((s) => s.currentUser)
-  const roles = useRoleStore((s) => s.roles)
-  const role = currentUser?.role
-
-  // Tab access: if role directly has parent permission → show all tabs
-  const userRoleObj = roles.find((r) => r.id === role)
-  const canViewAllTab   = checkPermission(roles, role, P.VIEW_HISTORY_ALL)
-  const canViewMoneyTab = checkPermission(roles, role, P.VIEW_HISTORY_MONEY)
-
-  const TABS = [
-    canViewAllTab   && { key: 'all',   label: '📋 ทั้งหมด' },
-    canViewMoneyTab && { key: 'money', label: '💰 รายการเงิน' },
-  ].filter(Boolean)
-
-  const [tab, setTab] = useState(TABS[0]?.key ?? 'all')
-  const activeTab = TABS.find((t) => t.key === tab) ? tab : TABS[0]?.key
-
-  if (TABS.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
-        <p className="text-5xl mb-4">🔒</p>
-        <p className="font-semibold text-gray-600">สิทธิ์ไม่เพียงพอ</p>
-        <p className="text-sm mt-1">คุณไม่มีสิทธิ์ดูแท็บใดในหน้านี้</p>
-      </div>
-    )
-  }
+  const [tab, setTab] = useState(TABS[0].key)
 
   return (
     <div className="space-y-5">
@@ -572,7 +494,7 @@ export default function HistoryPage() {
         {TABS.map((t) => (
           <button
             key={t.key}
-            className={`btn text-sm px-4 py-2 rounded-lg transition-all ${activeTab === t.key ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`btn text-sm px-4 py-2 rounded-lg transition-all ${tab === t.key ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
             onClick={() => setTab(t.key)}
           >
             {t.label}
@@ -581,8 +503,8 @@ export default function HistoryPage() {
       </div>
 
       <SectionCard>
-        {activeTab === 'all'   && canViewAllTab   && <AllTab />}
-        {activeTab === 'money' && canViewMoneyTab && <MoneyTab />}
+        {tab === 'all'   && <AllTab />}
+        {tab === 'money' && <MoneyTab />}
       </SectionCard>
     </div>
   )

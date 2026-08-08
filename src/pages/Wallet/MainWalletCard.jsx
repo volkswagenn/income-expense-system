@@ -4,6 +4,8 @@ import { th } from 'date-fns/locale'
 import useWalletStore from '../../store/useWalletStore'
 import AmountDisplay from '../../components/shared/AmountDisplay'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import DatePicker from '../../components/shared/DatePicker'
 import { transferBetweenWallets, addToWallet } from '../../lib/walletEngine'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
 
@@ -11,24 +13,36 @@ function dateLabel(d) {
   try { return format(new Date(d + 'T00:00:00'), 'd MMM yyyy', { locale: th }) } catch { return d }
 }
 
-function WalletModal({ title, onClose, onConfirm, label, buttonLabel, buttonClass = 'btn-primary' }) {
+function WalletModal({ title, onClose, onConfirm, label, buttonLabel, buttonClass = 'btn-primary', needsAccount }) {
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [accountId, setAccountId] = useState('')
+  const accountCount = useWalletStore((s) => s.transferAccounts.length)
+  const blocked = needsAccount && accountCount === 0
+  const missingAccount = needsAccount && !blocked && !accountId
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-4 p-6 space-y-4">
         <h3 className="font-semibold text-base">{title}</h3>
         <div>
           <label className="label">วันที่</label>
-          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DatePicker value={date} onChange={setDate} />
         </div>
+        {needsAccount && (
+          <TransferAccountPicker value={accountId} onChange={setAccountId} />
+        )}
         <div>
           <label className="label">{label}</label>
           <input className="input" type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus />
         </div>
         <div className="flex gap-2 justify-end">
           <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-          <button className={`btn ${buttonClass}`} onClick={() => { if (Number(amount) > 0) onConfirm(Number(amount), date) }}>
+          <button
+            className={`btn ${buttonClass}`}
+            disabled={blocked || missingAccount}
+            onClick={() => { if (Number(amount) > 0) onConfirm(Number(amount), date, accountId) }}
+          >
             {buttonLabel}
           </button>
         </div>
@@ -43,18 +57,18 @@ export default function MainWalletCard() {
   const [modal, setModal] = useState(null)
   const { warning, check, proceed, cancel } = useNegativeConfirm()
 
-  const handleAction = (amount, date) => {
+  const handleAction = (amount, date, accountId) => {
     const dl = ` (${dateLabel(date)})`
 
     const execute = () => {
       if (modal === 'deposit_cash') {
         addToWallet('cash', amount, { activityType: 'CASH_DEPOSIT', description: `ฝากเงินสด ${amount.toLocaleString()} บาท${dl}` })
       } else if (modal === 'move_to_transfer') {
-        transferBetweenWallets('cash', 'transfer', amount)
+        transferBetweenWallets('cash', 'transfer', amount, {}, accountId)
       } else if (modal === 'deposit_transfer') {
-        addToWallet('transfer', amount, { activityType: 'CASH_DEPOSIT', description: `รับเงินโอน ${amount.toLocaleString()} บาท${dl}` })
+        addToWallet('transfer', amount, { activityType: 'CASH_DEPOSIT', description: `รับเงินโอน ${amount.toLocaleString()} บาท${dl}` }, accountId)
       } else if (modal === 'move_to_cash') {
-        transferBetweenWallets('transfer', 'cash', amount)
+        transferBetweenWallets('transfer', 'cash', amount, {}, accountId)
       }
       setModal(null)
     }
@@ -62,7 +76,7 @@ export default function MainWalletCard() {
     if (modal === 'move_to_transfer') {
       check({ method: 'cash', amount, onConfirm: execute })
     } else if (modal === 'move_to_cash') {
-      check({ method: 'transfer', amount, onConfirm: execute })
+      check({ method: 'transfer', amount, accountId, onConfirm: execute })
     } else {
       execute()
     }
@@ -70,9 +84,9 @@ export default function MainWalletCard() {
 
   const MODAL_CONFIG = {
     deposit_cash:     { title: 'ฝากเงินสด',              label: 'จำนวนเงินสด (บาท)',  buttonLabel: 'ฝากเงิน',  buttonClass: 'btn-success' },
-    move_to_transfer: { title: 'ย้ายเงินสด → เงินโอน',  label: 'จำนวนเงิน (บาท)',   buttonLabel: 'ย้ายเงิน', buttonClass: 'btn-primary' },
-    deposit_transfer: { title: 'รับเงินโอน',             label: 'จำนวนเงินโอน (บาท)', buttonLabel: 'รับเงิน',  buttonClass: 'btn-success' },
-    move_to_cash:     { title: 'ถอนเงินโอน → เงินสด',   label: 'จำนวนเงิน (บาท)',   buttonLabel: 'ถอนเงิน',  buttonClass: 'btn-warning' },
+    move_to_transfer: { title: 'ย้ายเงินสด → เงินโอน',  label: 'จำนวนเงิน (บาท)',   buttonLabel: 'ย้ายเงิน', buttonClass: 'btn-primary', needsAccount: true },
+    deposit_transfer: { title: 'รับเงินโอน',             label: 'จำนวนเงินโอน (บาท)', buttonLabel: 'รับเงิน',  buttonClass: 'btn-success', needsAccount: true },
+    move_to_cash:     { title: 'ถอนเงินโอน → เงินสด',   label: 'จำนวนเงิน (บาท)',   buttonLabel: 'ถอนเงิน',  buttonClass: 'btn-warning', needsAccount: true },
   }
 
   return (

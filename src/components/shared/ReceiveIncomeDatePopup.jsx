@@ -1,13 +1,21 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
+import TransferAccountPicker from './TransferAccountPicker'
+import DatePicker from './DatePicker'
+import useWalletStore from '../../store/useWalletStore'
 
 export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, onCancel }) {
   const today = format(new Date(), 'yyyy-MM-dd')
   const [receivedDate, setReceivedDate] = useState(today)
+  // ใช้บัญชีที่ผูกไว้ตอนเปิดบิลรอรับเงินเป็นค่าเริ่มต้น
+  const [accountId, setAccountId] = useState(item?.defaultTransferAccountId ?? '')
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   if (!open || !item) return null
 
   const methodLabel = method === 'cash' ? 'เงินสด' : 'เงินโอน'
+  const needsAccount = method === 'transfer'
+  const resolvedAccountId = needsAccount ? resolveAccount(accountId) : null
   const isToday = receivedDate === today
   const billDate = item.date
   const isBillDate = billDate && receivedDate === billDate
@@ -35,14 +43,13 @@ export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, 
             </div>
           </div>
 
+          {needsAccount && (
+            <TransferAccountPicker value={accountId} onChange={setAccountId} label="เข้าบัญชี" />
+          )}
+
           <div>
             <label className="label">วันที่ได้รับเงิน {isToday && <span className="text-blue-500">(วันนี้)</span>}</label>
-            <input
-              type="date"
-              className="input"
-              value={receivedDate}
-              onChange={(e) => setReceivedDate(e.target.value)}
-            />
+            <DatePicker value={receivedDate} onChange={setReceivedDate} />
             <div className="flex flex-wrap gap-2 mt-2">
               <button
                 type="button"
@@ -68,8 +75,8 @@ export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, 
           <button className="btn btn-secondary flex-1" onClick={onCancel}>ยกเลิก</button>
           <button
             className="btn btn-success flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => onConfirm(receivedDate)}
-            disabled={!receivedDate}
+            onClick={() => onConfirm(receivedDate, resolvedAccountId)}
+            disabled={!receivedDate || (needsAccount && !resolvedAccountId)}
           >
             ยืนยันรับเงิน
           </button>

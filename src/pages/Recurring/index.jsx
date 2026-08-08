@@ -36,15 +36,16 @@ export default function RecurringPage() {
     syncEntryFromTransaction,
   } = useRecurringStore()
   const { addTransaction, deleteTransaction } = useTransactionStore()
-  const { addPending, deletePending } = usePendingStore()
+  const { addPending, deletePending, pendingPayments } = usePendingStore()
   const { addLog } = useLogStore()
 
   const month = monthKey(viewYear, viewMonth)
 
-  // auto-generate entries when month changes
+  // สร้าง entry ของเดือนที่ดูอยู่ — ต้องรันใหม่เมื่อ items เปลี่ยนด้วย
+  // ไม่งั้นการเปิดใช้รายการที่ปิดไว้จะไม่สร้าง entry จนกว่าจะสลับเดือนไปกลับ
   useEffect(() => {
     generateEntries(month)
-  }, [month])
+  }, [month, items])
 
   const navigateMonth = (delta) => {
     let m = viewMonth + delta
@@ -57,7 +58,6 @@ export default function RecurringPage() {
 
   // entries for current view month, merged with item data
   const monthEntries = useMemo(() => {
-    const monthItems = items.filter((it) => it.enabled || entries.some((e) => e.recurringId === it.id && e.month === month))
     return entries
       .filter((e) => e.month === month)
       .map((e) => ({ entry: e, item: items.find((it) => it.id === e.recurringId) }))
@@ -100,7 +100,7 @@ export default function RecurringPage() {
 
   const handlePay = (entry, item) => setPayTarget({ entry, item })
 
-  const executeMarkPaid = (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd')) => {
+  const executeMarkPaid = (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null) => {
     let tx = null
 
     let pendingPaymentId = null
@@ -114,6 +114,9 @@ export default function RecurringPage() {
         vendor: item.vendor,
         note: item.note,
         recurringEntryId: entry.id,
+        // พกวิธีจ่าย/บัญชีที่ตั้งไว้ไปด้วย เพื่อให้ตอนกดชำระใช้ได้ทันที
+        ...(item.defaultMethod && item.defaultMethod !== 'pending' ? { defaultMethod: item.defaultMethod } : {}),
+        ...(item.defaultTransferAccountId ? { defaultTransferAccountId: item.defaultTransferAccountId } : {}),
       })
       pendingPaymentId = p.id
     } else {
@@ -123,6 +126,7 @@ export default function RecurringPage() {
         amount,
         category: item.category,
         method: paidMethod,
+        ...(accountId ? { transferAccountId: accountId } : {}),
         itemName: item.name,
         vendor: item.vendor,
         note: item.note,
@@ -131,42 +135,35 @@ export default function RecurringPage() {
       deductWallet(paidMethod, amount, {
         activityType: 'RECURRING_PAID',
         description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
-      })
+      }, accountId)
     }
 
     updateEntry(entry.id, {
       status: 'paid',
       amount,
       paidMethod,
+      transferAccountId: accountId,
       paidAt: new Date(`${paidDate}T12:00:00`).toISOString(),
       transactionId: tx?.id ?? null,
       pendingPaymentId,
     })
 
-    if (paidMethod !== 'pending') {
-      addLog(buildLogEntry({
-        activityType: 'RECURRING_PAID',
-        description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท (${paidMethod === 'cash' ? 'เงินสด' : 'โอนเงิน'})`,
-        walletEffect: { target: paidMethod, delta: -amount },
-      }))
-    }
-
     setPayTarget(null)
   }
 
-  const handlePayConfirm = (amount, paidMethod, paidDate) => {
+  const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null) => {
     const { entry, item } = payTarget
-    if (paidMethod !== 'pending' && willGoNegative(paidMethod, amount)) {
-      setNegativeWarn({ amount, paidMethod, paidDate, entry, item })
+    if (paidMethod !== 'pending' && willGoNegative(paidMethod, amount, accountId)) {
+      setNegativeWarn({ amount, paidMethod, paidDate, accountId, entry, item })
       setPayTarget(null)
       return
     }
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate)
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId)
   }
 
   const handleNegativeConfirm = () => {
-    const { entry, item, amount, paidMethod, paidDate } = negativeWarn
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate)
+    const { entry, item, amount, paidMethod, paidDate, accountId } = negativeWarn
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId)
     setNegativeWarn(null)
   }
 
@@ -183,17 +180,52 @@ export default function RecurringPage() {
 
   const handleUndoPay = (entry) => setUndoTarget(entry)
 
+  // pending ที่ผูกกับ entry — ใช้ทั้งตอนแสดงผลลัพธ์และตอนยกเลิกจริง
+  const linkedPendingOf = (entry) =>
+    entry?.pendingPaymentId ? pendingPayments.find((p) => p.id === entry.pendingPaymentId) : null
+
+  const undoEffects = (entry) => {
+    if (!entry) return []
+    const lines = []
+    const linked = linkedPendingOf(entry)
+    if (entry.paidMethod && entry.paidMethod !== 'pending') {
+      lines.push(`คืนเงิน ${entry.amount.toLocaleString()} บาท เข้า${entry.paidMethod === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
+      if (entry.transactionId) lines.push('ลบรายการบันทึกที่เชื่อมโยง')
+    }
+    if (linked?.status === 'paid') {
+      lines.push(`คืนเงิน ${linked.amount.toLocaleString()} บาท เข้า${linked.paidMethod === 'cash' ? 'เงินสด' : 'เงินโอน'} (ชำระผ่านรายการค้างจ่าย)`)
+      if (linked.transactionId) lines.push('ลบรายการบันทึกของการชำระ')
+    }
+    if (linked) lines.push('ลบรายการค้างจ่ายที่เชื่อมโยง')
+    if (lines.length === 0) lines.push('ไม่มีผลต่อยอดเงิน')
+    return lines
+  }
+
   const executeUndoPay = () => {
     const entry = undoTarget
     const item = items.find((it) => it.id === entry.recurringId)
 
     if (entry.transactionId) deleteTransaction(entry.transactionId)
+
+    // จ่ายผ่านช่องทาง "ค้างชำระ" แล้วไปกดชำระที่หน้ารายการรอ — ต้องคืนเงินและลบ
+    // transaction ของการชำระด้วย ไม่งั้นเงินยังถูกหักอยู่แต่ entry กลับเป็น "รอจ่าย" → จ่ายซ้ำได้
+    const linked = linkedPendingOf(entry)
+    if (linked?.status === 'paid') {
+      if (linked.transactionId) deleteTransaction(linked.transactionId)
+      if (linked.paidMethod) {
+        addToWallet(linked.paidMethod, linked.amount, {
+          activityType: 'RECURRING_UNPAID',
+          description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${linked.amount.toLocaleString()} บาท (ชำระผ่านรายการค้างจ่าย)`,
+        }, linked.transferAccountId)
+      }
+    }
     if (entry.pendingPaymentId) deletePending(entry.pendingPaymentId)
+
     if (entry.paidMethod && entry.paidMethod !== 'pending') {
       addToWallet(entry.paidMethod, entry.amount, {
         activityType: 'RECURRING_UNPAID',
         description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${entry.amount.toLocaleString()} บาท`,
-      })
+      }, entry.transferAccountId)
     }
 
     updateEntry(entry.id, {
@@ -202,6 +234,7 @@ export default function RecurringPage() {
       paidMethod: null,
       transactionId: null,
       pendingPaymentId: null,
+      transferAccountId: null,
       amount: item?.amountType === 'fixed' ? (item.fixedAmount ?? 0) : 0,
     })
 
@@ -360,7 +393,7 @@ export default function RecurringPage() {
       <ConfirmPopup
         open={!!undoTarget}
         title="ยกเลิกการจ่าย"
-        message={`ยกเลิกการจ่าย "${items.find((i) => i.id === undoTarget?.recurringId)?.name}"?\nระบบจะคืนเงินและลบรายการบันทึกที่เกี่ยวข้อง`}
+        message={`ยกเลิกการจ่าย "${items.find((i) => i.id === undoTarget?.recurringId)?.name}"?\n\nผลที่จะเกิดขึ้น:\n${undoEffects(undoTarget).map((e) => `• ${e}`).join('\n')}`}
         onConfirm={executeUndoPay}
         onCancel={() => setUndoTarget(null)}
         confirmLabel="ยืนยัน"

@@ -1,16 +1,20 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
+import { Link } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import CategorySelect from '../../components/shared/CategorySelect'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import usePendingStore from '../../store/usePendingStore'
+import useWalletStore from '../../store/useWalletStore'
 import { addToWallet } from '../../lib/walletEngine'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 
-const EMPTY = { cash: '', transfer: '', otherAmount: '', otherType: '', otherMethod: '', note: '', detail: '', docType: 'none' }
+const EMPTY = { cash: '', transfer: '', otherAmount: '', otherType: '', otherMethod: '', note: '', detail: '', docType: 'none', transferAccountId: '', otherAccountId: '', category: '' }
 
 function RecentTransactions() {
   const { transactions } = useTransactionStore()
@@ -69,10 +73,23 @@ export default function IncomeForm() {
   const cashAmt = Number(form.cash) || 0
   const transferAmt = Number(form.transfer) || 0
   const otherAmt = Number(form.otherAmount) || 0
+
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+
   const handleSave = () => {
     if (!cashAmt && !transferAmt && !otherAmt) return setErrMsg('กรุณาใส่จำนวนเงินอย่างน้อย 1 ช่อง')
     if (otherAmt > 0 && !form.otherType) return setErrMsg('กรุณาระบุประเภทรายรับอื่นๆ')
     if (otherAmt > 0 && !isPendingMode && !form.otherMethod) return setErrMsg('กรุณาเลือกว่ารายรับอื่นๆ เข้ากระเป๋าไหน')
+
+    // เงินโอนต้องระบุว่าเข้าบัญชีธนาคารไหน
+    const transferAccountId = resolveAccount(form.transferAccountId)
+    const otherAccountId = resolveAccount(form.otherAccountId)
+    if (!isPendingMode) {
+      if (transferAmt > 0 && !transferAccountId) return setErrMsg('กรุณาเลือกบัญชีสำหรับเงินโอน')
+      if (otherAmt > 0 && form.otherMethod === 'transfer' && !otherAccountId) {
+        return setErrMsg('กรุณาเลือกบัญชีสำหรับรายรับอื่นๆ')
+      }
+    }
     setErrMsg('')
 
     // ── PENDING MODE: รวมทุกยอดเป็น pendingIncome เดียว ──
@@ -90,7 +107,10 @@ export default function IncomeForm() {
         description: `เปิดบิลรอรับเงิน ${date}`,
         note: noteText,
         source: !cashAmt && !transferAmt ? 'other' : 'main',
+        category: form.category || undefined,
         otherIncomeType: otherAmt > 0 ? (form.otherType || 'อื่นๆ') : undefined,
+        // ผูกบัญชีไว้ล่วงหน้า เวลากดรับเงินโอนจะเข้าบัญชีนี้ทันที
+        ...(form.transferAccountId ? { defaultTransferAccountId: form.transferAccountId } : {}),
         ...(attachments.length > 0 ? {
           attachments,
           documentPath: attachments[0].path,
@@ -116,17 +136,20 @@ export default function IncomeForm() {
 
     // ── NORMAL MODE ──
     if (cashAmt > 0) {
-      const tx = addTransaction({ date, type: 'income', amount: cashAmt, method: 'cash', note: form.note, detail: form.detail, itemName: 'รายรับเงินสด', ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}) })
+      const tx = addTransaction({ date, type: 'income', amount: cashAmt, method: 'cash', category: form.category || undefined, note: form.note, detail: form.detail, itemName: 'รายรับเงินสด', ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}) })
       addToWallet('cash', cashAmt, { activityType: 'ADD_INCOME_MAIN', description: `รับเงินสด ${cashAmt.toLocaleString()} บาท`, newValue: tx })
     }
     if (transferAmt > 0) {
-      const tx = addTransaction({ date, type: 'income', amount: transferAmt, method: 'transfer', note: form.note, detail: form.detail, itemName: 'รายรับเงินโอน', ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}) })
-      addToWallet('transfer', transferAmt, { activityType: 'ADD_INCOME_MAIN', description: `รับเงินโอน ${transferAmt.toLocaleString()} บาท`, newValue: tx })
+      const tx = addTransaction({ date, type: 'income', amount: transferAmt, method: 'transfer', transferAccountId, category: form.category || undefined, note: form.note, detail: form.detail, itemName: 'รายรับเงินโอน', ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}) })
+      addToWallet('transfer', transferAmt, { activityType: 'ADD_INCOME_MAIN', description: `รับเงินโอน ${transferAmt.toLocaleString()} บาท`, newValue: tx }, transferAccountId)
     }
     if (otherAmt > 0) {
       const method = form.otherMethod || 'cash'
+      const accountId = method === 'transfer' ? otherAccountId : null
       const tx = addTransaction({
         date, type: 'income', amount: otherAmt, method,
+        ...(accountId ? { transferAccountId: accountId } : {}),
+        category: form.category || undefined,
         otherIncomeType: form.otherType,
         note: form.note, detail: form.detail,
         itemName: form.otherType || 'รายรับอื่นๆ',
@@ -136,7 +159,7 @@ export default function IncomeForm() {
         activityType: 'ADD_OTHER_INCOME',
         description: `${form.otherType} ${otherAmt.toLocaleString()} บาท → กระเป๋า${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
         newValue: tx,
-      })
+      }, accountId)
     }
 
     clearDraft()
@@ -181,10 +204,36 @@ export default function IncomeForm() {
           <label className="label">💵 เงินสด (บาท)</label>
           <input className="input" type="number" min="0" value={form.cash} onChange={(e) => set('cash', e.target.value)} placeholder="0" />
         </div>
-        <div>
-          <label className="label">🏦 เงินโอน (บาท)</label>
-          <input className="input" type="number" min="0" value={form.transfer} onChange={(e) => set('transfer', e.target.value)} placeholder="0" />
+        <div className="space-y-2">
+          <div>
+            <label className="label">🏦 เงินโอน (บาท)</label>
+            <input className="input" type="number" min="0" value={form.transfer} onChange={(e) => set('transfer', e.target.value)} placeholder="0" />
+          </div>
+          {/* ระบุบัญชีปลายทางเมื่อมีการรับเงินโอน */}
+          {!isPendingMode && transferAmt > 0 && (
+            <TransferAccountPicker
+              value={form.transferAccountId}
+              onChange={(v) => set('transferAccountId', v)}
+              label="เข้าบัญชี"
+            />
+          )}
         </div>
+      </div>
+
+      {/* หมวดหมู่รายรับ */}
+      <div className="max-w-sm">
+        <div className="flex items-center justify-between mb-1">
+          <label className="label mb-0">หมวดหมู่รายรับ</label>
+          <Link to="/categories" className="text-xs text-emerald-600 hover:text-emerald-700 hover:underline">
+            🗂️ จัดการหมวดหมู่
+          </Link>
+        </div>
+        <CategorySelect
+          type="income"
+          value={form.category}
+          onChange={(v) => set('category', v)}
+          placeholder="ไม่ระบุหมวดหมู่"
+        />
       </div>
 
       {/* รายรับอื่นๆ */}
@@ -222,10 +271,29 @@ export default function IncomeForm() {
                 </label>
               ))}
             </div>
+            {form.otherMethod === 'transfer' && otherAmt > 0 && (
+              <div className="mt-2 max-w-sm">
+                <TransferAccountPicker
+                  value={form.otherAccountId}
+                  onChange={(v) => set('otherAccountId', v)}
+                  label="เข้าบัญชี"
+                />
+              </div>
+            )}
           </div>
         )}
         {isPendingMode && (
-          <p className="text-xs text-amber-600 px-1">รวมเป็นรายการรอรับเงินเดียวกัน</p>
+          <div className="px-1 space-y-2">
+            <p className="text-xs text-amber-600">รวมเป็นรายการรอรับเงินเดียวกัน</p>
+            <div className="max-w-sm">
+              <TransferAccountPicker
+                value={form.transferAccountId}
+                onChange={(v) => set('transferAccountId', v)}
+                label="ตั้งบัญชีที่จะรับเงิน (ไม่บังคับ)"
+              />
+            </div>
+            <p className="text-xs text-amber-600">ตั้งไว้แล้ว เวลากดรับเงินโอนจะเข้าบัญชีนั้นให้เลย</p>
+          </div>
         )}
       </div>
 

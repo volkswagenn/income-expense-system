@@ -1,9 +1,14 @@
 import { useState, useMemo } from 'react'
 import { format } from 'date-fns'
+import { Link } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
+import DatePicker from '../../components/shared/DatePicker'
 import EditableDropdown from '../../components/shared/EditableDropdown'
+import CategorySelect from '../../components/shared/CategorySelect'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import useWalletStore from '../../store/useWalletStore'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -15,114 +20,15 @@ import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 
 const EMPTY = {
-  itemName: '', category: '', amount: '', method: 'cash',
+  itemName: '', category: '', amount: '', method: 'cash', transferAccountId: '', pendingAccountId: '',
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
-
-// ── Category manager popup ────────────────────────────────────────────────────
-function CategoryManagerPopup({ categories, onAdd, onUpdate, onDelete, onClose }) {
-  const [newName, setNewName] = useState('')
-  const [editingId, setEditingId] = useState(null)
-  const [editingName, setEditingName] = useState('')
-  const [deleteCat, setDeleteCat] = useState(null)
-
-  const handleAdd = () => {
-    const name = newName.trim()
-    if (!name) return
-    onAdd(name, 'expense')
-    setNewName('')
-  }
-
-  const saveEdit = (id) => {
-    if (editingName.trim()) onUpdate(id, editingName.trim())
-    setEditingId(null)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b flex items-center justify-between bg-gray-50">
-          <h3 className="font-semibold text-base">🗂️ จัดการหมวดหมู่รายจ่าย</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-4 space-y-3">
-          <div className="flex gap-2">
-            <input
-              className="input text-sm py-1.5 flex-1"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="ชื่อหมวดหมู่ใหม่..."
-              onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            />
-            <button className="btn btn-primary text-sm px-3" onClick={handleAdd}>+ เพิ่ม</button>
-          </div>
-
-          <div className="space-y-1.5 max-h-72 overflow-y-auto">
-            {categories.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-3">ยังไม่มีหมวดหมู่</p>
-            )}
-            {categories.map((cat) => (
-              <div key={cat.id} className="flex items-center gap-2 p-2 rounded-lg bg-gray-50">
-                {editingId === cat.id ? (
-                  <>
-                    <input
-                      className="input text-sm py-1 flex-1"
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveEdit(cat.id)
-                        if (e.key === 'Escape') setEditingId(null)
-                      }}
-                      autoFocus
-                    />
-                    <button className="btn btn-primary text-xs py-1 px-2" onClick={() => saveEdit(cat.id)}>บันทึก</button>
-                    <button className="btn btn-secondary text-xs py-1 px-2" onClick={() => setEditingId(null)}>ยกเลิก</button>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-sm flex-1 text-gray-800">{cat.name}</span>
-                    <button
-                      className="text-xs text-blue-500 hover:text-blue-700 px-1"
-                      onClick={() => { setEditingId(cat.id); setEditingName(cat.name) }}
-                    >แก้ไข</button>
-                    <button
-                      className="text-xs text-red-400 hover:text-red-600 px-1"
-                      onClick={() => setDeleteCat(cat)}
-                    >ลบ</button>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="px-5 py-3 border-t bg-gray-50 flex justify-end">
-          <button className="btn btn-secondary" onClick={onClose}>ปิด</button>
-        </div>
-      </div>
-
-      <ConfirmPopup
-        open={!!deleteCat}
-        title="ลบหมวดหมู่"
-        message={`ลบหมวดหมู่ "${deleteCat?.name}"?`}
-        onConfirm={() => { onDelete(deleteCat.id); setDeleteCat(null) }}
-        onCancel={() => setDeleteCat(null)}
-        confirmLabel="ลบ"
-        danger
-      />
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ExpenseForm() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm, clearDraft, hasDraft] = useFormDraft('expense', EMPTY)
   const [saved, setSaved] = useState(false)
   const [errMsg, setErrMsg] = useState('')
-  const [catPopup, setCatPopup] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [attachments, setAttachments] = useState([])
@@ -131,32 +37,14 @@ export default function ExpenseForm() {
   const { addTransaction } = useTransactionStore()
   const { addPending, addTaxInvoice } = usePendingStore()
   const {
-    addCategory, updateCategory, softDeleteCategory,
     addVendor, updateVendor, softDeleteVendor,
     addQuickItem, updateQuickItem, softDeleteQuickItem,
-    getCategories, getVendors, getQuickItems,
+    getVendors, getQuickItems, getCategoryFilterIds,
   } = useCategoryStore()
   const { addLog } = useLogStore()
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
-
-  const logCategoryAdd = (name, type) => {
-    const item = addCategory(name, type)
-    addLog(buildLogEntry({ activityType: 'CATEGORY_CREATE', description: `สร้างหมวดหมู่รายจ่าย "${name}"`, newValue: item }))
-    return item
-  }
-
-  const logCategoryUpdate = (id, name) => {
-    const oldItem = getCategories('expense').find((item) => item.id === id)
-    updateCategory(id, name)
-    addLog(buildLogEntry({ activityType: 'CATEGORY_UPDATE', description: `แก้ไขหมวดหมู่ "${oldItem?.name ?? id}" → "${name}"`, oldValue: oldItem, newValue: { id, name } }))
-  }
-
-  const logCategoryDelete = (id) => {
-    const oldItem = getCategories('expense').find((item) => item.id === id)
-    softDeleteCategory(id)
-    addLog(buildLogEntry({ activityType: 'CATEGORY_DELETE', description: `ลบหมวดหมู่ "${oldItem?.name ?? id}"`, oldValue: oldItem }))
-  }
 
   const logVendorAdd = (name) => {
     const item = addVendor(name)
@@ -196,6 +84,7 @@ export default function ExpenseForm() {
 
   const execute = () => {
     const amt = Number(form.amount)
+    const accountId = form.method === 'transfer' ? resolveAccount(form.transferAccountId) : null
     let tx = null
 
     if (form.method === 'pending') {
@@ -212,6 +101,8 @@ export default function ExpenseForm() {
         openDate: date,
         note: [form.note, missingDueDateNote].filter(Boolean).join('\n'),
         missingDueDate: !form.dueDate,
+        // ผูกบัญชีไว้ล่วงหน้า เวลากดชำระจะตัดจากบัญชีนี้ทันที
+        ...(form.pendingAccountId ? { defaultTransferAccountId: form.pendingAccountId } : {}),
         ...(attachments.length > 0 ? {
           attachments,
           documentPath: attachments[0].path,
@@ -229,6 +120,7 @@ export default function ExpenseForm() {
       tx = addTransaction({
         date, type: 'expense', amount: amt,
         method: form.method, category: form.category, itemName: form.itemName,
+        ...(accountId ? { transferAccountId: accountId } : {}),
         vendor: form.vendor, receiptNo: form.receiptNo, taxStatus: form.taxStatus,
         dueDate: null, note: form.note,
         ...(attachments.length > 0 ? {
@@ -242,7 +134,7 @@ export default function ExpenseForm() {
         activityType: 'ADD_EXPENSE',
         description: `จ่าย "${form.itemName}" ${amt.toLocaleString()} บาท`,
         newValue: tx,
-      })
+      }, accountId)
     }
 
     if (form.taxStatus === 'waiting') {
@@ -271,15 +163,22 @@ export default function ExpenseForm() {
   const handleSave = () => {
     if (!form.itemName) return setErrMsg('กรุณาใส่รายการจ่าย')
     if (!form.amount || Number(form.amount) <= 0) return setErrMsg('กรุณาใส่จำนวนเงิน')
+    if (form.method === 'transfer' && !resolveAccount(form.transferAccountId)) {
+      return setErrMsg('กรุณาเลือกบัญชีที่จะจ่ายเงินโอน')
+    }
     setErrMsg('')
     if (form.method === 'pending') {
       execute()
     } else {
-      check({ method: form.method, amount: Number(form.amount), onConfirm: execute })
+      check({
+        method: form.method,
+        amount: Number(form.amount),
+        accountId: form.transferAccountId,
+        onConfirm: execute,
+      })
     }
   }
 
-  const expenseCategories = getCategories('expense')
   const vendorList = getVendors()
   const quickList = getQuickItems()
 
@@ -288,11 +187,13 @@ export default function ExpenseForm() {
   const currentMonth = format(new Date(), 'yyyy-MM')
   const matchingRecurring = useMemo(() => {
     if (!form.category) return null
+    // เลือกหมวดหมู่หลัก → เตือนถึงรายการประจำที่อยู่ในหมวดหมู่ย่อยข้างในด้วย
+    const scope = new Set(getCategoryFilterIds(form.category))
     const pendingThisMonth = recurringEntries.filter(
       (e) => e.month === currentMonth && e.status === 'pending'
     )
     for (const entry of pendingThisMonth) {
-      const item = recurringAllItems.find((it) => it.id === entry.recurringId && it.category === form.category)
+      const item = recurringAllItems.find((it) => it.id === entry.recurringId && scope.has(it.category))
       if (item) return item
     }
     return null
@@ -342,21 +243,14 @@ export default function ExpenseForm() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="label mb-0">หมวดหมู่</label>
-              <button
+              <Link
+                to="/categories"
                 className="text-xs text-blue-500 hover:text-blue-700 hover:underline"
-                onClick={() => setCatPopup(true)}
               >
                 🗂️ จัดการหมวดหมู่
-              </button>
+              </Link>
             </div>
-            <select
-              className="input"
-              value={form.category}
-              onChange={(e) => set('category', e.target.value)}
-            >
-              <option value="">เลือกหมวดหมู่...</option>
-              {expenseCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <CategorySelect value={form.category} onChange={(v) => set('category', v)} />
           </div>
         </div>
 
@@ -371,23 +265,43 @@ export default function ExpenseForm() {
             <label className="label">จำนวนเงิน (บาท)</label>
             <input className="input" type="number" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" />
           </div>
-          <div>
-            <label className="label">วิธีชำระเงิน</label>
-            <select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}>
-              <option value="cash">💵 เงินสด</option>
-              <option value="transfer">🏦 เงินโอน</option>
-              <option value="pending">⏳ ค้างชำระ</option>
-            </select>
+          <div className="space-y-2">
+            <div>
+              <label className="label">วิธีชำระเงิน</label>
+              <select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}>
+                <option value="cash">💵 เงินสด</option>
+                <option value="transfer">🏦 เงินโอน</option>
+                <option value="pending">⏳ ค้างชำระ</option>
+              </select>
+            </div>
+            {/* ระบุบัญชีที่จะตัดเงิน */}
+            {form.method === 'transfer' && (
+              <TransferAccountPicker
+                value={form.transferAccountId}
+                onChange={(v) => set('transferAccountId', v)}
+                label="ตัดจากบัญชี"
+              />
+            )}
           </div>
         </div>
 
         {form.method === 'pending' && (
           <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
             <p className="text-xs text-amber-700 font-medium">⏳ รายการค้างชำระ — ยังไม่ตัดเงินจนกว่าจะชำระ</p>
-            <div>
-              <label className="label">วันที่กำหนดชำระ</label>
-              <input className="input" type="date" value={form.dueDate} onChange={(e) => set('dueDate', e.target.value)} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="label">วันที่กำหนดชำระ</label>
+                <DatePicker value={form.dueDate} onChange={(v) => set('dueDate', v)} placeholder="ไม่ระบุ" />
+              </div>
+              <div>
+                <TransferAccountPicker
+                  value={form.pendingAccountId}
+                  onChange={(v) => set('pendingAccountId', v)}
+                  label="ตั้งบัญชีที่จะจ่าย (ไม่บังคับ)"
+                />
+              </div>
             </div>
+            <p className="text-xs text-amber-600">ตั้งบัญชีไว้แล้ว เวลากดชำระจะตัดจากบัญชีนั้นให้เลย</p>
           </div>
         )}
 
@@ -442,7 +356,7 @@ export default function ExpenseForm() {
             <p className="text-xs text-orange-700 font-medium">📋 รอใบกำกับภาษี — ระบบจะสร้างการ์ดติดตามให้อัตโนมัติ</p>
             <div>
               <label className="label">วันที่คาดว่าจะได้รับใบกำกับภาษี</label>
-              <input className="input" type="date" value={form.taxDueDate} onChange={(e) => set('taxDueDate', e.target.value)} />
+              <DatePicker value={form.taxDueDate} onChange={(v) => set('taxDueDate', v)} placeholder="ไม่ระบุ" />
             </div>
           </div>
         )}
@@ -453,16 +367,6 @@ export default function ExpenseForm() {
           {errMsg && <span className="text-red-500 text-sm">{errMsg}</span>}
         </div>
       </div>
-
-      {catPopup && (
-        <CategoryManagerPopup
-          categories={expenseCategories}
-          onAdd={logCategoryAdd}
-          onUpdate={logCategoryUpdate}
-          onDelete={logCategoryDelete}
-          onClose={() => setCatPopup(false)}
-        />
-      )}
 
       <ConfirmPopup
         open={!!warning}

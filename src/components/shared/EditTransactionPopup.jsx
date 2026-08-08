@@ -2,22 +2,24 @@ import { useState } from 'react'
 import useTransactionStore from '../../store/useTransactionStore'
 import useWalletStore from '../../store/useWalletStore'
 import usePendingStore from '../../store/usePendingStore'
-import useCategoryStore from '../../store/useCategoryStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import ConfirmPopup from './ConfirmPopup'
+import CategorySelect from './CategorySelect'
+import TransferAccountPicker from './TransferAccountPicker'
+import DatePicker from './DatePicker'
 
 function walletAffected(method) {
   return method === 'cash' || method === 'transfer'
 }
 
-function applyWalletDelta(ws, method, delta) {
+function applyWalletDelta(ws, method, delta, transferAccountId = null) {
   if (method === 'cash') {
     if (delta > 0) ws.addCash(delta)
     else ws.deductCash(-delta)
   } else if (method === 'transfer') {
-    if (delta > 0) ws.addTransfer(delta)
-    else ws.deductTransfer(-delta)
+    if (delta > 0) ws.addTransfer(delta, transferAccountId)
+    else ws.deductTransfer(-delta, transferAccountId)
   }
 }
 
@@ -29,12 +31,10 @@ export default function EditTransactionPopup({ transaction, onClose }) {
     addTaxInvoice, deleteTaxInvoiceByTxId, syncTaxInvoiceByTxId,
   } = usePendingStore()
   const { addLog } = useLogStore()
-  const { getCategories } = useCategoryStore()
   const [form, setForm] = useState({ ...transaction })
   const [confirm, setConfirm] = useState(false)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
-  const expenseCategories = getCategories('expense')
 
   // Linked records for banner
   const linkedPending = pendingPayments.find(
@@ -49,18 +49,22 @@ export default function EditTransactionPopup({ transaction, onClose }) {
     const oldAmt = Number(transaction.amount)
     const newAmt = Number(form.amount)
 
+    // เงินโอนต้องถอนคืนบัญชีเดิม แล้วลงบัญชีใหม่ที่ผู้ใช้เลือก
+    const oldAccountId = transaction.transferAccountId
+    const newAccountId = ws.resolveTransferAccountId(form.transferAccountId)
+
     // ── Reverse the original wallet effect ──
     if (transaction.type === 'income' && walletAffected(transaction.method)) {
-      applyWalletDelta(ws, transaction.method, -oldAmt)
+      applyWalletDelta(ws, transaction.method, -oldAmt, oldAccountId)
     } else if (transaction.type === 'expense' && transaction.method !== 'pending' && walletAffected(transaction.method)) {
-      applyWalletDelta(ws, transaction.method, +oldAmt)
+      applyWalletDelta(ws, transaction.method, +oldAmt, oldAccountId)
     }
 
     // ── Apply the new wallet effect ──
     if (form.type === 'income' && walletAffected(form.method)) {
-      applyWalletDelta(ws, form.method, +newAmt)
+      applyWalletDelta(ws, form.method, +newAmt, newAccountId)
     } else if (form.type === 'expense' && form.method !== 'pending' && walletAffected(form.method)) {
-      applyWalletDelta(ws, form.method, -newAmt)
+      applyWalletDelta(ws, form.method, -newAmt, newAccountId)
     }
 
     const walletDesc = []
@@ -87,6 +91,7 @@ export default function EditTransactionPopup({ transaction, onClose }) {
       note: form.note,
       detail: form.detail,
       otherIncomeType: form.otherIncomeType,
+      transferAccountId: form.method === 'transfer' ? newAccountId : null,
     })
 
     // ── Pending payment sync (4-case) ──
@@ -202,7 +207,7 @@ export default function EditTransactionPopup({ transaction, onClose }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">วันที่</label>
-                <input type="date" className="input" value={form.date} onChange={(e) => set('date', e.target.value)} />
+                <DatePicker value={form.date} onChange={(v) => set('date', v)} />
               </div>
               <div>
                 <label className="label">จำนวนเงิน (บาท)</label>
@@ -233,14 +238,25 @@ export default function EditTransactionPopup({ transaction, onClose }) {
                     </>
                   )}
                 </select>
+                {form.method === 'transfer' && (
+                  <div className="mt-2">
+                    <TransferAccountPicker
+                      value={form.transferAccountId}
+                      onChange={(v) => set('transferAccountId', v)}
+                      label={form.type === 'income' ? 'เข้าบัญชี' : 'ตัดจากบัญชี'}
+                    />
+                  </div>
+                )}
               </div>
-              {form.type === 'expense' && (
+              {(form.type === 'expense' || form.type === 'income') && (
                 <div>
                   <label className="label">หมวดหมู่</label>
-                  <select className="input" value={form.category ?? ''} onChange={(e) => set('category', e.target.value)}>
-                    <option value="">ไม่ระบุ</option>
-                    {expenseCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <CategorySelect
+                    type={form.type}
+                    value={form.category}
+                    onChange={(v) => set('category', v)}
+                    placeholder="ไม่ระบุ"
+                  />
                 </div>
               )}
               {form.type === 'income' && form.method === 'other' && (
@@ -275,14 +291,14 @@ export default function EditTransactionPopup({ transaction, onClose }) {
                   {form.method === 'pending' && (
                     <div>
                       <label className="label">วันครบกำหนดชำระ</label>
-                      <input type="date" className="input" value={form.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value)} />
+                      <DatePicker value={form.dueDate ?? ''} onChange={(v) => set('dueDate', v)} placeholder="ไม่ระบุ" />
                     </div>
                   )}
                 </div>
                 {form.taxStatus === 'waiting' && (
                   <div>
                     <label className="label">วันที่คาดว่าจะได้รับใบกำกับภาษี</label>
-                    <input type="date" className="input" value={form.taxDueDate ?? ''} onChange={(e) => set('taxDueDate', e.target.value)} />
+                    <DatePicker value={form.taxDueDate ?? ''} onChange={(v) => set('taxDueDate', v)} placeholder="ไม่ระบุ" />
                   </div>
                 )}
               </>

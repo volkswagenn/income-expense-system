@@ -1,59 +1,61 @@
 import { useNavigate } from 'react-router-dom'
 import useWalletStore from '../../store/useWalletStore'
 import usePendingStore from '../../store/usePendingStore'
-import AmountDisplay from '../../components/shared/AmountDisplay'
+import Icon from '../../components/shared/Icon'
 
-function StatCard({ label, amount, sub, onClick, color = 'gray' }) {
-  const colors = {
-    gray: {
-      box: 'bg-gray-50 border-gray-200',
-      amount: 'text-gray-900',
-      sub: 'text-gray-400',
-    },
-    slate: {
-      box: 'bg-slate-50 border-slate-200',
-      amount: 'text-slate-900',
-      sub: 'text-slate-500',
-    },
-    green: {
-      box: 'bg-teal-50 border-teal-200',
-      amount: 'text-teal-700',
-      sub: 'text-teal-500',
-    },
-    blue: {
-      box: 'bg-blue-50 border-blue-200',
-      amount: 'text-blue-700',
-      sub: 'text-blue-500',
-    },
-    indigo: {
-      box: 'bg-indigo-50 border-indigo-200',
-      amount: 'text-indigo-700',
-      sub: 'text-indigo-500',
-    },
-    red: {
-      box: 'bg-red-50 border-red-200',
-      amount: 'text-red-600',
-      sub: 'text-red-400',
-    },
-    amber: {
-      box: 'bg-orange-50 border-orange-200',
-      amount: 'text-orange-700',
-      sub: 'text-orange-500',
-    },
+const fmt = (n) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** การ์ดยอดรวม — พื้นเข้มพร้อมวงกลม lime ตาม mockup */
+function HeroCard({ total, cash, transfer }) {
+  return (
+    <div className="relative overflow-hidden rounded-card bg-ink p-5 sm:col-span-2">
+      <div className="absolute -right-8 -top-11 w-[130px] h-[130px] rounded-full bg-lime opacity-[.13]" />
+      <div className="relative">
+        <p className="text-[12.5px] text-[#9AA0A8]">ยอดเงินคงเหลือรวม</p>
+        <p className="text-[34px] font-semibold text-white tabular-nums tracking-[-0.02em] mt-1">
+          {fmt(total)}
+          <span className="text-[15px] font-normal text-[#9AA0A8] ml-1.5">บาท</span>
+        </p>
+        <div className="flex gap-5 mt-3">
+          <div className="flex items-center gap-1.5">
+            <Icon name="payments" size={16} className="text-lime" />
+            <span className="text-[12px] text-[#9AA0A8]">เงินสด</span>
+            <span className="text-[12.5px] text-white tabular-nums">{fmt(cash)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Icon name="account_balance" size={16} className="text-lime" />
+            <span className="text-[12px] text-[#9AA0A8]">เงินโอน</span>
+            <span className="text-[12.5px] text-white tabular-nums">{fmt(transfer)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StatCard({ icon, label, amount, tone, onClick, sub }) {
+  const tones = {
+    income:   { box: 'bg-income-soft border-transparent', ic: 'text-income',   val: 'text-income' },
+    expense:  { box: 'bg-expense-soft border-transparent', ic: 'text-expense', val: 'text-expense' },
+    pending:  { box: 'bg-pending-soft border-pending-line', ic: 'text-pending', val: 'text-pending' },
+    transfer: { box: 'bg-transfer-soft border-transparent', ic: 'text-transfer', val: 'text-transfer' },
+    plain:    { box: 'bg-white border-hairline', ic: 'text-muted', val: 'text-ink' },
   }
-  const tone = colors[color] ?? colors.gray
+  const t = tones[tone] ?? tones.plain
+
   return (
     <div
-      className={`rounded-xl border p-4 min-h-[106px] flex flex-col justify-between ${tone.box} ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      className={`rounded-card border p-4 ${t.box} ${onClick ? 'cursor-pointer hover:brightness-[0.98] transition' : ''}`}
       onClick={onClick}
     >
-      <p className="text-xs text-gray-500 leading-tight min-h-[16px]">{label}</p>
-      <div className={`mt-2 tabular-nums ${tone.amount}`}>
-        <AmountDisplay amount={amount} size="lg" />
+      <div className="flex items-center gap-1.5">
+        <Icon name={icon} size={17} className={t.ic} />
+        <p className="text-[12.5px] text-muted">{label}</p>
       </div>
-      <p className={`text-xs mt-1 min-h-[16px] leading-tight ${sub ? tone.sub : 'text-transparent'}`}>
-        {sub || 'ไม่มีรายละเอียด'}
+      <p className={`text-[24px] font-semibold tabular-nums tracking-[-0.02em] mt-1.5 ${t.val}`}>
+        {fmt(amount)}
       </p>
+      <p className="text-[11.5px] text-faint mt-0.5 min-h-[16px]">{sub ?? ''}</p>
     </div>
   )
 }
@@ -65,37 +67,25 @@ export default function FinancialStatus() {
   const navigate = useNavigate()
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <StatCard
-          label="ยอดเงินคงเหลือรวม"
-          amount={cash + transfer}
-          sub="เงินสด + เงินโอน"
-          color="slate"
-        />
-        <StatCard
-          label="กระเป๋าเงินสด"
-          amount={cash}
-          color={cash < 0 ? 'red' : 'green'}
-        />
-        <StatCard
-          label="กระเป๋าเงินโอน"
-          amount={transfer}
-          color={transfer < 0 ? 'red' : 'indigo'}
-        />
-        <StatCard
-          label="หนี้ค้างชำระ"
-          amount={pendingTotal}
-          color={pendingTotal > 0 ? 'amber' : 'gray'}
-          onClick={() => navigate('/wallet?tab=payment')}
-          sub={pendingTotal > 0 ? 'คลิกดูรายละเอียด' : undefined}
-        />
-        <StatCard
-          label="รอรับเงิน"
-          amount={pendingIncomeTotal}
-          color={pendingIncomeTotal > 0 ? 'blue' : 'gray'}
-          onClick={() => navigate('/wallet?tab=income')}
-          sub={pendingIncomeTotal > 0 ? 'คลิกดูรายละเอียด' : undefined}
-        />
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      <HeroCard total={cash + transfer} cash={cash} transfer={transfer} />
+
+      <StatCard
+        icon="schedule"
+        label="หนี้ค้างชำระ"
+        amount={pendingTotal}
+        tone={pendingTotal > 0 ? 'pending' : 'plain'}
+        onClick={() => navigate('/pending-tasks?tab=payment')}
+        sub={pendingTotal > 0 ? 'คลิกดูรายละเอียด' : 'ไม่มีรายการค้าง'}
+      />
+      <StatCard
+        icon="savings"
+        label="รอรับเงิน"
+        amount={pendingIncomeTotal}
+        tone={pendingIncomeTotal > 0 ? 'transfer' : 'plain'}
+        onClick={() => navigate('/pending-tasks?tab=income')}
+        sub={pendingIncomeTotal > 0 ? 'คลิกดูรายละเอียด' : 'ไม่มีรายการรอรับ'}
+      />
     </div>
   )
 }

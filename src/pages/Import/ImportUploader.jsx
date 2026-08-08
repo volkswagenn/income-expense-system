@@ -4,7 +4,9 @@ import { th } from 'date-fns/locale'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet } from '../../lib/walletEngine'
+import { addToWallet, deductWallet, reverseTransactionWalletEffect } from '../../lib/walletEngine'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import useWalletStore from '../../store/useWalletStore'
 import { parseImportFile } from '../../lib/importParser'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 
@@ -62,6 +64,8 @@ export default function ImportUploader({ formType, onDone }) {
 
   const { transactions, addTransaction, deleteByDate } = useTransactionStore()
   const { addLog } = useLogStore()
+  const [accountId, setAccountId] = useState('')
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   const datesWithData = parsedRows
     ? new Set(parsedRows.filter((r) => transactions.some((t) => t.date === r.date)).map((r) => r.date))
@@ -102,7 +106,16 @@ export default function ImportUploader({ formType, onDone }) {
   const validRows = parsedRows ? parsedRows.filter((r) => hasValue(r, formType)) : []
 
   const execute = () => {
-    overwriteDates.forEach((date) => deleteByDate(date))
+    // เงินโอนที่นำเข้าทั้งชุดจะลงบัญชีเดียวกันที่เลือกไว้
+    const acct = resolveAccount(accountId)
+    // ถอนผลกระทบต่อกระเป๋าเงินของรายการเดิมก่อนลบ ไม่งั้นยอดเงินจะถูกนับซ้ำ
+    let reversedCount = 0
+    overwriteDates.forEach((date) => {
+      transactions
+        .filter((t) => t.date === date)
+        .forEach((t) => { reverseTransactionWalletEffect(t); reversedCount += 1 })
+      deleteByDate(date)
+    })
 
     let totalIncome = 0, totalExpense = 0
 
@@ -122,9 +135,9 @@ export default function ImportUploader({ formType, onDone }) {
           addToWallet('cash', cash, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินสด ${cash.toLocaleString()} บาท (${r.date})` })
           totalIncome += cash
         }
-        if (transfer > 0) {
-          addTransaction({ date: r.date, type: 'income', amount: transfer, method: 'transfer', itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' })
-          addToWallet('transfer', transfer, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})` })
+        if (transfer > 0 && acct) {
+          addTransaction({ date: r.date, type: 'income', amount: transfer, method: 'transfer', transferAccountId: acct, itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' })
+          addToWallet('transfer', transfer, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})` }, acct)
           totalIncome += transfer
         }
       } else if (formType === 'summary') {
@@ -137,6 +150,7 @@ export default function ImportUploader({ formType, onDone }) {
         }
         if (expense > 0) {
           addTransaction({ date: r.date, type: 'expense', amount: expense, method: 'cash', category: '', itemName: 'รายจ่าย (นำเข้าข้อมูล)', note: r.note ?? '' })
+          deductWallet('cash', expense, { activityType: 'IMPORT_DATA', description: `นำเข้ารายจ่าย ${expense.toLocaleString()} บาท (${r.date})` })
           totalExpense += expense
         }
       }
@@ -146,7 +160,7 @@ export default function ImportUploader({ formType, onDone }) {
     addLog(buildLogEntry({
       activityType: 'IMPORT_DATA',
       description: `นำเข้าข้อมูลจากไฟล์ ${validRows.length} แถว รายรับ ${totalIncome.toLocaleString()} บาท${totalExpense > 0 ? ` รายจ่าย ${totalExpense.toLocaleString()} บาท` : ''}${overwriteNote}`,
-      newValue: { count: validRows.length, income: totalIncome, expense: totalExpense, overwritten: overwriteDates.size },
+      newValue: { count: validRows.length, income: totalIncome, expense: totalExpense, overwritten: overwriteDates.size, reversedTransactions: reversedCount },
     }))
 
     const msg = `นำเข้าสำเร็จ ${validRows.length} แถว${overwriteNote}`
@@ -192,6 +206,13 @@ export default function ImportUploader({ formType, onDone }) {
 
           {parsedRows && (
             <>
+              {/* บัญชีปลายทางของยอดเงินโอนที่นำเข้า */}
+              {formType === 'bytype' && validRows.some((r) => Number(r.transfer) > 0) && (
+                <div className="max-w-sm">
+                  <TransferAccountPicker value={accountId} onChange={setAccountId} label="เงินโอนเข้าบัญชี" />
+                </div>
+              )}
+
               {/* Overwrite notice */}
               {datesWithData.size > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">

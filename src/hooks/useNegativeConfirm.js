@@ -4,8 +4,9 @@ import useWalletStore from '../store/useWalletStore'
 export function useNegativeConfirm() {
   const [warning, setWarning] = useState(null) // { message, onConfirm } | null
 
-  const check = ({ method, amount, subWalletId, onConfirm }) => {
-    const { cash, transfer, subWallets } = useWalletStore.getState()
+  const check = ({ method, amount, subWalletId, accountId, onConfirm }) => {
+    const store = useWalletStore.getState()
+    const { cash, subWallets, transferAccounts } = store
     let newBalance = null
     let label = null
 
@@ -13,8 +14,13 @@ export function useNegativeConfirm() {
       newBalance = cash - amount
       label = 'กระเป๋าเงินสด'
     } else if (method === 'transfer') {
-      newBalance = transfer - amount
-      label = 'กระเป๋าเงินโอน'
+      // เช็คยอดของบัญชีที่ถูกเลือก ไม่ใช่ยอดรวมทุกบัญชี
+      const id = store.resolveTransferAccountId(accountId)
+      const account = transferAccounts.find((a) => a.id === id)
+      if (account) {
+        newBalance = account.balance - amount
+        label = `บัญชี "${account.name}"`
+      }
     } else if (subWalletId) {
       const sub = subWallets.find((w) => w.id === subWalletId)
       if (sub) {

@@ -1,3 +1,11 @@
+/* ฟอนต์แบบ local — แอปทำงาน offline จึงใช้ Google Fonts CDN ไม่ได้ */
+@import '@fontsource/anuphan/300.css';
+@import '@fontsource/anuphan/400.css';
+@import '@fontsource/anuphan/500.css';
+@import '@fontsource/anuphan/600.css';
+@import '@fontsource/anuphan/700.css';
+@import 'material-symbols/rounded.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,58 +13,95 @@
 @layer base {
   * { box-sizing: border-box; }
   body {
-    font-family: 'Sarabun', sans-serif;
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-paper text-ink;
+    font-family: 'Anuphan', 'Sarabun', system-ui, sans-serif;
+    font-size: 13.5px;
+    -webkit-font-smoothing: antialiased;
   }
+  /* ตัวเลขต้องกว้างเท่ากันเสมอ ยอดเงินจะได้ไม่ขยับตอนอัปเดต */
+  .tabular-nums, table, input[type='number'] { font-variant-numeric: tabular-nums; }
 }
 
 @layer components {
+  /* ── ไอคอน Material Symbols Rounded ─────────────────────────────── */
+  .mi {
+    font-family: 'Material Symbols Rounded';
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    user-select: none;
+  }
+  .mif { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+  /* ── ปุ่ม ─────────────────────────────────────────────────────────── */
   .btn {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors;
+    @apply inline-flex items-center justify-center gap-1.5 px-4 rounded-ctl font-medium transition-colors;
+    height: 38px;
+    font-size: 13.5px;
   }
-  .btn-primary {
-    @apply bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800;
-  }
-  .btn-secondary {
-    @apply bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300;
-  }
-  .btn-success {
-    @apply bg-emerald-600 text-white hover:bg-emerald-700;
-  }
-  .btn-danger {
-    @apply bg-red-500 text-white hover:bg-red-600;
-  }
-  .btn-warning {
-    @apply bg-amber-500 text-white hover:bg-amber-600;
-  }
-  .btn-ghost {
-    @apply text-gray-600 hover:bg-gray-100 hover:text-gray-900;
-  }
+  .btn-primary   { @apply bg-ink text-white hover:bg-black active:bg-black; }
+  .btn-accent    { @apply bg-lime text-ink font-semibold hover:bg-lime-dark; }
+  .btn-secondary { @apply bg-white text-ink border border-hairline hover:bg-[#F6F5F1]; }
+  .btn-success   { @apply bg-income text-white hover:brightness-110; }
+  .btn-danger    { @apply bg-expense text-white hover:brightness-110; }
+  .btn-warning   { @apply bg-pending text-white hover:brightness-110; }
+  .btn-ghost     { @apply text-muted hover:bg-[#F1F0EC] hover:text-ink; }
+
+  /* ── ฟอร์ม ────────────────────────────────────────────────────────── */
   .input {
-    @apply w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition;
+    @apply w-full px-3.5 bg-white border border-hairline rounded-ctl text-ink transition
+           focus:outline-none focus:border-ink;
+    height: 44px;
+    font-size: 13.5px;
   }
-  .label {
-    @apply block text-sm font-medium text-gray-700 mb-1;
+  select.input { @apply pr-9; }
+  textarea.input { height: auto; @apply py-2.5; }
+  .label { @apply block font-medium text-muted mb-1.5; font-size: 12.5px; }
+
+  /* ── การ์ด ───────────────────────────────────────────────────────── */
+  .card { @apply bg-white rounded-card border border-hairline; }
+  .card-inner { @apply bg-white rounded-panel border border-hairline; }
+  .section-title { @apply font-semibold text-ink mb-3; font-size: 14.5px; }
+
+  /* ── ยอดเงิน ─────────────────────────────────────────────────────── */
+  .amount-lg {
+    @apply font-semibold tabular-nums;
+    font-size: 30px;
+    letter-spacing: -0.02em;
   }
-  .card {
-    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
-  }
-  .section-title {
-    @apply text-base font-semibold text-gray-800 mb-3;
-  }
-  .amount-positive { @apply text-emerald-600 font-semibold; }
-  .amount-negative { @apply text-red-600 font-semibold; }
+  .amount-positive { @apply text-income font-semibold tabular-nums; }
+  .amount-negative { @apply text-expense font-semibold tabular-nums; }
+
+  /* ── ชิป / ป้าย ──────────────────────────────────────────────────── */
   .badge {
-    @apply inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-bold rounded-full;
+    @apply inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold rounded-full;
   }
-  .badge-red { @apply bg-red-500 text-white; }
-  .badge-amber { @apply bg-amber-500 text-white; }
-  .badge-blue { @apply bg-blue-500 text-white; }
-  .badge-green { @apply bg-emerald-500 text-white; }
+  .badge-red   { @apply bg-expense text-white; }
+  .badge-amber { @apply bg-pending text-white; }
+  .badge-blue  { @apply bg-transfer text-white; }
+  .badge-green { @apply bg-income text-white; }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border;
+  }
+  .chip-income    { @apply bg-income-soft text-income border-transparent; }
+  .chip-expense   { @apply bg-expense-soft text-expense border-transparent; }
+  .chip-pending   { @apply bg-pending-soft text-pending border-pending-line; }
+  .chip-transfer  { @apply bg-transfer-soft text-transfer border-transparent; }
+  .chip-recurring { @apply bg-recurring-soft text-recurring border-transparent; }
 }
 
-/* custom scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { @apply bg-transparent; }
-::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
-::-webkit-scrollbar-thumb:hover { @apply bg-gray-400; }
+/* แถบเลื่อน */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D6D3CA; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #BEBAB0; }

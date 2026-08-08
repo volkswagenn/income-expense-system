@@ -4,24 +4,34 @@ import { th } from 'date-fns/locale'
 import useWalletStore from '../../store/useWalletStore'
 import { returnLoan } from '../../lib/walletEngine'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
 
 function ReturnModal({ loan, onClose }) {
-  const [method, setMethod] = useState('cash')
+  const [method, setMethod] = useState(loan.method === 'transfer' ? 'transfer' : 'cash')
+  // คืนเข้าบัญชีเดิมที่ยืมออกมาเป็นค่าเริ่มต้น
+  const [accountId, setAccountId] = useState(loan.transferAccountId ?? '')
   const [regularConfirm, setRegularConfirm] = useState(false)
   const { warning, check, proceed, cancel } = useNegativeConfirm()
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+
+  const needsAccount = method === 'transfer'
+  const resolvedAccountId = needsAccount ? resolveAccount(accountId) : null
 
   const doReturn = () => {
-    returnLoan(loan.id, method)
+    returnLoan(loan.id, method, resolvedAccountId)
     setRegularConfirm(false)
     onClose()
   }
 
   const handleReturnClick = () => {
-    const { cash, transfer } = useWalletStore.getState()
-    const balance = method === 'cash' ? cash : transfer
+    if (needsAccount && !resolvedAccountId) return
+    const store = useWalletStore.getState()
+    const balance = method === 'cash'
+      ? store.cash
+      : (store.transferAccounts.find((a) => a.id === resolvedAccountId)?.balance ?? 0)
     if (balance - loan.amount < 0) {
-      check({ method, amount: loan.amount, onConfirm: doReturn })
+      check({ method, amount: loan.amount, accountId: resolvedAccountId, onConfirm: doReturn })
     } else {
       setRegularConfirm(true)
     }
@@ -47,9 +57,16 @@ function ReturnModal({ loan, onClose }) {
                 <option value="transfer">🏦 กระเป๋าเงินโอน</option>
               </select>
             </div>
+            {needsAccount && (
+              <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+            )}
             <div className="flex gap-2 justify-end">
               <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-              <button className="btn bg-purple-600 text-white hover:bg-purple-700" onClick={handleReturnClick}>
+              <button
+                className="btn bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                onClick={handleReturnClick}
+                disabled={needsAccount && !resolvedAccountId}
+              >
                 คืนเงิน
               </button>
             </div>

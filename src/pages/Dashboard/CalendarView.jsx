@@ -15,6 +15,19 @@ const THAI_MONTHS_FULL = [
 ]
 const DAY_HEADERS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส']
 
+// สิ่งที่เลือกแสดง/ซ่อนบนปฏิทินได้
+const LAYERS = [
+  { key: 'income',        label: 'รายรับ',        dot: 'bg-emerald-500' },
+  { key: 'expense',       label: 'รายจ่าย',       dot: 'bg-red-500' },
+  { key: 'pending',       label: 'ค้างชำระ',      dot: 'bg-amber-500' },
+  { key: 'pendingIncome', label: 'รอรับเงิน',     dot: 'bg-blue-500' },
+  { key: 'tax',           label: 'ใบกำกับภาษี',   dot: 'bg-orange-500' },
+  { key: 'recurring',     label: 'รายการประจำ',   dot: 'bg-purple-500' },
+  { key: 'note',          label: 'โน้ต',          dot: 'bg-gray-400' },
+]
+
+const ALL_ON = Object.fromEntries(LAYERS.map((l) => [l.key, true]))
+
 function buildCells(year, month) {
   const firstDow = new Date(year, month, 1).getDay()
   const gridStart = new Date(year, month, 1 - firstDow)
@@ -36,6 +49,10 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
     startDate ? new Date(startDate + 'T00:00:00').getMonth() : today.getMonth()
   )
   const [noteDate, setNoteDate] = useState(null)
+  const [show, setShow] = useState(ALL_ON)
+
+  const toggleLayer = (key) => setShow((s) => ({ ...s, [key]: !s[key] }))
+  const activeCount = LAYERS.filter((l) => show[l.key]).length
 
   const { transactions } = useTransactionStore()
   const { pendingPayments, taxInvoices, pendingIncomes } = usePendingStore()
@@ -52,11 +69,11 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
     setViewMonth(d.getMonth())
   }, [startDate])
 
-  // Generate recurring entries when calendar month changes
+  // Generate recurring entries when calendar month changes (หรือเมื่อรายการประจำเปลี่ยน)
   useEffect(() => {
     const month = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`
     generateEntries(month)
-  }, [viewYear, viewMonth])
+  }, [viewYear, viewMonth, recurringItems])
 
   const cells = useMemo(() => buildCells(viewYear, viewMonth), [viewYear, viewMonth])
 
@@ -171,6 +188,31 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
         <button className="btn btn-secondary text-sm" onClick={goToToday}>วันนี้</button>
       </div>
 
+      {/* ตัวกรองสิ่งที่แสดงบนปฏิทิน */}
+      <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5 border-b border-gray-100 bg-gray-50/60">
+        <span className="text-xs text-gray-400 mr-0.5">แสดง:</span>
+        {LAYERS.map((l) => (
+          <button
+            key={l.key}
+            onClick={() => toggleLayer(l.key)}
+            className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border transition-colors ${
+              show[l.key]
+                ? 'bg-white border-gray-300 text-gray-700 shadow-sm'
+                : 'bg-transparent border-gray-200 text-gray-300 line-through'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${show[l.key] ? l.dot : 'bg-gray-300'}`} />
+            {l.label}
+          </button>
+        ))}
+        <button
+          className="text-xs text-blue-500 hover:text-blue-700 ml-auto"
+          onClick={() => setShow(activeCount === LAYERS.length ? {} : ALL_ON)}
+        >
+          {activeCount === LAYERS.length ? 'ซ่อนทั้งหมด' : 'แสดงทั้งหมด'}
+        </button>
+      </div>
+
       {/* Day-of-week headers */}
       <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
         {DAY_HEADERS.map((d) => (
@@ -182,6 +224,10 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
       <div className="grid grid-cols-7 gap-0.5 p-1">
         {cells.map((date) => {
           const dateStr = format(date, 'yyyy-MM-dd')
+          // ซ่อนตามตัวกรองด้านบน — ส่งเฉพาะชั้นข้อมูลที่เปิดอยู่
+          const dayTx = (txByDate[dateStr] || []).filter(
+            (t) => (t.type === 'income' ? show.income : show.expense)
+          )
           return (
             <CalendarDayCell
               key={dateStr}
@@ -191,12 +237,12 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
               isToday={dateStr === todayStr}
               isHighlighted={isHighlighted(dateStr)}
               isInCustomRange={isInCustomRange(dateStr)}
-              transactions={txByDate[dateStr] || []}
-              pendingItems={pendingByDate[dateStr] || []}
-              pendingIncomeItems={pendingIncomeByDate[dateStr] || []}
-              taxItems={taxByDate[dateStr] || []}
-              recurringItems={recurringByDate[dateStr] || []}
-              note={notes[dateStr] || ''}
+              transactions={dayTx}
+              pendingItems={show.pending ? (pendingByDate[dateStr] || []) : []}
+              pendingIncomeItems={show.pendingIncome ? (pendingIncomeByDate[dateStr] || []) : []}
+              taxItems={show.tax ? (taxByDate[dateStr] || []) : []}
+              recurringItems={show.recurring ? (recurringByDate[dateStr] || []) : []}
+              note={show.note ? (notes[dateStr] || '') : ''}
               onContextMenu={setNoteDate}
               onClick={() => navigate('/transactions')}
               getCategoryName={getCategoryName}

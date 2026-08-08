@@ -118,16 +118,18 @@ export default function PendingTracker() {
   const pendingIncomeReceived = (pendingIncomes ?? []).filter((p) => p.status === 'received')
 
   const requestPay = (item, method) => {
-    if (willGoNegative(method, item.amount)) setNegConfirm({ item, method })
+    // เช็คยอดติดลบกับบัญชีที่ผูกไว้ตอนตั้งค่า
+    if (willGoNegative(method, item.amount, item.defaultTransferAccountId)) setNegConfirm({ item, method })
     else setPayConfirm({ item, method })
   }
 
-  const executePay = (item, method, paidDate) => {
+  const executePay = (item, method, paidDate, accountId = null) => {
     const tx = addTransaction({
       date: paidDate,
       type: 'expense',
       amount: item.amount,
       method,
+      ...(accountId ? { transferAccountId: accountId } : {}),
       category: item.category,
       itemName: item.itemName || item.description || 'ชำระค้างจ่าย',
       vendor: item.vendor,
@@ -140,22 +142,23 @@ export default function PendingTracker() {
     deductWallet(method, item.amount, {
       activityType: 'PAY_PENDING',
       description: `ชำระค้างชำระ "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${paidDate}`,
-      newValue: { pendingId: item.id, transactionId: tx.id, paidDate },
-    })
-    payPending(item.id, method, tx.id)
+      newValue: { pendingId: item.id, transactionId: tx.id, paidDate, transferAccountId: accountId },
+    }, accountId)
+    payPending(item.id, method, tx.id, accountId)
     if (item.transactionId && item.transactionId !== tx.id) {
-      updateTransaction(item.transactionId, { method })
+      updateTransaction(item.transactionId, { method, transferAccountId: accountId })
     }
     setPayConfirm(null)
     setNegConfirm(null)
   }
 
-  const executeReceive = (item, method, receivedDate) => {
+  const executeReceive = (item, method, receivedDate, accountId = null) => {
     const tx = addTransaction({
       date: receivedDate,
       type: 'income',
       amount: item.amount,
       method,
+      ...(accountId ? { transferAccountId: accountId } : {}),
       itemName: item.description ?? 'รายรับรอรับ',
       note: item.note ?? '',
       ...(item.otherIncomeType ? { otherIncomeType: item.otherIncomeType } : {}),
@@ -163,9 +166,9 @@ export default function PendingTracker() {
     addToWallet(method, item.amount, {
       activityType: 'RECEIVE_INCOME',
       description: `รับเงิน "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${receivedDate}`,
-      newValue: { pendingIncomeId: item.id, transactionId: tx.id, receivedDate },
-    })
-    receivePendingIncome(item.id, method, tx.id)
+      newValue: { pendingIncomeId: item.id, transactionId: tx.id, receivedDate, transferAccountId: accountId },
+    }, accountId)
+    receivePendingIncome(item.id, method, tx.id, accountId)
     setReceiveConfirm(null)
   }
 
@@ -354,7 +357,7 @@ export default function PendingTracker() {
         open={!!payConfirm}
         item={payConfirm?.item}
         method={payConfirm?.method}
-        onConfirm={(paidDate) => executePay(payConfirm.item, payConfirm.method, paidDate)}
+        onConfirm={(paidDate, accountId) => executePay(payConfirm.item, payConfirm.method, paidDate, accountId)}
         onCancel={() => setPayConfirm(null)}
       />
       <PayPendingDatePopup
@@ -362,7 +365,7 @@ export default function PendingTracker() {
         item={negConfirm?.item}
         method={negConfirm?.method}
         danger
-        onConfirm={(paidDate) => executePay(negConfirm.item, negConfirm.method, paidDate)}
+        onConfirm={(paidDate, accountId) => executePay(negConfirm.item, negConfirm.method, paidDate, accountId)}
         onCancel={() => setNegConfirm(null)}
       />
 
@@ -371,7 +374,7 @@ export default function PendingTracker() {
         open={!!receiveConfirm}
         item={receiveConfirm?.item}
         method={receiveConfirm?.method}
-        onConfirm={(receivedDate) => executeReceive(receiveConfirm.item, receiveConfirm.method, receivedDate)}
+        onConfirm={(receivedDate, accountId) => executeReceive(receiveConfirm.item, receiveConfirm.method, receivedDate, accountId)}
         onCancel={() => setReceiveConfirm(null)}
       />
 

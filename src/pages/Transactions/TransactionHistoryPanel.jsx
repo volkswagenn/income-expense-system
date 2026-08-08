@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useTransactionStore from '../../store/useTransactionStore'
-import useCategoryStore from '../../store/useCategoryStore'
+import useCategoryStore, { buildCategoryTree, resolveCategoryFilterIds } from '../../store/useCategoryStore'
 import usePendingStore from '../../store/usePendingStore'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
 import EditTransactionPopup from '../../components/shared/EditTransactionPopup'
@@ -15,8 +15,8 @@ function methodLabel(m) {
 }
 
 function TxCard({ tx, onEdit }) {
-  const { getCategoryName } = useCategoryStore()
-  const { pendingPayments } = usePendingStore()
+  const { getCategoryPath } = useCategoryStore()
+  const { pendingPayments, taxInvoices, pendingIncomes } = usePendingStore()
   const [expanded, setExpanded] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -28,7 +28,7 @@ function TxCard({ tx, onEdit }) {
   const attachment = getPrimaryAttachment(tx)
   const attachments = getAttachments(tx)
   const hasDetails = tx.vendor || tx.receiptNo || tx.detail || tx.dueDate || tx.taxStatus !== 'none' || tx.otherIncomeType || attachment
-  const cancelEffects = describeTxCancelEffects(tx, pendingPayments)
+  const cancelEffects = describeTxCancelEffects(tx, { pendingPayments, taxInvoices, pendingIncomes })
 
   const handleDelete = () => {
     cancelTransaction(tx)
@@ -59,7 +59,7 @@ function TxCard({ tx, onEdit }) {
               </span>
               {tx.category && (
                 <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
-                  {getCategoryName(tx.category)}
+                  {getCategoryPath(tx.category)}
                 </span>
               )}
               {tx.note && <span className="text-xs text-gray-400 truncate">· 📝 {tx.note}</span>}
@@ -115,7 +115,7 @@ function TxCard({ tx, onEdit }) {
 
 export default function TransactionHistoryPanel() {
   const { transactions } = useTransactionStore()
-  const { getCategories } = useCategoryStore()
+  const categories = useCategoryStore((s) => s.categories)
   const [filter, setFilter] = useState('month')
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
@@ -125,12 +125,23 @@ export default function TransactionHistoryPanel() {
   const [editing, setEditing] = useState(null)
   const PAGE_SIZE = 30
 
-  const expenseCats = getCategories('expense')
+  // หมวดหมู่แยกตามประเภท จึงกรองด้วยหมวดหมู่ได้เมื่อเลือกรายรับหรือรายจ่ายแล้วเท่านั้น
+  const catTree = useMemo(
+    () => (typeFilter === 'all' ? [] : buildCategoryTree(categories, typeFilter)),
+    [categories, typeFilter]
+  )
+
+  // เลือกหมวดหมู่หลัก → รวมรายการของหมวดหมู่ย่อยข้างในทั้งหมด
+  // เลือกหมวดหมู่ย่อย → เฉพาะรายการของหมวดหมู่ย่อยนั้น ไม่รวมของหมวดหมู่หลักหรือย่อยอื่น
+  const catScope = useMemo(
+    () => (catFilter ? new Set(resolveCategoryFilterIds(categories, catFilter)) : null),
+    [categories, catFilter]
+  )
 
   const filtered = transactions.filter((t) => {
     if (t.date < startDate || t.date > endDate) return false
     if (typeFilter !== 'all' && t.type !== typeFilter) return false
-    if (catFilter && t.category !== catFilter) return false
+    if (catScope && !catScope.has(t.category)) return false
     return true
   }).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
 
@@ -161,19 +172,30 @@ export default function TransactionHistoryPanel() {
           <button
             key={o.key}
             className={`btn text-sm ${typeFilter === o.key ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => { setTypeFilter(o.key); resetPage() }}
+            onClick={() => { setTypeFilter(o.key); setCatFilter(''); resetPage() }}
           >
             {o.label}
           </button>
         ))}
-        {(typeFilter === 'expense' || typeFilter === 'all') && expenseCats.length > 0 && (
+        {catTree.length > 0 && (
           <select
-            className="input text-sm py-1.5 w-44"
+            className={`input text-sm py-1.5 w-56 ${typeFilter === 'income' ? 'border-emerald-200' : 'border-red-200'}`}
             value={catFilter}
             onChange={(e) => { setCatFilter(e.target.value); resetPage() }}
           >
             <option value="">หมวดหมู่ทั้งหมด</option>
-            {expenseCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {catTree.map((main) =>
+              main.children.length > 0 ? (
+                <optgroup key={main.id} label={main.name}>
+                  <option value={main.id}>{main.name} (รวมย่อยทั้งหมด)</option>
+                  {main.children.map((sub) => (
+                    <option key={sub.id} value={sub.id}>{'  '}└ {sub.name}</option>
+                  ))}
+                </optgroup>
+              ) : (
+                <option key={main.id} value={main.id}>{main.name}</option>
+              )
+            )}
           </select>
         )}
         <span className="text-sm text-gray-500 ml-auto">{filtered.length} รายการ</span>

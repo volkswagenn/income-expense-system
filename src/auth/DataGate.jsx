@@ -1,0 +1,68 @@
+import { useCallback, useEffect, useState } from 'react'
+import Icon from '../components/shared/Icon'
+import { hydrateStores } from '../store/hydrate'
+
+/**
+ * โหลดข้อมูลของร้านให้ครบก่อนเข้าแอป
+ *
+ * ระบบนี้ออนไลน์อย่างเดียวตามที่ออกแบบไว้ — ถ้าโหลดไม่สำเร็จต้องบอกตรงๆ
+ * ไม่ใช่ปล่อยให้เข้าไปแล้วเห็นหน้าจอว่างเปล่าซึ่งแยกไม่ออกว่าข้อมูลหายจริงหรือแค่โหลดไม่มา
+ */
+export default function DataGate({ children }) {
+  const [status, setStatus] = useState('loading') // loading | ready | error
+  const [error, setError] = useState(null)
+  const [attempt, setAttempt] = useState(0)
+
+  const retry = useCallback(() => {
+    setStatus('loading')
+    setError(null)
+    setAttempt((n) => n + 1)
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    hydrateStores()
+      .then(() => alive && setStatus('ready'))
+      .catch((err) => {
+        if (!alive) return
+        setError(err.message)
+        setStatus('error')
+      })
+    return () => {
+      alive = false
+    }
+  }, [attempt])
+
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-9 h-9 mx-auto mb-3 rounded-full border-[3px] border-hairline border-t-ink animate-spin" />
+          <p className="text-label text-muted">กำลังโหลดข้อมูลร้าน…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'error') {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center px-5 py-10">
+        <div className="w-full max-w-[400px] text-center">
+          <div className="w-14 h-14 rounded-panel bg-expense-soft text-expense flex items-center justify-center mx-auto mb-4">
+            <Icon name="cloud_off" size={28} />
+          </div>
+          <h1 className="text-[17px] font-semibold text-ink">โหลดข้อมูลไม่สำเร็จ</h1>
+          <p className="text-body text-muted mt-2 leading-relaxed">{error}</p>
+          <button
+            onClick={retry}
+            className="mt-6 w-full h-11 rounded-ctl bg-ink text-white text-body font-semibold hover:bg-[#24282F]"
+          >
+            ลองใหม่
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return children
+}

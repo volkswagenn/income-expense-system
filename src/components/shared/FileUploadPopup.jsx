@@ -1,10 +1,7 @@
 import { useState, useRef } from 'react'
-import { format } from 'date-fns'
 import useLogStore from '../../store/useLogStore'
-import useShopStore from '../../store/useShopStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { getDatedAttachmentFolder } from '../../lib/attachmentPaths'
-import { getShopFolderName } from '../../lib/shopIdentity'
 
 /**
  * props:
@@ -18,9 +15,6 @@ import { getShopFolderName } from '../../lib/shopIdentity'
  */
 export default function FileUploadPopup({ title, description, createdAt, filenamePrefix, folderBase, onConfirm, onCancel }) {
   const { addLog } = useLogStore()
-  const activeShopId = useShopStore((s) => s.activeShopId)
-  const shops = useShopStore((s) => s.shops)
-  const activeShop = shops.find((shop) => shop.id === activeShopId)
   const [files, setFiles] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -35,12 +29,14 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
     const yy = String(base.getFullYear()).slice(-2)
     const HH = String(now.getHours()).padStart(2, '0')
     const MM = String(now.getMinutes()).padStart(2, '0')
+    // ใส่วินาทีด้วย ไม่งั้นสองรายการคนละบิลที่วันที่เดียวกันและอัปโหลดในนาทีเดียวกันจะได้ชื่อซ้ำ
+    const SS = String(now.getSeconds()).padStart(2, '0')
     const suffix = files.length > 1 ? `_${String(index + 1).padStart(2, '0')}` : ''
-    return `${filenamePrefix}_${dd}${mm}${yy}_${HH}${MM}${suffix}.${ext}`
+    return `${filenamePrefix}_${dd}${mm}${yy}_${HH}${MM}${SS}${suffix}.${ext}`
   }
 
   const buildFolder = () => {
-    return getDatedAttachmentFolder(getShopFolderName(activeShop, shops), folderBase, createdAt)
+    return getDatedAttachmentFolder(folderBase, createdAt)
   }
 
   const filenames = files.map((file, index) => buildFilename(file, index))
@@ -63,22 +59,14 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
         const buffer = await file.arrayBuffer()
         const filePath = `${folder}/${filename}`
 
-        if (window.electronAPI?.saveFile) {
-          const result = await window.electronAPI.saveFile(new Uint8Array(buffer), filePath)
-          if (!result.success) throw new Error(result.error ?? 'บันทึกไฟล์ไม่สำเร็จ')
-          if (!result.verified) throw new Error('บันทึกแล้วแต่ไม่พบไฟล์ในระบบ กรุณาลองใหม่')
-          savedPaths.push(result.savedPath)
-        } else {
-          // Browser dev fallback
-          const blob = new Blob([buffer])
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = filename
-          a.click()
-          URL.revokeObjectURL(url)
-          savedPaths.push(filePath)
-        }
+        const blob = new Blob([buffer])
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(url)
+        savedPaths.push(filePath)
       }
       onConfirm(savedPaths)
     } catch (err) {
@@ -87,7 +75,7 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
         description: `อัปโหลดไฟล์ไม่สำเร็จ: ${title}`,
         status: 'error',
         errorMessage: err.message,
-        newValue: { filenames: files.map((file) => file.name), folder, filenamePrefix, shopId: activeShopId },
+        newValue: { filenames: files.map((file) => file.name), folder, filenamePrefix },
       }))
       setError(err.message)
       setSaving(false)
@@ -145,7 +133,7 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
                 ))}
               </div>
               <p className="text-blue-600 text-xs">
-                โฟลเดอร์: [โฟลเดอร์ App]/{folder}/
+                ไฟล์จะถูกดาวน์โหลดลงเครื่อง และบันทึกชื่อไว้ในระบบเป็น {folder}/
               </p>
             </div>
           )}

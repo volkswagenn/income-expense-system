@@ -5,6 +5,8 @@ import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { addToWallet } from '../../lib/walletEngine'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import useWalletStore from '../../store/useWalletStore'
 import { saveAppFile } from '../../lib/fileHelper'
 import { parseImportFile } from '../../lib/importParser'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
@@ -29,6 +31,8 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
 
   const { addTransaction } = useTransactionStore()
   const { addLog } = useLogStore()
+  const [accountId, setAccountId] = useState('')
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
   const update = (i, key, val) =>
     setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, [key]: val } : r))
@@ -83,6 +87,8 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
   }
 
   const execute = () => {
+    // เงินโอนที่นำเข้าทั้งชุดจะลงบัญชีเดียวกันที่เลือกไว้ด้านบน
+    const acct = resolveAccount(accountId)
     validRows.forEach((r) => {
       const cash = Number(r.cash || 0)
       const transfer = Number(r.transfer || 0)
@@ -91,9 +97,9 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
         addTransaction({ date: r.date, type: 'income', amount: cash, method: 'cash', itemName: 'รายรับเงินสด (นำเข้าข้อมูล)', note: r.note ?? '' })
         addToWallet('cash', cash, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินสด ${cash.toLocaleString()} บาท (${r.date})` })
       }
-      if (transfer > 0) {
-        addTransaction({ date: r.date, type: 'income', amount: transfer, method: 'transfer', itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' })
-        addToWallet('transfer', transfer, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})` })
+      if (transfer > 0 && acct) {
+        addTransaction({ date: r.date, type: 'income', amount: transfer, method: 'transfer', transferAccountId: acct, itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' })
+        addToWallet('transfer', transfer, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})` }, acct)
       }
       if (other > 0) {
         addTransaction({ date: r.date, type: 'income', amount: other, method: 'other', itemName: 'รายรับอื่นๆ (นำเข้าข้อมูล)', note: r.note ?? '' })
@@ -113,6 +119,13 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
       {done && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">
           ✓ นำเข้าข้อมูลสำเร็จ {validRows.length} วัน รวม {grandTotal.toLocaleString()} บาท (สด {grandCash.toLocaleString()} / โอน {grandTransfer.toLocaleString()}{grandOther > 0 ? ` / อื่นๆ ${grandOther.toLocaleString()}` : ''})
+        </div>
+      )}
+
+      {/* บัญชีปลายทางของยอดเงินโอนทั้งชุด */}
+      {grandTransfer > 0 && (
+        <div className="max-w-sm">
+          <TransferAccountPicker value={accountId} onChange={setAccountId} label="เงินโอนเข้าบัญชี" />
         </div>
       )}
 

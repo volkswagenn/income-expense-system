@@ -1,16 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import PendingPaymentSummary from '../Wallet/PendingPaymentSummary'
 import PendingIncomeSummary from '../Wallet/PendingIncomeSummary'
 import SectionCard from '../../components/shared/SectionCard'
 import usePendingStore from '../../store/usePendingStore'
-import useAuthStore from '../../store/useAuthStore'
-import useRoleStore from '../../store/useRoleStore'
-import { checkPermission, P } from '../../lib/permissions'
 
 const TABS = [
-  { key: 'payment', label: 'ค้างจ่าย', permission: P.VIEW_PENDING_PAYMENT },
-  { key: 'income', label: 'รอรับเงิน', permission: P.VIEW_PENDING_INCOME },
+  { key: 'payment', label: 'ค้างจ่าย' },
+  { key: 'income', label: 'รอรับเงิน' },
 ]
+
+const TAB_KEYS = TABS.map((t) => t.key)
 
 function TabBadge({ count, tone = 'red' }) {
   if (!count) return null
@@ -19,26 +18,19 @@ function TabBadge({ count, tone = 'red' }) {
 }
 
 export default function PendingTasksPage() {
-  const [tab, setTab] = useState('payment')
-  const role = useAuthStore((s) => s.currentUser?.role)
-  const roles = useRoleStore((s) => s.roles)
+  // แท็บผูกกับ URL โดยตรง — การ์ดหน้า Dashboard ลิงก์มาที่ ?tab=payment / ?tab=income
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const tab = TAB_KEYS.includes(tabParam) ? tabParam : 'payment'
+
+  const selectTab = (key) =>
+    setSearchParams(key === 'payment' ? {} : { tab: key }, { replace: true })
   const pendingCount = usePendingStore((s) =>
     s.pendingPayments.reduce((n, p) => n + (p.status === 'pending' ? 1 : 0), 0)
   )
   const incomeCount = usePendingStore((s) =>
     s.pendingIncomes.reduce((n, p) => n + (p.status === 'pending' ? 1 : 0), 0)
   )
-
-  const visibleTabs = useMemo(
-    () => TABS.filter((item) => checkPermission(roles, role, item.permission)),
-    [roles, role]
-  )
-
-  useEffect(() => {
-    if (visibleTabs.length > 0 && !visibleTabs.some((item) => item.key === tab)) {
-      setTab(visibleTabs[0].key)
-    }
-  }, [visibleTabs, tab])
 
   return (
     <div className="space-y-5">
@@ -48,11 +40,11 @@ export default function PendingTasksPage() {
       </div>
 
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit flex-wrap">
-        {visibleTabs.map((t) => (
+        {TABS.map((t) => (
           <button
             key={t.key}
             className={`btn text-sm px-4 py-2 rounded-lg transition-all ${tab === t.key ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setTab(t.key)}
+            onClick={() => selectTab(t.key)}
           >
             {t.label}
             {t.key === 'payment' && <TabBadge count={pendingCount} />}
@@ -61,25 +53,15 @@ export default function PendingTasksPage() {
         ))}
       </div>
 
-      {visibleTabs.length === 0 ? (
-        <SectionCard>
-          <div className="text-center py-10 text-gray-400 text-sm">
-            บัญชีนี้ยังไม่มีสิทธิ์สำหรับดูรายการรอดำเนินการ
-          </div>
+      {tab === 'payment' && (
+        <SectionCard title="รายการค้างจ่าย">
+          <PendingPaymentSummary fullPage />
         </SectionCard>
-      ) : (
-        <>
-          {tab === 'payment' && (
-            <SectionCard title="รายการค้างจ่าย">
-              <PendingPaymentSummary fullPage />
-            </SectionCard>
-          )}
-          {tab === 'income' && (
-            <SectionCard title="รายการรอรับเงิน">
-              <PendingIncomeSummary fullPage />
-            </SectionCard>
-          )}
-        </>
+      )}
+      {tab === 'income' && (
+        <SectionCard title="รายการรอรับเงิน">
+          <PendingIncomeSummary fullPage />
+        </SectionCard>
       )}
     </div>
   )

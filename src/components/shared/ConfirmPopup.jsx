@@ -8,7 +8,7 @@ export default function ConfirmPopup({ open, title, message, onConfirm, onCancel
             {title}
           </h3>
         </div>
-        <div className="px-6 py-4 text-sm text-gray-700 leading-relaxed">{message}</div>
+        <div className="px-6 py-4 text-sm text-gray-700 leading-relaxed whitespace-pre-line">{message}</div>
         <div className="px-6 pb-5 flex gap-3 justify-end">
           <button className="btn btn-secondary" onClick={onCancel}>{cancelLabel}</button>
           <button className={`btn ${danger ? 'btn-danger' : 'btn-warning'}`} onClick={onConfirm}>

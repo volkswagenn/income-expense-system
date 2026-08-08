@@ -1,10 +1,10 @@
 const VARIANTS = {
-  pending: 'bg-amber-100 text-amber-700 border-amber-200',
-  paid: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  waiting: 'bg-orange-100 text-orange-700 border-orange-200',
-  received: 'bg-blue-100 text-blue-700 border-blue-200',
-  success: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  failed: 'bg-red-100 text-red-700 border-red-200',
+  pending:  'bg-pending-soft text-pending border-pending-line',
+  paid:     'bg-income-soft text-income border-transparent',
+  waiting:  'bg-pending-soft text-pending border-pending-line',
+  received: 'bg-transfer-soft text-transfer border-transparent',
+  success:  'bg-income-soft text-income border-transparent',
+  failed:   'bg-expense-soft text-expense border-transparent',
 }
 
 const LABELS = {
@@ -17,9 +17,9 @@ const LABELS = {
 }
 
 export default function StatusBadge({ status, label }) {
-  const cls = VARIANTS[status] ?? 'bg-gray-100 text-gray-600 border-gray-200'
+  const cls = VARIANTS[status] ?? 'bg-[#F1F0EC] text-muted border-hairline'
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${cls}`}>
       {label ?? LABELS[status] ?? status}
     </span>
   )

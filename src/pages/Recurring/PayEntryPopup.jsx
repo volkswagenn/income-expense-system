@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import DatePicker from '../../components/shared/DatePicker'
+import useWalletStore from '../../store/useWalletStore'
 
 const METHOD_OPTIONS = [
   { value: 'cash', label: '💵 เงินสด' },
@@ -10,13 +13,18 @@ const METHOD_OPTIONS = [
 export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, onClose }) {
   const isVariable = item.amountType === 'variable'
   const [amount, setAmount] = useState(entry.amount > 0 ? String(entry.amount) : '')
-  const [method, setMethod] = useState('')
+  // ใช้วิธีจ่าย/บัญชีที่ตั้งไว้ตอนสร้างรายการประจำเป็นค่าเริ่มต้น
+  const [method, setMethod] = useState(item.defaultMethod ?? '')
+  const [accountId, setAccountId] = useState(item.defaultTransferAccountId ?? '')
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [error, setError] = useState('')
 
+  const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+
   const parsedAmount = parseFloat(amount)
   const canSaveAmount = !isNaN(parsedAmount) && parsedAmount > 0
-  const canSubmit = method && paidDate && canSaveAmount
+  const needsAccount = method === 'transfer'
+  const canSubmit = method && paidDate && canSaveAmount && (!needsAccount || !!resolveAccount(accountId))
 
   const handleSaveAmount = () => {
     if (!canSaveAmount) { setError('กรุณากรอกยอดเงินที่ถูกต้อง'); return }
@@ -27,7 +35,8 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
     if (!method) { setError('กรุณาเลือกวิธีชำระ'); return }
     if (!parsedAmount || parsedAmount <= 0) { setError('กรุณากรอกยอดเงินที่ถูกต้อง'); return }
     if (!paidDate) { setError('กรุณาเลือกวันที่จ่ายเงิน'); return }
-    onConfirm(parsedAmount, method, paidDate)
+    if (needsAccount && !resolveAccount(accountId)) { setError('กรุณาเลือกบัญชีที่จะตัดเงิน'); return }
+    onConfirm(parsedAmount, method, paidDate, needsAccount ? resolveAccount(accountId) : null)
   }
 
   return (
@@ -82,19 +91,22 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
                 </button>
               ))}
             </div>
+            {item.defaultMethod && (
+              <p className="text-xs text-gray-400 mt-1">เลือกให้อัตโนมัติจากที่ตั้งไว้ในรายการประจำ</p>
+            )}
           </div>
+
+          {/* บัญชีที่จะตัดเงิน */}
+          {needsAccount && (
+            <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+          )}
 
           {/* Paid date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               วันที่จ่ายเงิน <span className="text-red-500">*</span>
             </label>
-            <input
-              type="date"
-              className="input w-full"
-              value={paidDate}
-              onChange={(e) => { setPaidDate(e.target.value); setError('') }}
-            />
+            <DatePicker value={paidDate} onChange={(v) => { setPaidDate(v); setError('') }} />
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
