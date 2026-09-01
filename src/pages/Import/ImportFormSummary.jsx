@@ -2,10 +2,9 @@ import { useState, useRef } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { processSummaryImport } from '../../lib/importProcessor'
-import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet, deductWallet } from '../../lib/walletEngine'
+import { importEntry, runImport } from '../../lib/importRunner'
 import { saveAppFile } from '../../lib/fileHelper'
 import { parseImportFile } from '../../lib/importParser'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
@@ -26,9 +25,10 @@ export default function ImportFormSummary({ rows, setRows, startDate, endDate, s
   const [done, setDone] = useState(false)
   const [dlStatus, setDlStatus] = useState(null)
   const [ulMsg, setUlMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const fileRef = useRef(null)
 
-  const { addTransaction } = useTransactionStore()
   const { addLog } = useLogStore()
 
   const update = (i, key, val) =>
@@ -80,33 +80,45 @@ export default function ImportFormSummary({ rows, setRows, startDate, endDate, s
     }
   }
 
-  const execute = () => {
+  const execute = async () => {
+    if (saving) return
     const txs = processSummaryImport(rows)
-    txs.forEach((tx) => {
-      addTransaction(tx)
-      if (tx.type === 'income') {
-        addToWallet('cash', tx.amount, {
-          activityType: 'IMPORT_DATA',
-          description: `นำเข้ารายรับ ${tx.amount.toLocaleString()} บาท (${tx.date})`,
-        })
-      } else if (tx.type === 'expense') {
-        deductWallet('cash', tx.amount, {
-          activityType: 'IMPORT_DATA',
-          description: `นำเข้ารายจ่าย ${tx.amount.toLocaleString()} บาท (${tx.date})`,
-        })
-      }
-    })
+    setConfirm(false)
+    setSaving(true)
+    setSaveError('')
+    try {
+      await runImport(txs.map((tx) => importEntry(
+        tx,
+        `นำเข้า${tx.type === 'income' ? 'รายรับ' : 'รายจ่าย'} ${tx.amount.toLocaleString()} บาท (${tx.date})`
+      )))
+    } catch (err) {
+      setSaveError(err.message)
+      setSaving(false)
+      return
+    }
+    setSaving(false)
     addLog(buildLogEntry({
       activityType: 'IMPORT_DATA',
       description: `นำเข้าข้อมูลรายรับ-รายจ่ายรวม ${validRows.length} วัน รายรับ ${grandIncome.toLocaleString()} บาท รายจ่าย ${grandExpense.toLocaleString()} บาท`,
       newValue: { count: validRows.length, income: grandIncome, expense: grandExpense },
     }))
-    setConfirm(false)
     setDone(true)
   }
 
   return (
     <div className="space-y-4">
+      {saving && (
+        <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+          กำลังบันทึกลงเซิร์ฟเวอร์… อย่าปิดหน้านี้
+        </p>
+      )}
+
+      {saveError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          {saveError}
+        </p>
+      )}
+
       {done && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">
           ✓ นำเข้าข้อมูลสำเร็จ {validRows.length} วัน รายรับ {grandIncome.toLocaleString()} / รายจ่าย {grandExpense.toLocaleString()} บาท
@@ -193,7 +205,7 @@ export default function ImportFormSummary({ rows, setRows, startDate, endDate, s
 
       <button
         className="btn btn-primary"
-        disabled={validRows.length === 0}
+        disabled={validRows.length === 0 || saving}
         onClick={() => setConfirm(true)}
       >
         📥 นำเข้าข้อมูล ({validRows.length} วัน — รายรับ {grandIncome.toLocaleString()} / รายจ่าย {grandExpense.toLocaleString()} บาท)

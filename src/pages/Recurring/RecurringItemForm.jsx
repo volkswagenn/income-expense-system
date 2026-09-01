@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import CategorySelect from '../../components/shared/CategorySelect'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import NumpadPopup from '../../components/shared/NumpadPopup'
+import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL } from '../../lib/recurringSchedule'
 
 const EMPTY = {
   name: '',
@@ -8,6 +10,8 @@ const EMPTY = {
   amountType: 'fixed',
   fixedAmount: '',
   billingDay: '',
+  frequency: 'monthly',       // monthly | yearly
+  billingMonth: '',            // ใช้เฉพาะรายปี (1–12)
   vendor: '',
   note: '',
   enabled: true,
@@ -24,10 +28,17 @@ const METHOD_OPTIONS = [
 export default function RecurringItemForm({ item, onSave, onClose }) {
   const [form, setForm] = useState(
     item
-      ? { ...item, fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '' }
+      ? {
+          ...EMPTY,
+          ...item,
+          fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '',
+          frequency: item.frequency ?? 'monthly',
+          billingMonth: item.billingMonth ?? '',
+        }
       : { ...EMPTY }
   )
   const [error, setError] = useState({})
+  const [showNumpad, setShowNumpad] = useState(false)
 
   const set = (field, value) => setForm((f) => ({ ...f, [field]: value }))
 
@@ -37,6 +48,8 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
     if (!form.category) e.category = 'เลือกหมวดหมู่'
     if (!form.billingDay || isNaN(Number(form.billingDay)) || Number(form.billingDay) < 1 || Number(form.billingDay) > 31)
       e.billingDay = 'วันที่ 1–31'
+    if (form.frequency === 'yearly' && !(Number(form.billingMonth) >= 1 && Number(form.billingMonth) <= 12))
+      e.billingMonth = 'เลือกเดือนที่เรียกเก็บ'
     if (form.amountType === 'fixed') {
       const amt = parseFloat(form.fixedAmount)
       if (!form.fixedAmount || isNaN(amt) || amt <= 0) e.fixedAmount = 'กรอกยอดเงิน'
@@ -51,6 +64,8 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
       ...form,
       name: form.name.trim(),
       billingDay: Number(form.billingDay),
+      frequency: form.frequency === 'yearly' ? 'yearly' : 'monthly',
+      billingMonth: form.frequency === 'yearly' ? Number(form.billingMonth) : null,
       fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : undefined,
       vendor: form.vendor.trim() || undefined,
       note: form.note.trim() || undefined,
@@ -137,22 +152,69 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
             </div>
           )}
 
-          {/* Billing day */}
+          {/* รอบเรียกเก็บ: รายเดือน / รายปี */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">เรียกเก็บทุกวันที่ *</label>
-            <div className="flex items-center gap-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">รอบเรียกเก็บ</label>
+            <div className="grid grid-cols-2 gap-2">
+              {FREQUENCY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => set('frequency', opt.value)}
+                  className={`p-3 rounded-xl border-2 text-left transition-all ${
+                    form.frequency === opt.value
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <p className="text-sm font-medium text-gray-800">{opt.label}</p>
+                  <p className="text-xs text-gray-500">{opt.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Billing month (รายปี) + day */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              {form.frequency === 'yearly' ? 'เรียกเก็บทุกปี วันที่ *' : 'เรียกเก็บทุกวันที่ *'}
+            </label>
+            <div className="flex items-center gap-2 flex-wrap">
               <input
                 type="number"
                 min="1"
                 max="31"
-                className="input w-24 text-center"
+                className="input w-20 text-center"
                 value={form.billingDay}
                 onChange={(e) => set('billingDay', e.target.value)}
                 placeholder="1–31"
               />
-              <span className="text-sm text-gray-500">ของทุกเดือน</span>
+              <button
+                type="button"
+                onClick={() => setShowNumpad(true)}
+                className="btn btn-secondary px-3"
+                title="เปิดแป้นตัวเลข"
+                aria-label="เปิดแป้นตัวเลข"
+              >
+                🔢
+              </button>
+              {form.frequency === 'yearly' ? (
+                <select
+                  className="input flex-1 min-w-[140px]"
+                  value={form.billingMonth}
+                  onChange={(e) => set('billingMonth', e.target.value)}
+                >
+                  <option value="">— เลือกเดือน —</option>
+                  {THAI_MONTHS_FULL.map((m, i) => (
+                    <option key={i + 1} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-sm text-gray-500">ของทุกเดือน</span>
+              )}
             </div>
             {error.billingDay && <p className="text-xs text-red-500 mt-1">{error.billingDay}</p>}
+            {error.billingMonth && <p className="text-xs text-red-500 mt-1">{error.billingMonth}</p>}
             <p className="text-xs text-gray-400 mt-1">ถ้าเดือนนั้นสั้นกว่า จะใช้วันสุดท้ายแทน</p>
           </div>
 
@@ -220,10 +282,13 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
               <p className="text-xs text-gray-400">ปิดเพื่อหยุดพักโดยไม่ลบ</p>
             </div>
             <button
+              type="button"
+              role="switch"
+              aria-checked={form.enabled}
               onClick={() => set('enabled', !form.enabled)}
-              className={`relative w-11 h-6 rounded-full transition-colors ${form.enabled ? 'bg-blue-500' : 'bg-gray-300'}`}
+              className={`relative w-11 h-6 flex-shrink-0 rounded-full transition-colors ${form.enabled ? 'bg-blue-500' : 'bg-gray-300'}`}
             >
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
           </div>
         </div>
@@ -235,6 +300,19 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
           </button>
         </div>
       </div>
+
+      {showNumpad && (
+        <NumpadPopup
+          title="วันที่เรียกเก็บ"
+          hint="1–31"
+          initialValue={form.billingDay}
+          min={1}
+          max={31}
+          maxLength={2}
+          onSave={(n) => { set('billingDay', String(n)); setError((er) => ({ ...er, billingDay: undefined })); setShowNumpad(false) }}
+          onClose={() => setShowNumpad(false)}
+        />
+      )}
     </div>
   )
 }

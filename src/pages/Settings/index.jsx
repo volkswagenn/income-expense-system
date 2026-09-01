@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import useAppStore from '../../store/useAppStore'
 import { BackupFull } from '../Backup/BackupFull'
-import BackupSettings from '../Backup/BackupSettings'
 import LogDownloader from '../Backup/LogDownloader'
-import DemoDataPanel from './DemoDataPanel'
 import Icon from '../../components/shared/Icon'
 import AccountPanel from '../../auth/AccountPanel'
 
@@ -12,7 +10,6 @@ const TABS = [
   { key: 'backup', icon: 'backup', label: 'ข้อมูลและสำรอง' },
   { key: 'notify', icon: 'notifications', label: 'การแจ้งเตือน' },
   { key: 'logs', icon: 'history', label: 'ประวัติ' },
-  { key: 'demo', icon: 'science', label: 'ข้อมูลทดสอบ' },
   { key: 'about', icon: 'info', label: 'เกี่ยวกับแอพ' },
 ]
 
@@ -22,12 +19,28 @@ export default function SettingsPage() {
   const [tab, setTab] = useState('account')
   const [notifyDays, setNotifyDays] = useState(String(notifyDaysBefore ?? 3))
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  const saveNotifyDays = () => {
+  /**
+   * ค่านี้เก็บที่ shop_settings และแก้ได้เฉพาะเจ้าของร้าน (RLS บังคับ)
+   * ต้องรอผลจริงก่อนขึ้นว่าบันทึกแล้ว — ของเดิมยิงทิ้งไว้เฉยๆ ทำให้ editor
+   * ที่ไม่มีสิทธิ์เห็นข้อความ "บันทึกแล้ว" ทั้งที่เซิร์ฟเวอร์ปฏิเสธไปเรียบร้อย
+   */
+  const saveNotifyDays = async () => {
+    if (saving) return
     const value = Math.max(0, Number(notifyDays) || 0)
-    setNotifyDaysBefore(value)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    setSaving(true)
+    setSaveError('')
+    try {
+      await setNotifyDaysBefore(value)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err) {
+      setSaveError(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -59,10 +72,6 @@ export default function SettingsPage() {
                 <h2 className="section-title">สำรองข้อมูลทั้งหมด</h2>
                 <BackupFull />
               </div>
-              <div className="border-t pt-6">
-                <h2 className="section-title">สำรองเฉพาะการตั้งค่า</h2>
-                <BackupSettings />
-              </div>
             </div>
           )}
 
@@ -85,13 +94,18 @@ export default function SettingsPage() {
                     onChange={(e) => setNotifyDays(e.target.value)}
                   />
                 </div>
-                <button className="btn btn-primary" onClick={saveNotifyDays}>
-                  บันทึกการตั้งค่า
+                <button className="btn btn-primary" onClick={saveNotifyDays} disabled={saving}>
+                  {saving ? 'กำลังบันทึก…' : 'บันทึกการตั้งค่า'}
                 </button>
               </div>
               {saved && (
                 <p className="text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2">
                   ✅ บันทึกการตั้งค่าแล้ว
+                </p>
+              )}
+              {saveError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2">
+                  บันทึกไม่สำเร็จ — {saveError}
                 </p>
               )}
             </div>
@@ -103,13 +117,6 @@ export default function SettingsPage() {
                 <h2 className="section-title">ประวัติการใช้งาน</h2>
               </div>
               <LogDownloader />
-            </div>
-          )}
-
-          {tab === 'demo' && (
-            <div className="space-y-4">
-              <h2 className="section-title">ข้อมูลทดสอบระบบ</h2>
-              <DemoDataPanel />
             </div>
           )}
 

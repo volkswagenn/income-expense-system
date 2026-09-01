@@ -4,7 +4,7 @@ import { th } from 'date-fns/locale'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet, deductWallet, reverseTransactionWalletEffect } from '../../lib/walletEngine'
+import { clearDates, importEntry, runImport } from '../../lib/importRunner'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import useWalletStore from '../../store/useWalletStore'
 import { parseImportFile } from '../../lib/importParser'
@@ -60,9 +60,10 @@ export default function ImportUploader({ formType, onDone }) {
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [doneMsg, setDoneMsg] = useState('')
+  const [saving, setSaving] = useState(false)
   const inputRef = useRef(null)
 
-  const { transactions, addTransaction, deleteByDate } = useTransactionStore()
+  const { transactions } = useTransactionStore()
   const { addLog } = useLogStore()
   const [accountId, setAccountId] = useState('')
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -105,69 +106,88 @@ export default function ImportUploader({ formType, onDone }) {
 
   const validRows = parsedRows ? parsedRows.filter((r) => hasValue(r, formType)) : []
 
-  const execute = () => {
+  /**
+   * นำเข้าทั้งชุด — ต้องทำตามลำดับจริงๆ ไม่ใช่ยิงทิ้งไว้แบบเดิม
+   *
+   * ของเดิมวน forEach แล้วเรียก deleteByDate กับ addTransaction โดยไม่ await
+   * ทั้งคู่เป็น async ผลคือคำสั่งลบวันเดิมยังทำงานค้างอยู่ตอนที่รายการใหม่ถูกส่งไปแล้ว
+   * รายการที่เพิ่งนำเข้าจึงถูกคำสั่งลบที่ตามมาทีหลังลบทิ้งไปด้วยแบบสุ่ม
+   * (ขึ้นกับว่าคำสั่งไหนถึงเซิร์ฟเวอร์ก่อน) แล้วหน้าจอก็ยังขึ้นว่าสำเร็จ
+   */
+  const execute = async () => {
+    if (saving) return
     // เงินโอนที่นำเข้าทั้งชุดจะลงบัญชีเดียวกันที่เลือกไว้
     const acct = resolveAccount(accountId)
-    // ถอนผลกระทบต่อกระเป๋าเงินของรายการเดิมก่อนลบ ไม่งั้นยอดเงินจะถูกนับซ้ำ
-    let reversedCount = 0
-    overwriteDates.forEach((date) => {
-      transactions
-        .filter((t) => t.date === date)
-        .forEach((t) => { reverseTransactionWalletEffect(t); reversedCount += 1 })
-      deleteByDate(date)
-    })
 
+    const entries = []
     let totalIncome = 0, totalExpense = 0
 
     validRows.forEach((r) => {
       if (formType === 'daily') {
         const amt = Number(r.total) || 0
         if (amt > 0) {
-          addTransaction({ date: r.date, type: 'income', amount: amt, method: 'cash', itemName: 'รายรับรวม (นำเข้าข้อมูล)', note: r.note ?? '' })
-          addToWallet('cash', amt, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับรวม ${amt.toLocaleString()} บาท (${r.date})` })
+          entries.push(importEntry(
+            { date: r.date, type: 'income', amount: amt, method: 'cash', itemName: 'รายรับรวม (นำเข้าข้อมูล)', note: r.note ?? '' },
+            `นำเข้ารายรับรวม ${amt.toLocaleString()} บาท (${r.date})`))
           totalIncome += amt
         }
       } else if (formType === 'bytype') {
         const cash = Number(r.cash) || 0
         const transfer = Number(r.transfer) || 0
         if (cash > 0) {
-          addTransaction({ date: r.date, type: 'income', amount: cash, method: 'cash', itemName: 'รายรับเงินสด (นำเข้าข้อมูล)', note: r.note ?? '' })
-          addToWallet('cash', cash, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินสด ${cash.toLocaleString()} บาท (${r.date})` })
+          entries.push(importEntry(
+            { date: r.date, type: 'income', amount: cash, method: 'cash', itemName: 'รายรับเงินสด (นำเข้าข้อมูล)', note: r.note ?? '' },
+            `นำเข้ารายรับเงินสด ${cash.toLocaleString()} บาท (${r.date})`))
           totalIncome += cash
         }
         if (transfer > 0 && acct) {
-          addTransaction({ date: r.date, type: 'income', amount: transfer, method: 'transfer', transferAccountId: acct, itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' })
-          addToWallet('transfer', transfer, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})` }, acct)
+          entries.push(importEntry(
+            { date: r.date, type: 'income', amount: transfer, method: 'transfer', transferAccountId: acct, itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' },
+            `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})`))
           totalIncome += transfer
         }
       } else if (formType === 'summary') {
         const income = Number(r.income) || 0
         const expense = Number(r.expense) || 0
         if (income > 0) {
-          addTransaction({ date: r.date, type: 'income', amount: income, method: 'cash', itemName: 'รายรับ (นำเข้าข้อมูล)', note: r.note ?? '' })
-          addToWallet('cash', income, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับ ${income.toLocaleString()} บาท (${r.date})` })
+          entries.push(importEntry(
+            { date: r.date, type: 'income', amount: income, method: 'cash', itemName: 'รายรับ (นำเข้าข้อมูล)', note: r.note ?? '' },
+            `นำเข้ารายรับ ${income.toLocaleString()} บาท (${r.date})`))
           totalIncome += income
         }
         if (expense > 0) {
-          addTransaction({ date: r.date, type: 'expense', amount: expense, method: 'cash', category: '', itemName: 'รายจ่าย (นำเข้าข้อมูล)', note: r.note ?? '' })
-          deductWallet('cash', expense, { activityType: 'IMPORT_DATA', description: `นำเข้ารายจ่าย ${expense.toLocaleString()} บาท (${r.date})` })
+          entries.push(importEntry(
+            { date: r.date, type: 'expense', amount: expense, method: 'cash', itemName: 'รายจ่าย (นำเข้าข้อมูล)', note: r.note ?? '' },
+            `นำเข้ารายจ่าย ${expense.toLocaleString()} บาท (${r.date})`))
           totalExpense += expense
         }
       }
     })
 
-    const overwriteNote = overwriteDates.size > 0 ? ` (เขียนทับข้อมูล ${overwriteDates.size} วัน)` : ''
-    addLog(buildLogEntry({
-      activityType: 'IMPORT_DATA',
-      description: `นำเข้าข้อมูลจากไฟล์ ${validRows.length} แถว รายรับ ${totalIncome.toLocaleString()} บาท${totalExpense > 0 ? ` รายจ่าย ${totalExpense.toLocaleString()} บาท` : ''}${overwriteNote}`,
-      newValue: { count: validRows.length, income: totalIncome, expense: totalExpense, overwritten: overwriteDates.size, reversedTransactions: reversedCount },
-    }))
-
-    const msg = `นำเข้าสำเร็จ ${validRows.length} แถว${overwriteNote}`
     setConfirm(false)
-    setDone(true)
-    setDoneMsg(msg)
-    if (onDone) onDone()
+    setSaving(true)
+    setError('')
+    try {
+      // ลบให้จบก่อน แล้วค่อยเขียนของใหม่ — ห้ามสลับหรือทำพร้อมกัน
+      // clearDates คืนเงินของรายการเก่าให้ถูกกระเป๋าผ่าน RPC เดียวกับตอนยกเลิกรายการ
+      const removed = overwriteDates.size > 0 ? await clearDates([...overwriteDates]) : 0
+      await runImport(entries)
+
+      const overwriteNote = overwriteDates.size > 0 ? ` (เขียนทับข้อมูล ${overwriteDates.size} วัน)` : ''
+      addLog(buildLogEntry({
+        activityType: 'IMPORT_DATA',
+        description: `นำเข้าข้อมูลจากไฟล์ ${validRows.length} แถว รายรับ ${totalIncome.toLocaleString()} บาท${totalExpense > 0 ? ` รายจ่าย ${totalExpense.toLocaleString()} บาท` : ''}${overwriteNote}`,
+        newValue: { count: validRows.length, income: totalIncome, expense: totalExpense, overwritten: overwriteDates.size, removedTransactions: removed },
+      }))
+
+      setDone(true)
+      setDoneMsg(`นำเข้าสำเร็จ ${entries.length} รายการ${overwriteNote}`)
+      if (onDone) onDone()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const confirmMsg = [

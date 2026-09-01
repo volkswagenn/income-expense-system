@@ -1,4 +1,5 @@
 import useCategoryStore from '../../store/useCategoryStore'
+import { isYearly, scheduleLabel } from '../../lib/recurringSchedule'
 
 const METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', pending: 'ค้างชำระ' }
 
@@ -33,6 +34,9 @@ export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSk
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-sm font-semibold text-gray-800">{item.name}</span>
             <StatusBadge status={entry.status} />
+            {isYearly(item) && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">📆 รายปี</span>
+            )}
             {catDeleted && (
               <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600">หมวดหมู่ถูกลบ</span>
             )}
@@ -40,7 +44,7 @@ export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSk
 
           <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
             <span>📁 {catName}</span>
-            <span>📅 ทุกวันที่ {item.billingDay}</span>
+            <span>📅 {scheduleLabel(item, { short: true })}</span>
             {item.vendor && <span>🏢 {item.vendor}</span>}
           </div>
 

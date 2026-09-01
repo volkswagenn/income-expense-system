@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { eachDayOfInterval, parseISO, format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { exportChartAsPng } from '../../lib/chartExporter'

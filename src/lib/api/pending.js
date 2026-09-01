@@ -5,10 +5,8 @@ import { fromRow, fromRows, toRow } from './_map'
 /**
  * ค้างชำระ / รอรับเงิน / รอใบกำกับภาษี
  *
- * หมายเหตุสำคัญ: การ "กดจ่าย" และ "กดรับเงิน" เป็นงานหลายสเต็ป
- * (สร้าง transaction + ปิดรายการค้าง + ขยับยอด + เขียน log) ซึ่งต้องจบในครั้งเดียว
- * ตอนนี้ยังไม่มี RPC รองรับ → เฟส 4 จะเพิ่ม pay_pending_payment / receive_pending_income
- * แล้วย้ายมาเรียกที่นี่ ไฟล์นี้จึงมีแต่ CRUD ล้วนไปก่อน
+ * การ "กดจ่าย" และ "กดรับเงิน" เป็นงานหลายสเต็ป (สร้าง transaction + ปิดรายการค้าง
+ * + ขยับยอด + เขียน log) จึงต้องผ่าน RPC ที่ทำให้จบในครั้งเดียว ห้ามยิงทีละคำสั่งจาก client
  */
 
 // ── ค้างชำระ ────────────────────────────────────────────────────────────────
@@ -35,6 +33,18 @@ export async function updatePendingPayment(id, changes) {
 
 export async function deletePendingPayment(id) {
   await unwrap(supabase.from('pending_payments').delete().eq('id', id))
+}
+
+/**
+ * จ่ายรายการค้างชำระ — สร้าง transaction + ตัดเงิน + ปิดรายการค้าง
+ * + อัปเดตรายการประจำที่ผูกอยู่ ทั้งหมดในคำสั่งเดียว คืน transaction ที่สร้าง
+ */
+export async function payPendingPayment(id, { method, accountId = null, date = null, log = null }) {
+  return fromRow('transactions', await unwrap(
+    supabase.rpc('pay_pending_payment', {
+      p_pending: id, p_method: method, p_account: accountId, p_date: date, p_log: log,
+    })
+  ))
 }
 
 export async function deletePendingPaymentByTxId(transactionId) {
@@ -67,6 +77,15 @@ export async function updatePendingIncome(id, changes) {
 
 export async function deletePendingIncome(id) {
   await unwrap(supabase.from('pending_incomes').delete().eq('id', id))
+}
+
+/** รับเงินที่รออยู่ — สร้าง transaction + เพิ่มเงินเข้ากระเป๋า + ปิดรายการรอ ในคำสั่งเดียว */
+export async function receivePendingIncome(id, { method, accountId = null, date = null, log = null }) {
+  return fromRow('transactions', await unwrap(
+    supabase.rpc('receive_pending_income', {
+      p_pending: id, p_method: method, p_account: accountId, p_date: date, p_log: log,
+    })
+  ))
 }
 
 // ── รอใบกำกับภาษี ───────────────────────────────────────────────────────────

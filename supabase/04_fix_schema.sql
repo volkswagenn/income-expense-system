@@ -75,9 +75,14 @@ alter table tax_invoices add column if not exists document_label text;
 alter table recurring_items add column if not exists default_method text;
 alter table recurring_items add column if not exists default_transfer_account_id uuid
   references transfer_accounts(id) on delete set null;
+-- รอบเรียกเก็บ: monthly = ทุกเดือน / yearly = ปีละครั้งในเดือน billing_month
+alter table recurring_items add column if not exists frequency text not null default 'monthly'
+  check (frequency in ('monthly', 'yearly'));
+alter table recurring_items add column if not exists billing_month int
+  check (billing_month between 1 and 12);
 
 -- ── ตรวจผล ─────────────────────────────────────────────────────────────────
--- ควรได้ 28 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
+-- ควรได้ 30 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
 select table_name, column_name
   from information_schema.columns
  where table_schema = 'public'
@@ -86,6 +91,6 @@ select table_name, column_name
   or (table_name = 'pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'pending_incomes'  and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'tax_invoices'     and column_name in ('due_date','document_path','document_type','document_label'))
-  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id'))
+  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id','frequency','billing_month'))
    )
  order by table_name, column_name;

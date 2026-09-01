@@ -9,10 +9,18 @@ import { buildLogEntry } from '../../lib/logBuilder'
 import { deductWallet, addToWallet, willGoNegative } from '../../lib/walletEngine'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import RecurringEntryCard from './RecurringEntryCard'
+import RecurringEntryRow from './RecurringEntryRow'
+import { isYearly, scheduleLabel } from '../../lib/recurringSchedule'
 import RecurringItemForm from './RecurringItemForm'
 import PayEntryPopup from './PayEntryPopup'
 
 const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+
+// มุมมองรายการ: card = การ์ดเต็ม / compact = บรรทัดเดียว — จำไว้ในเครื่องต่อผู้ใช้
+const VIEW_KEY = 'jodflow.recurring.view'
+function loadView() {
+  try { return localStorage.getItem(VIEW_KEY) === 'compact' ? 'compact' : 'card' } catch { return 'card' }
+}
 
 function monthKey(year, month) {
   return `${year}-${String(month + 1).padStart(2, '0')}`
@@ -29,6 +37,8 @@ export default function RecurringPage() {
   const [undoTarget, setUndoTarget] = useState(null)
   const [negativeWarn, setNegativeWarn] = useState(null) // { amount, method, proceed }
   const [showItemList, setShowItemList] = useState(false)
+  const [view, setView] = useState(loadView)
+  const changeView = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} }
 
   const {
     items, entries, addItem, updateItem, toggleItem, deleteItem,
@@ -269,7 +279,28 @@ export default function RecurringPage() {
           </span>
           <button className="btn btn-secondary w-8 h-8 p-0 flex items-center justify-center" onClick={() => navigateMonth(1)}>›</button>
         </div>
-        <button className="btn btn-primary text-sm" onClick={() => setShowForm(true)}>+ เพิ่มรายการ</button>
+        <div className="flex items-center gap-2">
+          {/* สลับมุมมอง การ์ดเต็ม / บรรทัดเดียว */}
+          <div className="inline-flex rounded-lg border border-hairline bg-white p-0.5" role="group" aria-label="มุมมองรายการ">
+            <button
+              type="button"
+              onClick={() => changeView('card')}
+              className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${view === 'card' ? 'bg-ink text-white' : 'text-gray-500 hover:bg-[#F6F5F1]'}`}
+              title="การ์ดเต็ม"
+            >
+              ▤ เต็ม
+            </button>
+            <button
+              type="button"
+              onClick={() => changeView('compact')}
+              className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${view === 'compact' ? 'bg-ink text-white' : 'text-gray-500 hover:bg-[#F6F5F1]'}`}
+              title="บรรทัดเดียว"
+            >
+              ☰ ย่อ
+            </button>
+          </div>
+          <button className="btn btn-primary text-sm" onClick={() => setShowForm(true)}>+ เพิ่มรายการ</button>
+        </div>
       </div>
 
       {/* Summary */}
@@ -301,17 +332,20 @@ export default function RecurringPage() {
           <p className="text-xs mt-1">กด "เพิ่มรายการ" เพื่อสร้างรายจ่ายประจำ</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {monthEntries.map(({ entry, item }) => (
-            <RecurringEntryCard
-              key={entry.id}
-              entry={entry}
-              item={item}
-              onPay={handlePay}
-              onUndoPay={handleUndoPay}
-              onSkip={handleSkip}
-            />
-          ))}
+        <div className={view === 'compact' ? 'space-y-1' : 'space-y-2'}>
+          {monthEntries.map(({ entry, item }) => {
+            const Row = view === 'compact' ? RecurringEntryRow : RecurringEntryCard
+            return (
+              <Row
+                key={entry.id}
+                entry={entry}
+                item={item}
+                onPay={handlePay}
+                onUndoPay={handleUndoPay}
+                onSkip={handleSkip}
+              />
+            )
+          })}
         </div>
       )}
 
@@ -334,6 +368,9 @@ export default function RecurringPage() {
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${item.enabled ? 'bg-emerald-400' : 'bg-gray-300'}`} />
                       <span className="text-sm font-medium text-gray-800 truncate">{item.name}</span>
+                      {isYearly(item) && (
+                        <span className="text-[10px] font-medium px-1.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">รายปี</span>
+                      )}
                       {item.amountType === 'fixed' && (
                         <span className="text-xs text-gray-500 tabular-nums">{(item.fixedAmount ?? 0).toLocaleString('th-TH')} บาท</span>
                       )}
@@ -341,7 +378,7 @@ export default function RecurringPage() {
                         <span className="text-xs text-gray-400 italic">ยอดเปลี่ยนแปลง</span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 ml-4">ทุกวันที่ {item.billingDay} ของเดือน</p>
+                    <p className="text-xs text-gray-400 ml-4">{scheduleLabel(item)}</p>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <button

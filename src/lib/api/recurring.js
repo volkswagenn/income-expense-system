@@ -1,6 +1,7 @@
 import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
+import { occursInMonth } from '../recurringSchedule'
 
 // รายการประจำ (แม่แบบ) + entries รายเดือนที่งอกจากแม่แบบ
 
@@ -33,6 +34,22 @@ export async function deleteRecurringItem(id) {
   await unwrap(supabase.from('recurring_items').delete().eq('id', id))
 }
 
+/**
+ * เมื่อรายการกลายเป็นรายปี entry "รอจ่าย" ของเดือนอื่นที่เคยงอกไว้ต้องหายไป
+ * (ที่จ่ายแล้วเก็บไว้เป็นประวัติ) — คืน id ที่ลบเพื่อให้ store ตัดออกจากหน้าจอ
+ */
+export async function deletePendingEntriesOutsideMonth(recurringId, billingMonth) {
+  const rows = await unwrap(
+    supabase.from('recurring_entries').select('id, month')
+      .eq('recurring_id', recurringId).eq('status', 'pending')
+  )
+  const ids = (rows ?? [])
+    .filter((r) => Number(r.month.split('-')[1]) !== Number(billingMonth))
+    .map((r) => r.id)
+  if (ids.length > 0) await unwrap(supabase.from('recurring_entries').delete().in('id', ids))
+  return ids
+}
+
 // ── entries รายเดือน ────────────────────────────────────────────────────────
 
 export async function listRecurringEntries() {
@@ -48,10 +65,11 @@ export async function listRecurringEntries() {
  */
 export async function generateEntries(month, computeDueDate) {
   const shopId = getShopId()
-  const items = (await listRecurringItems()).filter((it) => it.enabled)
+  const [year, mon] = month.split('-').map(Number)
+  // รายปีสร้าง entry เฉพาะเดือนที่ตรงกับเดือนเรียกเก็บ รายเดือนสร้างทุกเดือน
+  const items = (await listRecurringItems()).filter((it) => it.enabled && occursInMonth(it, mon))
   if (items.length === 0) return []
 
-  const [year, mon] = month.split('-').map(Number)
   const rows = items.map((item) => ({
     shop_id: shopId,
     recurring_id: item.id,
@@ -73,8 +91,4 @@ export async function updateRecurringEntry(id, changes) {
   return fromRow('recurring_entries', await unwrap(
     supabase.from('recurring_entries').update(toRow('recurring_entries', changes)).eq('id', id).select().single()
   ))
-}
-
-export async function markEntrySkipped(id) {
-  return updateRecurringEntry(id, { status: 'skipped' })
 }

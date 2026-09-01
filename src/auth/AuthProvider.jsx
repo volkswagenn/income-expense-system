@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { setShopId } from '../lib/api/context'
 import { configError, supabase, toThaiError } from '../lib/supabase'
+import { resetStores } from '../store/hydrate'
 
 /**
  * ศูนย์กลางของ "ตอนนี้ใครล็อกอินอยู่ และอยู่ร้านไหน สิทธิ์อะไร"
@@ -120,6 +121,10 @@ export function AuthProvider({ children }) {
   }, [])
 
   const signOut = useCallback(async () => {
+    // ล้าง store ก่อนตัด session — ไม่งั้นข้อมูลร้านเดิมยังค้างอยู่ในหน่วยความจำ
+    // แล้วโผล่ให้คนที่ล็อกอินต่อจากนี้เห็นชั่วขณะก่อน hydrate รอบใหม่จะเสร็จ
+    resetStores()
+    setShopId(null)
     await supabase.auth.signOut()
   }, [])
 

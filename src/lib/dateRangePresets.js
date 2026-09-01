@@ -8,7 +8,6 @@ import { localDateStr } from './dateUtils'
  * ทุกค่าคำนวณด้วยเวลาท้องถิ่น (ไม่ใช้ UTC) ผ่าน localDateStr
  */
 export const ALL_TIME_START = '2000-01-01'
-export const ALL_TIME_END = '2099-12-31'
 
 export const DATE_PRESETS = [
   {

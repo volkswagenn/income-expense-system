@@ -2,40 +2,42 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import usePendingStore from '../../store/usePendingStore'
-import useTransactionStore from '../../store/useTransactionStore'
+import useWalletStore from '../../store/useWalletStore'
 import StatusBadge from '../../components/shared/StatusBadge'
 import ReceiveIncomeDatePopup from '../../components/shared/ReceiveIncomeDatePopup'
 import { AttachmentButton, getAttachments, getPrimaryAttachment } from '../../components/shared/AttachmentViewer'
-import { addToWallet } from '../../lib/walletEngine'
+import { buildLogEntry } from '../../lib/logBuilder'
 
 export default function PendingIncomeSummary({ fullPage = false }) {
-  const { pendingIncomes = [], receivePendingIncome, getPendingIncomeTotal } = usePendingStore()
-  const { addTransaction } = useTransactionStore()
+  const { pendingIncomes = [], receivePendingIncomeAtomic, getPendingIncomeTotal } = usePendingStore()
   const [receiveConfirm, setReceiveConfirm] = useState(null) // { item, method }
+  const [busy, setBusy] = useState(false)
 
   const unpaid = pendingIncomes.filter((p) => p.status === 'pending')
   const total = getPendingIncomeTotal()
   const list = fullPage ? unpaid : unpaid.slice(0, 5)
 
-  const executeReceive = (item, method, receivedDate) => {
-    const tx = addTransaction({
-      date: receivedDate,
-      type: 'income',
-      amount: item.amount,
-      method,
-      itemName: item.description ?? 'รายรับรอรับ',
-      note: item.note ?? '',
-      ...(item.otherIncomeType ? { otherIncomeType: item.otherIncomeType } : {}),
-      ...(item.attachments?.length ? { attachments: item.attachments } : {}),
-      ...(item.documentPath ? { documentPath: item.documentPath, documentType: item.documentType, documentLabel: item.documentLabel } : {}),
-    })
-    addToWallet(method, item.amount, {
-      activityType: 'RECEIVE_INCOME',
-      description: `รับเงิน "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${receivedDate}`,
-      newValue: { pendingIncomeId: item.id, transactionId: tx.id, receivedDate },
-    })
-    receivePendingIncome(item.id, method, tx.id)
-    setReceiveConfirm(null)
+  /** กดรับเงินจากหน้ากระเป๋าเงิน — RPC เดียวจบเหมือนหน้ารายการรอดำเนินการ */
+  const executeReceive = async (item, method, receivedDate) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await receivePendingIncomeAtomic(item.id, {
+        method,
+        accountId: null,
+        date: receivedDate,
+        log: buildLogEntry({
+          activityType: 'RECEIVE_INCOME',
+          description: `รับเงิน "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${receivedDate}`,
+          walletEffect: { target: 'cash', delta: +item.amount },
+          newValue: { pendingIncomeId: item.id, receivedDate },
+        }),
+      })
+      await useWalletStore.getState().refresh()
+      setReceiveConfirm(null)
+    } finally {
+      setBusy(false)
+    }
   }
 
   if (!fullPage && unpaid.length === 0) {

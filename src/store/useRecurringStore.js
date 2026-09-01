@@ -1,7 +1,6 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import { v4 as uuid } from 'uuid'
 import { getDaysInMonth } from 'date-fns'
+import * as recurringApi from '../lib/api/recurring'
 import { localMonthStr } from '../lib/dateUtils'
 
 export function computeDueDate(year, month, billingDay) {
@@ -12,135 +11,115 @@ export function computeDueDate(year, month, billingDay) {
 
 export const INITIAL = { items: [], entries: [] }
 
-const useRecurringStore = create(
-  persist(
-    (set, get) => ({
-      ...INITIAL,
-      _reset: () => set(INITIAL),
+const useRecurringStore = create((set, get) => ({
+  ...INITIAL,
+  _reset: () => set(INITIAL),
 
-      // ── Items (templates) ────────────────────────────────────────────────────
+  _hydrate: ({ recurringItems, recurringEntries }) =>
+    set({ items: recurringItems ?? [], entries: recurringEntries ?? [] }),
 
-      addItem: (data) => {
-        const item = {
-          id: uuid(),
-          enabled: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          ...data,
-        }
-        set((s) => ({ items: [...s.items, item] }))
-        return item
-      },
+  // ── แม่แบบรายการประจำ ─────────────────────────────────────────────────────
 
-      updateItem: (id, changes) =>
-        set((s) => ({
-          items: s.items.map((it) =>
-            it.id === id ? { ...it, ...changes, updatedAt: new Date().toISOString() } : it
-          ),
-        })),
+  addItem: async (data) => {
+    const item = await recurringApi.createRecurringItem(data)
+    set((s) => ({ items: [...s.items, item] }))
+    return item
+  },
 
-      toggleItem: (id) =>
-        set((s) => ({
-          items: s.items.map((it) =>
-            it.id === id ? { ...it, enabled: !it.enabled, updatedAt: new Date().toISOString() } : it
-          ),
-        })),
+  updateItem: async (id, changes) => {
+    const item = await recurringApi.updateRecurringItem(id, changes)
+    set((s) => ({ items: s.items.map((it) => (it.id === id ? { ...it, ...item } : it)) }))
+    // เปลี่ยนเป็นรายปี → entry รอจ่ายของเดือนอื่นที่งอกไว้ก่อนหน้าต้องถูกเก็บออก
+    if (item.frequency === 'yearly' && item.billingMonth) {
+      const removed = await recurringApi.deletePendingEntriesOutsideMonth(id, item.billingMonth)
+      if (removed.length > 0) {
+        const gone = new Set(removed)
+        set((s) => ({ entries: s.entries.filter((e) => !gone.has(e.id)) }))
+      }
+    }
+    return item
+  },
 
-      deleteItem: (id) =>
-        set((s) => ({
-          items: s.items.filter((it) => it.id !== id),
-          // keep paid entries for history, remove only pending/skipped
-          entries: s.entries.filter((e) => e.recurringId !== id || e.status === 'paid'),
-        })),
+  toggleItem: async (id) => {
+    const current = get().items.find((it) => it.id === id)
+    if (!current) return
+    return get().updateItem(id, { enabled: !current.enabled })
+  },
 
-      // ── Entries (monthly records) ────────────────────────────────────────────
+  deleteItem: async (id) => {
+    await recurringApi.deleteRecurringItem(id)
+    set((s) => ({
+      items: s.items.filter((it) => it.id !== id),
+      // เก็บ entry ที่จ่ายไปแล้วไว้เป็นประวัติ ลบเฉพาะที่ยังไม่จ่าย
+      entries: s.entries.filter((e) => e.recurringId !== id || e.status === 'paid'),
+    }))
+  },
 
-      // idempotent: safe to call multiple times for same month
-      generateEntries: (month) => {
-        const { items, entries } = get()
-        const [year, mon] = month.split('-').map(Number)
-        const newEntries = []
-        items.filter((it) => it.enabled).forEach((item) => {
-          const exists = entries.some(
-            (e) => e.recurringId === item.id && e.month === month
-          )
-          if (!exists) {
-            newEntries.push({
-              id: uuid(),
-              recurringId: item.id,
-              month,
-              dueDate: computeDueDate(year, mon, item.billingDay),
-              status: 'pending',
-              amount: item.amountType === 'fixed' ? (item.fixedAmount ?? 0) : 0,
-              paidAt: null,
-              paidMethod: null,
-              transactionId: null,
-              pendingPaymentId: null,
-              createdAt: new Date().toISOString(),
-            })
-          }
-        })
-        if (newEntries.length > 0) {
-          set((s) => ({ entries: [...s.entries, ...newEntries] }))
-        }
-      },
+  // ── entries รายเดือน ──────────────────────────────────────────────────────
 
-      updateEntry: (id, changes) =>
-        set((s) => ({
-          entries: s.entries.map((e) => (e.id === id ? { ...e, ...changes } : e)),
-        })),
+  /**
+   * สร้าง entries ของเดือนที่ระบุ — เรียกซ้ำได้ไม่เกิดรายการซ้ำ
+   * ฐานข้อมูลมี unique (recurring_id, month) เป็นคนกันซ้ำให้ ไม่ใช่เช็คใน JS
+   * ซึ่งเชื่อถือไม่ได้เมื่อมีหลายเครื่องกดพร้อมกัน
+   */
+  generateEntries: async (month) => {
+    const created = await recurringApi.generateEntries(month, computeDueDate)
+    if (created.length === 0) return []
+    set((s) => {
+      const seen = new Set(s.entries.map((e) => e.id))
+      return { entries: [...s.entries, ...created.filter((e) => !seen.has(e.id))] }
+    })
+    return created
+  },
 
-      markSkipped: (entryId) =>
-        set((s) => ({
-          entries: s.entries.map((e) => (e.id === entryId ? { ...e, status: 'skipped' } : e)),
-        })),
+  updateEntry: async (id, changes) => {
+    const entry = await recurringApi.updateRecurringEntry(id, changes)
+    set((s) => ({ entries: s.entries.map((e) => (e.id === id ? { ...e, ...entry } : e)) }))
+    return entry
+  },
 
-      // sync back when transaction deleted from History page
-      syncEntryFromTransaction: (transactionId) =>
-        set((s) => ({
-          entries: s.entries.map((e) =>
-            e.transactionId === transactionId
-              ? { ...e, status: 'pending', transactionId: null, pendingPaymentId: null, paidAt: null, paidMethod: null, amount: 0 }
-              : e
-          ),
-        })),
+  markSkipped: async (entryId) => get().updateEntry(entryId, { status: 'skipped' }),
 
-      // sync back when pending paid from Wallet page
-      syncEntryPaidFromPending: (pendingPaymentId) =>
-        set((s) => ({
-          entries: s.entries.map((e) =>
-            e.pendingPaymentId === pendingPaymentId
-              ? { ...e, status: 'paid', paidAt: new Date().toISOString() }
-              : e
-          ),
-        })),
+  /** ย้อนสถานะเมื่อรายการที่ผูกไว้ถูกลบจากหน้าประวัติ */
+  syncEntryFromTransaction: async (transactionId) => {
+    const targets = get().entries.filter((e) => e.transactionId === transactionId)
+    for (const e of targets) {
+      await get().updateEntry(e.id, {
+        status: 'pending', transactionId: null, pendingPaymentId: null,
+        paidAt: null, paidMethod: null, amount: 0,
+      })
+    }
+  },
 
-      getEntriesByMonth: (month) =>
-        get().entries.filter((e) => e.month === month),
+  /** ย้อนกลับ: รายการค้างที่ผูกอยู่ถูกจ่ายจากหน้ากระเป๋าเงิน */
+  syncEntryPaidFromPending: async (pendingPaymentId) => {
+    const targets = get().entries.filter((e) => e.pendingPaymentId === pendingPaymentId)
+    for (const e of targets) {
+      await get().updateEntry(e.id, { status: 'paid', paidAt: new Date().toISOString() })
+    }
+  },
 
-      getEntriesByDate: (date) =>
-        get().entries.filter((e) => e.dueDate === date),
+  getEntriesByMonth: (month) => get().entries.filter((e) => e.month === month),
 
-      getSummaryByMonth: (month) => {
-        const entries = get().getEntriesByMonth(month)
-        const paid = entries.filter((e) => e.status === 'paid')
-        const pending = entries.filter((e) => e.status === 'pending')
-        return {
-          paidCount: paid.length,
-          paidTotal: paid.reduce((s, e) => s + (e.amount || 0), 0),
-          pendingCount: pending.length,
-          pendingTotal: pending.reduce((s, e) => s + (e.amount || 0), 0),
-          total: [...paid, ...pending].reduce((s, e) => s + (e.amount || 0), 0),
-        }
-      },
+  getEntriesByDate: (date) => get().entries.filter((e) => e.dueDate === date),
 
-      getPendingCountCurrentMonth: () => {
-        const month = localMonthStr()
-        return get().entries.filter((e) => e.month === month && e.status === 'pending').length
-      },
-    }),
-    { name: 'default_recurring_data' }
-  )
-)
+  getSummaryByMonth: (month) => {
+    const entries = get().getEntriesByMonth(month)
+    const paid = entries.filter((e) => e.status === 'paid')
+    const pending = entries.filter((e) => e.status === 'pending')
+    return {
+      paidCount: paid.length,
+      paidTotal: paid.reduce((s, e) => s + (e.amount || 0), 0),
+      pendingCount: pending.length,
+      pendingTotal: pending.reduce((s, e) => s + (e.amount || 0), 0),
+      total: [...paid, ...pending].reduce((s, e) => s + (e.amount || 0), 0),
+    }
+  },
+
+  getPendingCountCurrentMonth: () => {
+    const month = localMonthStr()
+    return get().entries.filter((e) => e.month === month && e.status === 'pending').length
+  },
+}))
 
 export default useRecurringStore

@@ -39,6 +39,12 @@ function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, 
   const pendingIncomeTotal = pendingIncomeItems.reduce((sum, item) => sum + (item.amount || 0), 0)
   const pendingPaymentTotal = pendingItems.reduce((sum, item) => sum + (item.amount || 0), 0)
 
+  // สรุปยอด: รายจ่ายประจำนับจาก entry ที่ไม่ถูกข้าม, รายจ่ายทั่วไปตัดรายการที่จ่ายจากรายการประจำออก (กันนับซ้ำ)
+  const recurringTotal = recurringItems.reduce((sum, { entry }) => sum + (entry.status === 'skipped' ? 0 : (entry.amount || 0)), 0)
+  const normalExpenseTotal = expense.reduce((sum, t) => sum + (t.recurringEntryId ? 0 : t.amount), 0)
+  const paidTotal = recurringTotal + normalExpenseTotal
+  const hasSummary = recurringTotal > 0 || normalExpenseTotal > 0 || totalIncome > 0
+
   const incomeGroups = {}
   income.forEach((t) => {
     const k = t.method === 'cash' ? 'เงินสด' : t.method === 'transfer' ? 'เงินโอน' : (t.otherIncomeType || 'อื่นๆ')
@@ -58,7 +64,7 @@ function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, 
     transform: pos.above ? 'translate(-50%, calc(-100% - 8px))' : 'translate(-50%, 8px)',
     zIndex: 9999,
     width: '210px',
-    maxHeight: '320px',
+    maxHeight: '400px',
     overflowY: 'auto',
     pointerEvents: 'none',
   }
@@ -150,6 +156,24 @@ function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, 
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {hasSummary && (
+        <div className="mb-2 pt-1.5 border-t border-gray-700">
+          <p className="text-gray-300 font-semibold mb-1">สรุปยอด</p>
+          <div className="space-y-1 pl-2">
+            <TooltipRow label="รายจ่ายประจำ" value={recurringTotal} />
+            <TooltipRow label="รายจ่าย" value={normalExpenseTotal} />
+            <div className="flex justify-between gap-3 pt-1 border-t border-gray-700/60">
+              <span className="text-red-400 font-semibold">รวมจ่าย</span>
+              <span className="font-bold tabular-nums text-red-400 flex-shrink-0">{paidTotal.toLocaleString('th-TH')}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-emerald-400 font-semibold">รวมรับ</span>
+              <span className="font-bold tabular-nums text-emerald-400 flex-shrink-0">{totalIncome.toLocaleString('th-TH')}</span>
+            </div>
           </div>
         </div>
       )}

@@ -75,11 +75,20 @@ export async function clearOldLogs(keepDays = 365) {
   )
 }
 
-/** ดึงทั้งหมดเพื่อส่งออกไฟล์ — วนทีละหน้าเพื่อไม่ให้ชนเพดานแถวของ PostgREST */
+/**
+ * ดึงทั้งหมดเพื่อส่งออกไฟล์ — วนทีละหน้าเพื่อไม่ให้ชนเพดานแถวของ PostgREST
+ *
+ * ⚠ pageSize ต้องต่ำกว่าเพดาน max-rows ของ PostgREST (ค่าตั้งต้นของ Supabase = 1000)
+ *   อยู่พอสมควร เพราะ listLogs ขอเกินมา 1 แถวเพื่อเช็คว่ามีหน้าถัดไปไหม
+ *   ถ้าตั้ง 1000 เซิร์ฟเวอร์จะตัดเหลือ 1000 พอดี → hasMore เป็น false → หยุดวนตั้งแต่
+ *   หน้าแรกและได้ไฟล์ที่ข้อมูลขาดไปเงียบๆ โดยไม่มี error อะไรเลย
+ */
+const EXPORT_PAGE_SIZE = 500
+
 export async function listAllLogsForExport() {
   const all = []
   for (let page = 0; ; page++) {
-    const { logs, hasMore } = await listLogs({ page, pageSize: 1000 })
+    const { logs, hasMore } = await listLogs({ page, pageSize: EXPORT_PAGE_SIZE })
     all.push(...logs)
     if (!hasMore) break
   }

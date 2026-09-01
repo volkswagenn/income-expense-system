@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useLogStore from '../../store/useLogStore'
 import useTransactionStore from '../../store/useTransactionStore'
-import useWalletStore from '../../store/useWalletStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
 import { ACTIVITY_LABELS } from '../../lib/logBuilder'
@@ -32,97 +31,6 @@ const MONEY_LOG_TYPES = new Set([
   'SUB_BORROW',
   'SUB_RETURN',
 ])
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function applyWalletTarget(ws, target, delta, transferAccountId = null) {
-  if (!target || delta === 0) return
-  if (target === 'cash') delta > 0 ? ws.addCash(delta) : ws.deductCash(-delta)
-  else if (target === 'transfer') {
-    // เงินโอนต้องกลับเข้าบัญชีธนาคารเดิมที่เคยเคลื่อนไหว
-    delta > 0 ? ws.addTransfer(delta, transferAccountId) : ws.deductTransfer(-delta, transferAccountId)
-  }
-  else if (target?.startsWith('sub:')) ws.updateSubWallet(target.slice(4), delta)
-}
-
-function tgtLabel(t) {
-  if (t === 'cash') return 'เงินสด'
-  if (t === 'transfer') return 'เงินโอน'
-  if (t?.startsWith('sub:')) return 'กระเป๋าตังค์'
-  return t ?? ''
-}
-
-function computeLogEffects(log, loans) {
-  const lines = []
-  const { activityType, walletEffect, newValue } = log
-
-  if (walletEffect) {
-    const { target, delta } = walletEffect
-    const rev = -delta
-    lines.push(`${tgtLabel(target)}: ${rev > 0 ? '+' : ''}${rev.toLocaleString()} บาท`)
-    if (activityType === 'TRANSFER_TO_WALLET') lines.push(`เงินโอน: ${delta.toLocaleString()} บาท`)
-    else if (activityType === 'WITHDRAW_FROM_TRANSFER') lines.push(`เงินสด: ${delta.toLocaleString()} บาท`)
-    if (activityType === 'SUB_DEPOSIT' && newValue?.fromMethod)
-      lines.push(`${tgtLabel(newValue.fromMethod)}: +${delta.toLocaleString()} บาท (คืนกลับ)`)
-    if (activityType === 'SUB_WITHDRAW' && newValue?.toMethod)
-      lines.push(`${tgtLabel(newValue.toMethod)}: ${delta.toLocaleString()} บาท (หักคืน)`)
-    if (activityType === 'SUB_BORROW' && newValue?.loanId) {
-      const loan = loans.find((l) => l.id === newValue.loanId)
-      if (loan) lines.push(`${tgtLabel(loan.method)}: -${loan.amount.toLocaleString()} บาท`)
-      lines.push('ลบรายการยืมเงินที่เชื่อมโยง')
-    }
-    if (activityType === 'SUB_RETURN' && newValue?.loanId) {
-      const loan = loans.find((l) => l.id === newValue.loanId)
-      if (loan) lines.push(`กระเป๋าตังค์: -${loan.amount.toLocaleString()} บาท (คืนค่า)`)
-    }
-  }
-  if (activityType === 'PAY_PENDING') lines.push('ย้อนสถานะค้างชำระกลับเป็น "รอชำระ"')
-  if (activityType === 'OPEN_BILL_INCOME') lines.push('ลบรายการรอรับเงินที่เชื่อมโยง')
-  return lines
-}
-
-function executeDeleteLog(log) {
-  const ws = useWalletStore.getState()
-  const ps = usePendingStore.getState()
-  const ts = useTransactionStore.getState()
-  const { activityType, walletEffect, newValue } = log
-
-  if (walletEffect) {
-    const { target, delta, transferAccountId } = walletEffect
-    const acct = transferAccountId ?? newValue?.transferAccountId ?? null
-    applyWalletTarget(ws, target, -delta, acct)
-    if (activityType === 'TRANSFER_TO_WALLET') applyWalletTarget(ws, 'transfer', delta, acct)
-    else if (activityType === 'WITHDRAW_FROM_TRANSFER') applyWalletTarget(ws, 'cash', delta)
-    else if (activityType === 'SUB_DEPOSIT' && newValue?.fromMethod) applyWalletTarget(ws, newValue.fromMethod, delta, acct)
-    else if (activityType === 'SUB_WITHDRAW' && newValue?.toMethod) applyWalletTarget(ws, newValue.toMethod, delta, acct)
-    else if (activityType === 'SUB_TRANSFER' && newValue?.toId) ws.updateSubWallet(newValue.toId, delta)
-
-    if (activityType === 'SUB_BORROW' && newValue?.loanId) {
-      const loan = ws.loans.find((l) => l.id === newValue.loanId)
-      if (loan) {
-        if (loan.method === 'cash') ws.deductCash(loan.amount)
-        else ws.deductTransfer(loan.amount, loan.transferAccountId)
-      }
-      ws.deleteLoanById(newValue.loanId)
-    }
-    if (activityType === 'SUB_RETURN' && newValue?.loanId) {
-      const loan = ws.loans.find((l) => l.id === newValue.loanId)
-      if (loan) {
-        ws.updateSubWallet(loan.subWalletId, -loan.amount)
-        ws.unReturnLoanById(loan.id)
-      }
-    }
-  }
-
-  if (activityType === 'OPEN_BILL' && newValue?.pendingId) ps.deletePending(newValue.pendingId)
-  if (activityType === 'PAY_PENDING' && newValue?.pendingId) {
-    if (newValue?.transactionId) ts.deleteTransaction(newValue.transactionId)
-    ps.unPayPending(newValue.pendingId)
-  }
-  if (activityType === 'OPEN_BILL_INCOME' && newValue?.pendingIncomeId) ps.deletePendingIncome(newValue.pendingIncomeId)
-
-  useLogStore.getState().deleteLog(log.id)
-}
 
 // ── AllTab ─────────────────────────────────────────────────────────────────────
 
@@ -305,28 +213,24 @@ function MoneyEventCard({ event, onCancel }) {
         </span>
         <p className="text-sm text-gray-700 mt-1 break-words">{log.description}</p>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
-        {delta != null && (
-          <span className={`text-sm font-bold tabular-nums ${delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-            {delta > 0 ? '+' : ''}{Number(delta).toLocaleString()}
-          </span>
-        )}
-        <button
-          className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-2 py-1 rounded-lg transition-colors whitespace-nowrap"
-          onClick={() => onCancel(event)}
-        >
-          ↩ ยกเลิก
-        </button>
-      </div>
+      {/*
+        รายการจัดการเงิน (ฝาก/ถอน/ยืม/คืน) ไม่มีปุ่มยกเลิกโดยตั้งใจ
+        ประวัติการใช้งานเป็นบันทึกที่แก้ย้อนหลังไม่ได้ตามที่ตั้ง RLS ไว้ (ดู 02_policies.sql)
+        ถ้าจะย้อนรายการพวกนี้ ให้ทำรายการตรงข้ามจากหน้ากระเป๋าเงิน — ยอดจะถูกต้องเสมอ
+        และมีร่องรอยครบว่าใครย้อนเมื่อไหร่
+      */}
+      {delta != null && (
+        <span className={`text-sm font-bold tabular-nums shrink-0 ${delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+          {delta > 0 ? '+' : ''}{Number(delta).toLocaleString()}
+        </span>
+      )}
     </div>
   )
 }
 
-function CancelConfirmPopup({ target, onConfirm, onCancel }) {
+function CancelConfirmPopup({ target, busy, error, onConfirm, onCancel }) {
   if (!target) return null
-  const descriptionText = target._kind === 'tx'
-    ? `"${target.tx.itemName}" ${target.tx.amount.toLocaleString()} บาท`
-    : target.log.description
+  const descriptionText = `"${target.tx.itemName}" ${Number(target.tx.amount).toLocaleString()} บาท`
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -353,10 +257,17 @@ function CancelConfirmPopup({ target, onConfirm, onCancel }) {
               </div>
             </div>
           )}
+          {error && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+              {error}
+            </p>
+          )}
         </div>
         <div className="px-5 pb-5 flex gap-3 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel}>ยกเลิก</button>
-          <button className="btn btn-danger" onClick={onConfirm}>ยืนยัน</button>
+          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ปิด</button>
+          <button className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? 'กำลังยกเลิก…' : 'ยืนยัน'}
+          </button>
         </div>
       </div>
     </div>
@@ -368,13 +279,14 @@ function MoneyTab() {
   const { transactions } = useTransactionStore()
   const { logs } = useLogStore()
   const { pendingPayments, taxInvoices, pendingIncomes } = usePendingStore()
-  const loans = useWalletStore((s) => s.loans)
 
   const [filter, setFilter] = useState('month')
   const [startDate, setStartDate] = useState(format(startOfMonth(today), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(endOfMonth(today), 'yyyy-MM-dd'))
   const [typeFilter, setTypeFilter] = useState('all')
   const [cancelTarget, setCancelTarget] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [cancelError, setCancelError] = useState('')
 
   const events = useMemo(() => {
     const txEvents = transactions
@@ -411,24 +323,27 @@ function MoneyTab() {
     return events
   }, [events, typeFilter])
 
+  // ยกเลิกได้เฉพาะ transaction — รายการจัดการเงินเป็นบันทึกที่ย้อนไม่ได้ (ดู MoneyEventCard)
   const handleCancelClick = (event) => {
-    let effects
-    if (event._kind === 'tx') {
-      effects = describeTxCancelEffects(event.tx, { pendingPayments, taxInvoices, pendingIncomes })
-    } else {
-      effects = computeLogEffects(event.log, loans)
-    }
-    setCancelTarget({ ...event, effects })
+    setCancelTarget({
+      ...event,
+      effects: describeTxCancelEffects(event.tx, { pendingPayments, taxInvoices, pendingIncomes }),
+    })
   }
 
-  const handleConfirmCancel = () => {
-    if (!cancelTarget) return
-    if (cancelTarget._kind === 'tx') {
-      cancelTransaction(cancelTarget.tx)
-    } else {
-      executeDeleteLog(cancelTarget.log)
+  const handleConfirmCancel = async () => {
+    if (!cancelTarget || busy) return
+    setBusy(true)
+    setCancelError('')
+    try {
+      await cancelTransaction(cancelTarget.tx)
+      setCancelTarget(null)
+    } catch (err) {
+      // ต้องบอกให้รู้ ไม่ใช่ปิดหน้าต่างเงียบๆ แล้วปล่อยให้เข้าใจว่ายกเลิกสำเร็จ
+      setCancelError(err.message)
+    } finally {
+      setBusy(false)
     }
-    setCancelTarget(null)
   }
 
   return (
@@ -469,8 +384,10 @@ function MoneyTab() {
 
       <CancelConfirmPopup
         target={cancelTarget}
+        busy={busy}
+        error={cancelError}
         onConfirm={handleConfirmCancel}
-        onCancel={() => setCancelTarget(null)}
+        onCancel={() => { setCancelTarget(null); setCancelError('') }}
       />
     </div>
   )
@@ -485,10 +402,32 @@ const TABS = [
 
 export default function HistoryPage() {
   const [tab, setTab] = useState(TABS[0].key)
+  const loadFirstPage = useLogStore((s) => s.loadFirstPage)
+  const loading = useLogStore((s) => s.loading)
+  const [loadError, setLoadError] = useState('')
+
+  /**
+   * ประวัติไม่ได้ถูกโหลดตอนเปิดแอป (hydrate.js ข้ามไว้ เพราะตารางโตได้เป็นหมื่นแถว)
+   * หน้านี้จึงต้องสั่งโหลดเอง — ก่อนหน้านี้ไม่มีใครเรียกเลย ทำให้แท็บประวัติ
+   * ขึ้นว่า "ไม่มีข้อมูล" เสมอทั้งที่ในฐานข้อมูลมีอยู่จริง
+   */
+  useEffect(() => {
+    let alive = true
+    loadFirstPage().catch((err) => {
+      if (alive) setLoadError(err.message)
+    })
+    return () => { alive = false }
+  }, [loadFirstPage])
 
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-bold text-gray-900">ประวัติการทำรายการทั้งหมด</h1>
+
+      {loadError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          โหลดประวัติไม่สำเร็จ — {loadError}
+        </p>
+      )}
 
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {TABS.map((t) => (
@@ -503,8 +442,16 @@ export default function HistoryPage() {
       </div>
 
       <SectionCard>
-        {tab === 'all'   && <AllTab />}
-        {tab === 'money' && <MoneyTab />}
+        {loading ? (
+          <div className="flex items-center justify-center py-14">
+            <div className="w-7 h-7 rounded-full border-[3px] border-hairline border-t-ink animate-spin" />
+          </div>
+        ) : (
+          <>
+            {tab === 'all'   && <AllTab />}
+            {tab === 'money' && <MoneyTab />}
+          </>
+        )}
       </SectionCard>
     </div>
   )

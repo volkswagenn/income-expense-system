@@ -39,25 +39,6 @@ export async function softDeleteCategory(id) {
   ))
 }
 
-/**
- * หา "อื่นๆ" ของประเภทที่ต้องการ — trigger สร้างให้ตอนสร้างร้าน
- * ของเดิมฮาร์ดโค้ด id ไว้ (cat-8 / cat-income-1) ซึ่งใช้ไม่ได้แล้วเพราะ id เป็น uuid ที่ Postgres สร้าง
- */
-export async function findFallbackCategory(type) {
-  const rows = await unwrap(
-    supabase
-      .from('categories')
-      .select('*')
-      .eq('shop_id', getShopId())
-      .eq('type', type)
-      .eq('name', 'อื่นๆ')
-      .is('parent_id', null)
-      .eq('deleted', false)
-      .limit(1)
-  )
-  return rows?.[0] ? fromRow('categories', rows[0]) : null
-}
-
 // ── ผู้ขาย ──────────────────────────────────────────────────────────────────
 
 export async function listVendors() {

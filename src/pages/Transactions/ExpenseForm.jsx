@@ -13,7 +13,7 @@ import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
 import useRecurringStore from '../../store/useRecurringStore'
-import { deductWallet } from '../../lib/walletEngine'
+import { walletTarget } from '../../lib/api/transactions'
 import { buildLogEntry } from '../../lib/logBuilder'
 import useLogStore from '../../store/useLogStore'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
@@ -29,6 +29,8 @@ export default function ExpenseForm() {
   const [form, setForm, clearDraft, hasDraft] = useFormDraft('expense', EMPTY)
   const [saved, setSaved] = useState(false)
   const [errMsg, setErrMsg] = useState('')
+  // ระบบออนไลน์อย่างเดียว การบันทึกต้องรอผลจริงจากเซิร์ฟเวอร์ จึงต้องกันกดซ้ำระหว่างรอ
+  const [saving, setSaving] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [attachments, setAttachments] = useState([])
@@ -43,53 +45,58 @@ export default function ExpenseForm() {
   } = useCategoryStore()
   const { addLog } = useLogStore()
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+  const refreshWallet = useWalletStore((s) => s.refresh)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
-  const logVendorAdd = (name) => {
-    const item = addVendor(name)
-    addLog(buildLogEntry({ activityType: 'VENDOR_CREATE', description: `สร้างผู้ขาย "${name}"`, newValue: item }))
+  const logVendorAdd = async (name) => {
+    const item = await addVendor(name)
+    await addLog(buildLogEntry({ activityType: 'VENDOR_CREATE', description: `สร้างผู้ขาย "${name}"`, newValue: item }))
     return item
   }
 
-  const logVendorUpdate = (id, name) => {
+  const logVendorUpdate = async (id, name) => {
     const oldItem = getVendors().find((item) => item.id === id)
-    updateVendor(id, name)
-    addLog(buildLogEntry({ activityType: 'VENDOR_UPDATE', description: `แก้ไขผู้ขาย "${oldItem?.name ?? id}" → "${name}"`, oldValue: oldItem, newValue: { id, name } }))
+    await updateVendor(id, name)
+    await addLog(buildLogEntry({ activityType: 'VENDOR_UPDATE', description: `แก้ไขผู้ขาย "${oldItem?.name ?? id}" → "${name}"`, oldValue: oldItem, newValue: { id, name } }))
   }
 
-  const logVendorDelete = (id) => {
+  const logVendorDelete = async (id) => {
     const oldItem = getVendors().find((item) => item.id === id)
-    softDeleteVendor(id)
-    addLog(buildLogEntry({ activityType: 'VENDOR_DELETE', description: `ลบผู้ขาย "${oldItem?.name ?? id}"`, oldValue: oldItem }))
+    await softDeleteVendor(id)
+    await addLog(buildLogEntry({ activityType: 'VENDOR_DELETE', description: `ลบผู้ขาย "${oldItem?.name ?? id}"`, oldValue: oldItem }))
   }
 
-  const logQuickItemAdd = (name, categoryId) => {
-    const item = addQuickItem(name, categoryId)
-    addLog(buildLogEntry({ activityType: 'QUICK_ITEM_CREATE', description: `สร้างรายการด่วน "${name}"`, newValue: item }))
+  const logQuickItemAdd = async (name, categoryId) => {
+    const item = await addQuickItem(name, categoryId)
+    await addLog(buildLogEntry({ activityType: 'QUICK_ITEM_CREATE', description: `สร้างรายการด่วน "${name}"`, newValue: item }))
     return item
   }
 
-  const logQuickItemUpdate = (id, changes) => {
+  const logQuickItemUpdate = async (id, changes) => {
     const oldItem = getQuickItems().find((item) => item.id === id)
-    updateQuickItem(id, changes)
-    addLog(buildLogEntry({ activityType: 'QUICK_ITEM_UPDATE', description: `แก้ไขรายการด่วน "${oldItem?.name ?? id}"`, oldValue: oldItem, newValue: { ...oldItem, ...changes } }))
+    await updateQuickItem(id, changes)
+    await addLog(buildLogEntry({ activityType: 'QUICK_ITEM_UPDATE', description: `แก้ไขรายการด่วน "${oldItem?.name ?? id}"`, oldValue: oldItem, newValue: { ...oldItem, ...changes } }))
   }
 
-  const logQuickItemDelete = (id) => {
+  const logQuickItemDelete = async (id) => {
     const oldItem = getQuickItems().find((item) => item.id === id)
-    softDeleteQuickItem(id)
-    addLog(buildLogEntry({ activityType: 'QUICK_ITEM_DELETE', description: `ลบรายการด่วน "${oldItem?.name ?? id}"`, oldValue: oldItem }))
+    await softDeleteQuickItem(id)
+    await addLog(buildLogEntry({ activityType: 'QUICK_ITEM_DELETE', description: `ลบรายการด่วน "${oldItem?.name ?? id}"`, oldValue: oldItem }))
   }
 
-  const execute = () => {
+  const execute = async () => {
+    if (saving) return
     const amt = Number(form.amount)
     const accountId = form.method === 'transfer' ? resolveAccount(form.transferAccountId) : null
     let tx = null
 
+    setSaving(true)
+    setErrMsg('')
+    try {
     if (form.method === 'pending') {
       const missingDueDateNote = form.dueDate ? '' : 'ไม่ได้ลงกำหนดชำระเงิน'
-      const pending = addPending({
+      const pending = await addPending({
         amount: amt,
         dueDate: form.dueDate || date,
         description: form.itemName,
@@ -110,14 +117,17 @@ export default function ExpenseForm() {
           documentLabel: attachments[0].label,
         } : {}),
       })
-      addLog(buildLogEntry({
+      await addLog(buildLogEntry({
         activityType: 'OPEN_BILL',
         description: `เปิดบิลรอจ่ายเงิน: "${form.itemName}" ${amt.toLocaleString()} บาท (วันที่เปิด: ${date}) ครบกำหนด: ${form.dueDate || date}${missingDueDateNote ? ` (${missingDueDateNote})` : ''}`,
         newValue: { pendingId: pending.id, itemName: form.itemName, amount: amt, dueDate: form.dueDate || date, openDate: date, missingDueDate: !form.dueDate },
         walletEffect: null,
       }))
     } else {
-      tx = addTransaction({
+      // บันทึกรายการ + ตัดเงิน + เขียน log จบในคำสั่งเดียวที่ฐานข้อมูล
+      // ถ้าแยกยิงแล้วเน็ตหลุดกลางทาง จะได้รายการที่ไม่ตัดเงิน หรือเงินหายโดยไม่มีรายการ
+      const target = walletTarget(form.method, { transferAccountId: accountId })
+      tx = await addTransaction({
         date, type: 'expense', amount: amt,
         method: form.method, category: form.category, itemName: form.itemName,
         ...(accountId ? { transferAccountId: accountId } : {}),
@@ -129,16 +139,21 @@ export default function ExpenseForm() {
           documentType: attachments[0].type,
           documentLabel: attachments[0].label,
         } : {}),
+      }, {
+        effect: target ? { target, delta: -amt } : null,
+        log: buildLogEntry({
+          activityType: 'ADD_EXPENSE',
+          description: `จ่าย "${form.itemName}" ${amt.toLocaleString()} บาท`,
+          walletEffect: target ? { target: form.method, delta: -amt, transferAccountId: accountId } : null,
+          newValue: { itemName: form.itemName, amount: amt, method: form.method, date },
+        }),
       })
-      deductWallet(form.method, amt, {
-        activityType: 'ADD_EXPENSE',
-        description: `จ่าย "${form.itemName}" ${amt.toLocaleString()} บาท`,
-        newValue: tx,
-      }, accountId)
+      // ยอดเงินถูกแก้ที่เซิร์ฟเวอร์ ต้องดึงค่าจริงมาแสดง ไม่คำนวณเองเพราะอาจมีคนอื่นแก้พร้อมกัน
+      await refreshWallet()
     }
 
     if (form.taxStatus === 'waiting') {
-      const tax = addTaxInvoice({
+      const tax = await addTaxInvoice({
         ...(tx ? { transactionId: tx.id } : {}),
         itemName: form.itemName,
         receiptNo: form.receiptNo,
@@ -146,7 +161,7 @@ export default function ExpenseForm() {
         dueDate: form.taxDueDate || null,
         createdAt: new Date(date + 'T00:00:00').toISOString(),
       })
-      addLog(buildLogEntry({
+      await addLog(buildLogEntry({
         activityType: 'CREATE_TAX_INVOICE',
         description: `สร้างรายการรอใบกำกับภาษี "${form.itemName}" ${amt.toLocaleString()} บาท`,
         newValue: { ...tax, ...(tx ? { transactionId: tx.id } : {}) },
@@ -158,6 +173,12 @@ export default function ExpenseForm() {
     setUploadStatus(null)
     setAttachments([])
     setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      // ยังไม่ล้างฟอร์ม ผู้ใช้จะได้กดบันทึกซ้ำได้โดยไม่ต้องกรอกใหม่
+      setErrMsg(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleSave = () => {
@@ -362,7 +383,9 @@ export default function ExpenseForm() {
         )}
 
         <div className="flex items-center gap-3">
-          <button className="btn btn-danger px-6" onClick={handleSave}>💾 บันทึกรายจ่าย</button>
+          <button className="btn btn-danger px-6" onClick={handleSave} disabled={saving}>
+            {saving ? '⏳ กำลังบันทึก…' : '💾 บันทึกรายจ่าย'}
+          </button>
           {saved && <span className="text-emerald-600 text-sm font-medium">✓ บันทึกสำเร็จ</span>}
           {errMsg && <span className="text-red-500 text-sm">{errMsg}</span>}
         </div>

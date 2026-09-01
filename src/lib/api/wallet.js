@@ -50,6 +50,42 @@ export async function moveBetweenTransferAccounts(fromId, toId, amount) {
   await unwrap(supabase.rpc('move_between_transfer_accounts', { p_from: fromId, p_to: toId, p_amount: amount }))
 }
 
+// ── ย้ายเงินสองก้อนพร้อมกัน (ต้องจบใน transaction เดียว ดู 05_wallet_functions.sql) ──
+
+/** ย้ายเงินสด ↔ บัญชีเงินโอน — to: 'transfer' = สด→โอน, 'cash' = โอน→สด */
+export async function moveCashTransfer({ accountId, amount, to, log = null }) {
+  await unwrap(supabase.rpc('move_cash_transfer', {
+    p_shop: getShopId(), p_account: accountId, p_amount: amount, p_to: to, p_log: log,
+  }))
+}
+
+/** ฝาก/ถอน กระเป๋าย่อย — direction: 'in' = ฝากเข้ากระเป๋าย่อย, 'out' = ถอนออก */
+export async function moveSubWallet({ subId, amount, direction, method, accountId = null, log = null }) {
+  await unwrap(supabase.rpc('move_sub_wallet', {
+    p_shop: getShopId(), p_sub: subId, p_amount: amount,
+    p_direction: direction, p_method: method, p_account: accountId, p_log: log,
+  }))
+}
+
+export async function moveBetweenSubWallets({ fromId, toId, amount, log = null }) {
+  await unwrap(supabase.rpc('move_between_sub_wallets', {
+    p_shop: getShopId(), p_from: fromId, p_to: toId, p_amount: amount, p_log: log,
+  }))
+}
+
+export async function borrowFromSubWallet({ subId, amount, method, accountId = null, subName = null, log = null }) {
+  return fromRow('loans', await unwrap(supabase.rpc('borrow_from_sub_wallet', {
+    p_shop: getShopId(), p_sub: subId, p_amount: amount,
+    p_method: method, p_account: accountId, p_sub_name: subName, p_log: log,
+  })))
+}
+
+export async function returnLoan({ loanId, method, accountId = null, log = null }) {
+  return fromRow('loans', await unwrap(supabase.rpc('return_loan', {
+    p_loan: loanId, p_method: method, p_account: accountId, p_log: log,
+  })))
+}
+
 // ── บัญชีเงินโอน ────────────────────────────────────────────────────────────
 
 export async function createTransferAccount({ bankName = '', name = '', initialBalance = 0 }) {
@@ -103,12 +139,22 @@ export async function reorderSubWallets(orderedIds) {
 
 // ── รายการยืม ───────────────────────────────────────────────────────────────
 
-export async function listLoans() {
-  return fromRows('loans', await unwrap(
-    supabase.from('loans').select('*').eq('shop_id', getShopId()).order('borrowed_at', { ascending: false })
-  ))
-}
-
 export async function deleteLoan(id) {
   await unwrap(supabase.from('loans').delete().eq('id', id))
+}
+
+/**
+ * ย้อนสถานะ "คืนแล้ว" กลับเป็น "ยังไม่คืน"
+ * ใช้ตอนผู้ใช้กดยกเลิกรายการคืนเงินจากหน้าประวัติ — ตัวนี้แก้แค่สถานะ
+ * ส่วนการคืนยอดเงินให้ตรงกัน ผู้เรียกต้องสั่ง adjust ของแต่ละก้อนเอง
+ */
+export async function unReturnLoan(id) {
+  return fromRow('loans', await unwrap(
+    supabase
+      .from('loans')
+      .update({ returned: false, returned_at: null, return_method: null, return_account_id: null })
+      .eq('id', id)
+      .select()
+      .single()
+  ))
 }

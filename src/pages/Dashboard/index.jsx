@@ -1,11 +1,18 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import FilterBar from './FilterBar'
 import FinancialStatus from './FinancialStatus'
 import CalendarView from './CalendarView'
-import ChartFiltered from './ChartFiltered'
-import TrendChart6M from './TrendChart6M'
 import SectionCard from '../../components/shared/SectionCard'
+
+// กราฟสองตัวนี้ลาก recharts (383 KB) มาด้วย ซึ่งไม่จำเป็นต้องมีตอนวาดหน้าแรก
+// แยกออกไปโหลดทีหลัง ตัวเลขและปฏิทินจึงขึ้นให้เห็นก่อนโดยไม่ต้องรอ
+const ChartFiltered = lazy(() => import('./ChartFiltered'))
+const TrendChart6M = lazy(() => import('./TrendChart6M'))
+
+function ChartSkeleton() {
+  return <div className="h-52 rounded-panel bg-[#F1F0EC] animate-pulse" />
+}
 
 export default function Dashboard() {
   const [filter, setFilter] = useState('month')
@@ -39,10 +46,14 @@ export default function Dashboard() {
 
         <div className="space-y-5">
           <SectionCard title="รายรับ-รายจ่ายตามช่วงเวลา">
-            <ChartFiltered startDate={startDate} endDate={endDate} />
+            <Suspense fallback={<ChartSkeleton />}>
+              <ChartFiltered startDate={startDate} endDate={endDate} />
+            </Suspense>
           </SectionCard>
           <SectionCard title="แนวโน้ม 6 เดือนย้อนหลัง">
-            <TrendChart6M />
+            <Suspense fallback={<ChartSkeleton />}>
+              <TrendChart6M />
+            </Suspense>
           </SectionCard>
         </div>
       </div>

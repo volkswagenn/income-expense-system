@@ -1,10 +1,9 @@
 import { useState, useRef } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet } from '../../lib/walletEngine'
+import { importEntry, runImport } from '../../lib/importRunner'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import useWalletStore from '../../store/useWalletStore'
 import { saveAppFile } from '../../lib/fileHelper'
@@ -27,9 +26,10 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
   const [done, setDone] = useState(false)
   const [dlStatus, setDlStatus] = useState(null)
   const [ulMsg, setUlMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const fileRef = useRef(null)
 
-  const { addTransaction } = useTransactionStore()
   const { addLog } = useLogStore()
   const [accountId, setAccountId] = useState('')
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -86,36 +86,65 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
     }
   }
 
-  const execute = () => {
+  const execute = async () => {
+    if (saving) return
     // เงินโอนที่นำเข้าทั้งชุดจะลงบัญชีเดียวกันที่เลือกไว้ด้านบน
     const acct = resolveAccount(accountId)
+    const entries = []
     validRows.forEach((r) => {
       const cash = Number(r.cash || 0)
       const transfer = Number(r.transfer || 0)
       const other = Number(r.other || 0)
       if (cash > 0) {
-        addTransaction({ date: r.date, type: 'income', amount: cash, method: 'cash', itemName: 'รายรับเงินสด (นำเข้าข้อมูล)', note: r.note ?? '' })
-        addToWallet('cash', cash, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินสด ${cash.toLocaleString()} บาท (${r.date})` })
+        entries.push(importEntry(
+          { date: r.date, type: 'income', amount: cash, method: 'cash', itemName: 'รายรับเงินสด (นำเข้าข้อมูล)', note: r.note ?? '' },
+          `นำเข้ารายรับเงินสด ${cash.toLocaleString()} บาท (${r.date})`))
       }
       if (transfer > 0 && acct) {
-        addTransaction({ date: r.date, type: 'income', amount: transfer, method: 'transfer', transferAccountId: acct, itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' })
-        addToWallet('transfer', transfer, { activityType: 'IMPORT_DATA', description: `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})` }, acct)
+        entries.push(importEntry(
+          { date: r.date, type: 'income', amount: transfer, method: 'transfer', transferAccountId: acct, itemName: 'รายรับเงินโอน (นำเข้าข้อมูล)', note: r.note ?? '' },
+          `นำเข้ารายรับเงินโอน ${transfer.toLocaleString()} บาท (${r.date})`))
       }
       if (other > 0) {
-        addTransaction({ date: r.date, type: 'income', amount: other, method: 'other', itemName: 'รายรับอื่นๆ (นำเข้าข้อมูล)', note: r.note ?? '' })
+        entries.push(importEntry(
+          { date: r.date, type: 'income', amount: other, method: 'other', itemName: 'รายรับอื่นๆ (นำเข้าข้อมูล)', note: r.note ?? '' },
+          `นำเข้ารายรับอื่นๆ ${other.toLocaleString()} บาท (${r.date})`))
       }
     })
+
+    setConfirm(false)
+    setSaving(true)
+    setSaveError('')
+    try {
+      await runImport(entries)
+    } catch (err) {
+      setSaveError(err.message)
+      setSaving(false)
+      return
+    }
+    setSaving(false)
     addLog(buildLogEntry({
       activityType: 'IMPORT_DATA',
       description: `นำเข้าข้อมูลรายรับแยกประเภท ${validRows.length} วัน รวม ${grandTotal.toLocaleString()} บาท (สด ${grandCash.toLocaleString()} / โอน ${grandTransfer.toLocaleString()}${grandOther > 0 ? ` / อื่นๆ ${grandOther.toLocaleString()}` : ''})`,
       newValue: { count: validRows.length, cash: grandCash, transfer: grandTransfer, other: grandOther, total: grandTotal },
     }))
-    setConfirm(false)
     setDone(true)
   }
 
   return (
     <div className="space-y-4">
+      {saving && (
+        <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+          กำลังบันทึกลงเซิร์ฟเวอร์… อย่าปิดหน้านี้
+        </p>
+      )}
+
+      {saveError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          {saveError}
+        </p>
+      )}
+
       {done && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">
           ✓ นำเข้าข้อมูลสำเร็จ {validRows.length} วัน รวม {grandTotal.toLocaleString()} บาท (สด {grandCash.toLocaleString()} / โอน {grandTransfer.toLocaleString()}{grandOther > 0 ? ` / อื่นๆ ${grandOther.toLocaleString()}` : ''})
@@ -218,7 +247,7 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
 
       <button
         className="btn btn-primary"
-        disabled={validRows.length === 0}
+        disabled={validRows.length === 0 || saving}
         onClick={() => setConfirm(true)}
       >
         📥 นำเข้าข้อมูล ({validRows.length} วัน — รวม {grandTotal.toLocaleString()} บาท)

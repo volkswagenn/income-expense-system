@@ -1,10 +1,10 @@
-/* ฟอนต์แบบ local — แอปทำงาน offline จึงใช้ Google Fonts CDN ไม่ได้ */
+/* ฟอนต์ตัวหนังสือฝังมากับ bundle — ไม่ต้องรอเน็ตก่อนอ่านข้อความได้
+   ส่วนฟอนต์ไอคอนโหลดจาก Google Fonts แบบตัดเฉพาะตัวที่ใช้ (ดู index.html) */
 @import '@fontsource/anuphan/300.css';
 @import '@fontsource/anuphan/400.css';
 @import '@fontsource/anuphan/500.css';
 @import '@fontsource/anuphan/600.css';
 @import '@fontsource/anuphan/700.css';
-@import 'material-symbols/rounded.css';
 
 @tailwind base;
 @tailwind components;

@@ -3,12 +3,13 @@ import { useState } from 'react'
 import { format, differenceInDays, parseISO } from 'date-fns'
 import { th } from 'date-fns/locale'
 import usePendingStore from '../../store/usePendingStore'
-import useTransactionStore from '../../store/useTransactionStore'
 import useAppStore from '../../store/useAppStore'
+import useWalletStore from '../../store/useWalletStore'
 import StatusBadge from '../../components/shared/StatusBadge'
 import PayPendingDatePopup from '../../components/shared/PayPendingDatePopup'
 import { AttachmentButton, getAttachments, getPrimaryAttachment } from '../../components/shared/AttachmentViewer'
-import { willGoNegative, deductWallet } from '../../lib/walletEngine'
+import { willGoNegative } from '../../lib/walletEngine'
+import { buildLogEntry } from '../../lib/logBuilder'
 
 function getAlertClass(dueDate, notifyDays) {
   if (!dueDate) return { bg: 'bg-gray-50 border-gray-100', text: 'text-gray-800' }
@@ -21,12 +22,12 @@ function getAlertClass(dueDate, notifyDays) {
 }
 
 export default function PendingPaymentSummary({ fullPage = false }) {
-  const { pendingPayments, payPending, getPendingUnpaid, getPendingTotal } = usePendingStore()
-  const { addTransaction } = useTransactionStore()
+  const { pendingPayments, payPendingAtomic, getPendingUnpaid, getPendingTotal } = usePendingStore()
   const { notifyDaysBefore } = useAppStore()
   const navigate = useNavigate()
   const [payConfirm, setPayConfirm] = useState(null)  // { id, method, amount, description }
   const [negConfirm, setNegConfirm] = useState(null)
+  const [busy, setBusy] = useState(false)
 
   const unpaid = getPendingUnpaid()
   const total = getPendingTotal()
@@ -43,32 +44,37 @@ export default function PendingPaymentSummary({ fullPage = false }) {
     }
   }
 
-  const executePay = (id, method, amount, description, paidDate) => {
-    const item = pendingPayments.find((p) => p.id === id)
-    const tx = addTransaction({
-      date: paidDate,
-      type: 'expense',
-      amount,
-      method,
-      category: item?.category,
-      itemName: item?.itemName || description || 'ชำระค้างจ่าย',
-      vendor: item?.vendor,
-      receiptNo: item?.receiptNo,
-      taxStatus: item?.taxStatus || 'none',
-      dueDate: null,
-      note: item?.note ?? '',
-      ...(item?.recurringEntryId ? { recurringEntryId: item.recurringEntryId } : {}),
-      ...(item?.attachments?.length ? { attachments: item.attachments } : {}),
-      ...(item?.documentPath ? { documentPath: item.documentPath, documentType: item.documentType, documentLabel: item.documentLabel } : {}),
-    })
-    deductWallet(method, amount, {
-      activityType: 'PAY_PENDING',
-      description: `ชำระค้างชำระ "${description}" ${amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${paidDate}`,
-      newValue: { pendingId: id, transactionId: tx.id, paidDate },
-    })
-    payPending(id, method, tx.id)
-    setPayConfirm(null)
-    setNegConfirm(null)
+  /**
+    * กดจ่ายจากหน้ากระเป๋าเงิน — ใช้ RPC ตัวเดียวกับหน้ารายการรอดำเนินการ
+    *
+    * ของเดิมสร้าง transaction / ตัดเงิน / ปิดรายการค้าง แยกกัน 3 คำสั่งโดยไม่ await
+    * และ addTransaction เป็น async ทำให้ `tx.id` เป็น undefined เสมอ = รายการค้าง
+    * ที่จ่ายแล้วไม่เคยผูกกับ transaction ที่สร้างขึ้น
+    *
+    * ข้อมูลรายการ (ชื่อ ผู้ขาย เลขที่บิล ไฟล์แนบ ฯลฯ) ไม่ต้องส่งไปแล้ว เพราะ RPC
+    * คัดลอกจากแถว pending_payments ให้เอง จึงไม่มีทางหลุดไม่ตรงกัน
+    */
+  const executePay = async (id, method, amount, description, paidDate) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await payPendingAtomic(id, {
+        method,
+        accountId: null,
+        date: paidDate,
+        log: buildLogEntry({
+          activityType: 'PAY_PENDING',
+          description: `ชำระค้างชำระ "${description}" ${amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${paidDate}`,
+          walletEffect: { target: 'cash', delta: -amount },
+          newValue: { pendingId: id, paidDate },
+        }),
+      })
+      await useWalletStore.getState().refresh()
+      setPayConfirm(null)
+      setNegConfirm(null)
+    } finally {
+      setBusy(false)
+    }
   }
 
   if (!fullPage && unpaid.length === 0) {

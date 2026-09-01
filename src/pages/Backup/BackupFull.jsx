@@ -1,116 +1,140 @@
 import { useState } from 'react'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import Icon from '../../components/shared/Icon'
 import useLogStore from '../../store/useLogStore'
-import { buildLogEntry, createLogRecord } from '../../lib/logBuilder'
-import { APP_DATA_KEYS, LOG_KEY, downloadJson, removeAllAppData } from '../../lib/appDataKeys'
+import { useAuth } from '../../auth/AuthProvider'
+import { loadAllData } from '../../lib/api'
+import { clearShopData } from '../../lib/api/settings'
+import { listAllLogsForExport } from '../../lib/api/logs'
+import { buildLogEntry } from '../../lib/logBuilder'
+import { downloadJson } from '../../lib/downloadJson'
 import { localDateStr } from '../../lib/dateUtils'
-
-function readKey(key) {
-  try { return JSON.parse(localStorage.getItem(key) || 'null') } catch { return null }
-}
-
-function buildBackupPayload() {
-  const data = { _backupType: 'app', _backupAt: new Date().toISOString() }
-  APP_DATA_KEYS.forEach((k) => { data[k] = readKey(k) })
-  return data
-}
+import { hydrateStores } from '../../store/hydrate'
 
 /**
- * แทรก log การกู้คืนลงในก้อนข้อมูล log ที่กำลังจะเขียนกลับ
- * เรียก addLog หลังเขียน localStorage ไม่ได้ เพราะ zustand persist จะเขียน log
- * ที่ค้างอยู่ในหน่วยความจำทับข้อมูลที่เพิ่งกู้คืนทันที
+ * สำรองข้อมูลของร้าน
+ *
+ * เวอร์ชันเดิมอ่าน/เขียน localStorage ซึ่งเป็นที่เก็บข้อมูลสมัยยังทำงานออฟไลน์
+ * พอย้ายข้อมูลจริงขึ้น Postgres แล้ว คีย์พวกนั้นไม่มีอยู่อีกเลย ผลคือ
+ *   • ปุ่มสำรอง → ได้ไฟล์ที่ทุกคีย์เป็น null (ดูเหมือนสำเร็จ แต่ไม่มีข้อมูลจริงสักแถว)
+ *   • ปุ่มกู้คืน → เขียนกลับลง localStorage ที่ไม่มีใครอ่าน แล้วรีโหลด = ไม่เกิดอะไรขึ้น
+ *   • ปุ่มล้างข้อมูล → ลบคีย์ที่ไม่มีอยู่ ข้อมูลบนเซิร์ฟเวอร์ยังอยู่ครบ
+ * ทั้งสามอย่างขึ้นว่าสำเร็จทุกครั้ง ซึ่งอันตรายกว่าไม่มีปุ่มเลย
+ *
+ * ตอนนี้จึงดึงจากเซิร์ฟเวอร์จริง และปุ่มล้างข้อมูลเรียก RPC `clear_shop_data`
+ * ที่ตรวจสิทธิ์เจ้าของร้านซ้ำอีกชั้นในฐานข้อมูล
  */
-function withRestoreLog(persistedLogState, record) {
-  if (!persistedLogState || typeof persistedLogState !== 'object') return persistedLogState
-  const logs = persistedLogState.state?.logs
-  if (!Array.isArray(logs)) return persistedLogState
-  return { ...persistedLogState, state: { ...persistedLogState.state, logs: [record, ...logs] } }
-}
-
 export function BackupFull() {
   const { addLog } = useLogStore()
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [fileError, setFileError] = useState('')
+  const { isOwner, shop } = useAuth()
 
-  const handleBackup = () => {
-    downloadJson(buildBackupPayload(), `backup_${localDateStr()}.json`)
-    addLog(buildLogEntry({ activityType: 'BACKUP_DATA', description: 'สำรองข้อมูลทั้งหมด' }))
-  }
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [okMsg, setOkMsg] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
 
-  const handleRestore = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result)
-        if (data._backupType !== 'app') {
-          setFileError('ไฟล์นี้ไม่ใช่ backup ที่ถูกต้อง กรุณาเลือกไฟล์ backup ที่ถูกต้อง')
-          return
-        }
-        // สำรองข้อมูลปัจจุบันไว้ก่อน — ดาวน์โหลดอย่างเดียว ไม่แตะ store
-        // เพราะการเขียน store จะทำให้ persist เขียนทับข้อมูลที่กำลังจะกู้คืน
-        downloadJson(buildBackupPayload(), `backup_ก่อนกู้คืน_${localDateStr()}.json`)
-
-        const restoreRecord = createLogRecord(
-          buildLogEntry({ activityType: 'RESTORE_BACKUP', description: `กู้คืนข้อมูลจากไฟล์ ${file.name}` })
-        )
-
-        APP_DATA_KEYS.forEach((key) => {
-          if (data[key] == null) return
-          const value = key === LOG_KEY ? withRestoreLog(data[key], restoreRecord) : data[key]
-          localStorage.setItem(key, JSON.stringify(value))
-        })
-
-        setFileError('')
-        window.location.reload()
-      } catch {
-        setFileError('ไฟล์ไม่ถูกต้อง กรุณาเลือกไฟล์ backup ที่ถูกต้อง')
+  const handleBackup = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    setOkMsg('')
+    try {
+      // ดึงสองชุดพร้อมกัน: ข้อมูลใช้งานทั้งหมด + ประวัติการใช้งาน (ทีละหน้าจนครบ)
+      const [data, logs] = await Promise.all([loadAllData(), listAllLogsForExport()])
+      const payload = {
+        _backupType: 'jodflow-shop',
+        _backupAt: new Date().toISOString(),
+        _shop: { id: shop?.id ?? null, name: shop?.name ?? null },
+        ...data,
+        logs,
       }
+      downloadJson(payload, `jodflow_backup_${localDateStr()}.json`)
+      setOkMsg(
+        `ดาวน์โหลดแล้ว — รายการ ${data.transactions.length.toLocaleString()} · ` +
+        `ประวัติ ${logs.length.toLocaleString()} รายการ`
+      )
+      addLog(buildLogEntry({
+        activityType: 'BACKUP_DATA',
+        description: `สำรองข้อมูลทั้งหมด (${data.transactions.length} รายการ, ${logs.length} ประวัติ)`,
+        newValue: { transactions: data.transactions.length, logs: logs.length },
+      }))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
     }
-    reader.readAsText(file)
-    e.target.value = ''
   }
 
-  const handleDeleteAllData = () => {
-    removeAllAppData()
-    setConfirmDelete(false)
-    window.location.reload()
+  const handleClearAll = async () => {
+    setConfirmClear(false)
+    setBusy(true)
+    setError('')
+    setOkMsg('')
+    try {
+      await clearShopData()
+      // ฐานข้อมูลเพิ่งลบข้อมูลไปทั้งร้าน ต้องโหลดใหม่ทั้งชุด
+      // ไม่งั้นหน้าจอยังโชว์ข้อมูลเก่าที่ไม่มีอยู่จริงแล้ว
+      await hydrateStores()
+      setOkMsg('ล้างข้อมูลของร้านเรียบร้อยแล้ว')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600">
-        สำรองข้อมูลทั้งหมด — รายการบันทึก กระเป๋าเงิน หมวดหมู่ รายการประจำ และ log
+        ดาวน์โหลดข้อมูลของร้านทั้งหมดเป็นไฟล์ JSON — รายการบันทึก กระเป๋าเงิน หมวดหมู่
+        รายการค้าง รายการประจำ โน้ตปฏิทิน และประวัติการใช้งาน
       </p>
-      <button className="btn btn-primary w-full" onClick={handleBackup}>
-        📥 ดาวน์โหลด Backup
+
+      <button className="btn btn-primary w-full" onClick={handleBackup} disabled={busy}>
+        <Icon name="backup" size={18} />
+        {busy ? 'กำลังเตรียมไฟล์…' : 'ดาวน์โหลด Backup'}
       </button>
 
-      <div className="border-t border-gray-100 pt-4 space-y-2">
-        <p className="text-sm font-medium text-gray-700">กู้คืนข้อมูล (Restore)</p>
-        <p className="text-xs text-amber-600">⚠️ ข้อมูลปัจจุบันจะถูกเขียนทับ ระบบจะ backup อัตโนมัติก่อน</p>
-        <label className="btn btn-secondary w-full cursor-pointer text-center block">
-          📂 เลือกไฟล์ Backup (.json)
-          <input type="file" accept=".json" className="hidden" onChange={handleRestore} />
-        </label>
-        {fileError && <p className="text-xs text-red-600">{fileError}</p>}
-      </div>
+      {okMsg && (
+        <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
+          ✓ {okMsg}
+        </p>
+      )}
+      {error && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          {error}
+        </p>
+      )}
 
       <div className="border-t border-gray-100 pt-4 space-y-2">
-        <p className="text-sm font-medium text-red-700">ล้างข้อมูลทั้งหมด</p>
-        <p className="text-xs text-red-500">⚠️ ลบข้อมูลทั้งหมด ไม่สามารถกู้คืนได้</p>
-        <button className="btn btn-danger w-full" onClick={() => setConfirmDelete(true)}>
-          🗑️ ล้างข้อมูลทั้งหมด
-        </button>
+        <p className="text-sm font-medium text-gray-700">กู้คืนข้อมูล</p>
+        <p className="text-xs text-gray-500 leading-relaxed">
+          ยังไม่รองรับการกู้คืนจากไฟล์ — ข้อมูลอยู่บนเซิร์ฟเวอร์ซึ่งมีสำรองของตัวเองอยู่แล้ว
+          ถ้าต้องกู้คืนจริง ให้ใช้ Point-in-time recovery ที่หน้า Supabase → Database → Backups
+        </p>
       </div>
+
+      {/* ล้างข้อมูลเป็นสิทธิ์ของเจ้าของร้านเท่านั้น — ฐานข้อมูลตรวจซ้ำให้อีกชั้น
+          ซ่อนปุ่มไปเลยสำหรับคนอื่น จะได้ไม่ต้องกดแล้วเจอ error */}
+      {isOwner && (
+        <div className="border-t border-gray-100 pt-4 space-y-2">
+          <p className="text-sm font-medium text-red-700">ล้างข้อมูลทั้งหมดของร้าน</p>
+          <p className="text-xs text-red-500">
+            ⚠️ ลบรายการ ยอดเงิน หมวดหมู่ และประวัติทั้งหมดของร้านนี้อย่างถาวร กู้คืนไม่ได้
+          </p>
+          <button className="btn btn-danger w-full" onClick={() => setConfirmClear(true)} disabled={busy}>
+            <Icon name="delete_sweep" size={18} />
+            ล้างข้อมูลทั้งหมด
+          </button>
+        </div>
+      )}
 
       <ConfirmPopup
-        open={confirmDelete}
+        open={confirmClear}
         title="⚠️ ล้างข้อมูลทั้งหมด"
-        message="ข้อมูลทั้งหมดจะถูกลบอย่างถาวร\nยืนยันหรือไม่?"
-        onConfirm={handleDeleteAllData}
-        onCancel={() => setConfirmDelete(false)}
+        message={'ข้อมูลทั้งหมดของร้านนี้จะถูกลบถาวรจากเซิร์ฟเวอร์\n\nแนะนำให้กดดาวน์โหลด Backup ไว้ก่อน\n\nยืนยันหรือไม่?'}
+        onConfirm={handleClearAll}
+        onCancel={() => setConfirmClear(false)}
         confirmLabel="ล้างข้อมูล"
         danger
       />

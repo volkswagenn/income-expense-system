@@ -11,7 +11,8 @@ import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import PayPendingDatePopup from '../../components/shared/PayPendingDatePopup'
 import ReceiveIncomeDatePopup from '../../components/shared/ReceiveIncomeDatePopup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
-import { willGoNegative, deductWallet, addToWallet } from '../../lib/walletEngine'
+import { willGoNegative } from '../../lib/walletEngine'
+import useWalletStore from '../../store/useWalletStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 
 function dueSoonDays(dueDate) {
@@ -91,10 +92,10 @@ function PendingIncomeItem({ item, onReceive, onDelete }) {
 export default function PendingTracker() {
   const {
     pendingPayments, taxInvoices, pendingIncomes,
-    payPending, receiveTaxInvoice, deletePending, deleteTaxInvoice,
-    receivePendingIncome, deletePendingIncome,
+    payPendingAtomic, receivePendingIncomeAtomic,
+    receiveTaxInvoice, deletePending, deleteTaxInvoice, deletePendingIncome,
   } = usePendingStore()
-  const { addTransaction, updateTransaction, transactions } = useTransactionStore()
+  const { transactions } = useTransactionStore()
   const { addLog } = useLogStore()
   const { notifyDaysBefore, setNotifyDaysBefore } = useAppStore()
 
@@ -109,6 +110,8 @@ export default function PendingTracker() {
   const [settingOpen, setSettingOpen] = useState(false)
   const [notifyInput, setNotifyInput] = useState(String(notifyDaysBefore))
   const [editingTx, setEditingTx] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const unpaid = pendingPayments.filter((p) => p.status === 'pending')
   const paid = pendingPayments.filter((p) => p.status === 'paid')
@@ -123,53 +126,77 @@ export default function PendingTracker() {
     else setPayConfirm({ item, method })
   }
 
-  const executePay = (item, method, paidDate, accountId = null) => {
-    const tx = addTransaction({
-      date: paidDate,
-      type: 'expense',
-      amount: item.amount,
-      method,
-      ...(accountId ? { transferAccountId: accountId } : {}),
-      category: item.category,
-      itemName: item.itemName || item.description || 'ชำระค้างจ่าย',
-      vendor: item.vendor,
-      receiptNo: item.receiptNo,
-      taxStatus: item.taxStatus || 'none',
-      dueDate: null,
-      note: item.note ?? '',
-      ...(item.recurringEntryId ? { recurringEntryId: item.recurringEntryId } : {}),
-    })
-    deductWallet(method, item.amount, {
-      activityType: 'PAY_PENDING',
-      description: `ชำระค้างชำระ "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${paidDate}`,
-      newValue: { pendingId: item.id, transactionId: tx.id, paidDate, transferAccountId: accountId },
-    }, accountId)
-    payPending(item.id, method, tx.id, accountId)
-    if (item.transactionId && item.transactionId !== tx.id) {
-      updateTransaction(item.transactionId, { method, transferAccountId: accountId })
+  /**
+   * กดจ่ายรายการค้างชำระ — คำสั่งเดียวจบที่ฐานข้อมูล (RPC `pay_pending_payment`)
+   *
+   * โค้ดเดิมทำ 4 สเต็ปแยกกันและไม่ await สักตัว ซึ่งผิดตั้งแต่บรรทัดแรก:
+   * addTransaction เป็น async ค่าที่ได้จึงเป็น Promise ไม่ใช่รายการ ทำให้ `tx.id`
+   * เป็น undefined ตลอด — รายการค้างที่จ่ายแล้วจึงไม่เคยถูกผูกกับ transaction
+   * ที่สร้างขึ้น (ยกเลิกย้อนหลังแล้วเงินไม่คืน) และ log ก็บันทึก transactionId เป็น
+   * undefined ไปด้วย ซ้ำร้ายถ้าสเต็ปกลางล้ม สเต็ปที่เหลือยังเดินต่อจนเงินไม่ตรง
+   *
+   * RPC ตัวนี้ทำครบในทรานแซกชันเดียว: สร้าง transaction, ตัดเงิน, ปิดรายการค้าง,
+   * อัปเดตรายการประจำที่ผูกอยู่ แล้วเขียน log (ดู 05_wallet_functions.sql)
+   */
+  const executePay = async (item, method, paidDate, accountId = null) => {
+    if (busy) return
+    setBusy(true)
+    setActionError('')
+    try {
+      await payPendingAtomic(item.id, {
+        method,
+        accountId,
+        date: paidDate,
+        log: buildLogEntry({
+          activityType: 'PAY_PENDING',
+          description: `ชำระค้างชำระ "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${paidDate}`,
+          walletEffect: {
+            target: method === 'cash' ? 'cash' : `transfer:${accountId}`,
+            delta: -item.amount,
+            transferAccountId: accountId,
+          },
+          newValue: { pendingId: item.id, paidDate, transferAccountId: accountId },
+        }),
+      })
+      // ยอดเงินถูกฐานข้อมูลตัดไปแล้ว ดึงกลับมาให้ตรง ไม่คำนวณเองใน JS
+      await useWalletStore.getState().refresh()
+      setPayConfirm(null)
+      setNegConfirm(null)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setBusy(false)
     }
-    setPayConfirm(null)
-    setNegConfirm(null)
   }
 
-  const executeReceive = (item, method, receivedDate, accountId = null) => {
-    const tx = addTransaction({
-      date: receivedDate,
-      type: 'income',
-      amount: item.amount,
-      method,
-      ...(accountId ? { transferAccountId: accountId } : {}),
-      itemName: item.description ?? 'รายรับรอรับ',
-      note: item.note ?? '',
-      ...(item.otherIncomeType ? { otherIncomeType: item.otherIncomeType } : {}),
-    })
-    addToWallet(method, item.amount, {
-      activityType: 'RECEIVE_INCOME',
-      description: `รับเงิน "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${receivedDate}`,
-      newValue: { pendingIncomeId: item.id, transactionId: tx.id, receivedDate, transferAccountId: accountId },
-    }, accountId)
-    receivePendingIncome(item.id, method, tx.id, accountId)
-    setReceiveConfirm(null)
+  /** กดรับเงินรายการรอรับ — หลักการเดียวกับ executePay (RPC `receive_pending_income`) */
+  const executeReceive = async (item, method, receivedDate, accountId = null) => {
+    if (busy) return
+    setBusy(true)
+    setActionError('')
+    try {
+      await receivePendingIncomeAtomic(item.id, {
+        method,
+        accountId,
+        date: receivedDate,
+        log: buildLogEntry({
+          activityType: 'RECEIVE_INCOME',
+          description: `รับเงิน "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${receivedDate}`,
+          walletEffect: {
+            target: method === 'cash' ? 'cash' : `transfer:${accountId}`,
+            delta: +item.amount,
+            transferAccountId: accountId,
+          },
+          newValue: { pendingIncomeId: item.id, receivedDate, transferAccountId: accountId },
+        }),
+      })
+      await useWalletStore.getState().refresh()
+      setReceiveConfirm(null)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleEditPending = (item) => {
@@ -235,6 +262,13 @@ export default function PendingTracker() {
             <button className="btn btn-primary text-xs py-1 px-3" onClick={saveNotifySetting}>บันทึก</button>
             <button className="btn btn-secondary text-xs py-1 px-2" onClick={() => setSettingOpen(false)}>ยกเลิก</button>
           </div>
+        )}
+
+        {/* ผลลัพธ์ที่ล้ม ต้องเห็นบนหน้าจอ ไม่ใช่จมอยู่ใน console */}
+        {actionError && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+            ทำรายการไม่สำเร็จ — {actionError}
+          </p>
         )}
 
         {/* Pending payments tab */}

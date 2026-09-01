@@ -8,8 +8,6 @@ import * as categoriesApi from '../lib/api/categories'
 // ของเดิมฮาร์ดโค้ด id ไว้ (cat-8 / cat-income-1) — ใช้ไม่ได้แล้วเพราะ id เป็น uuid
 // ที่ Postgres สร้าง ต้องหาด้วยชื่อ+ประเภทแทน (ดู getFallbackCategoryId)
 
-export const CATEGORY_TYPES = ['expense', 'income']
-
 export const INITIAL = { categories: [], vendors: [], quickItems: [] }
 
 /**

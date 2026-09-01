@@ -11,9 +11,9 @@ import { fromRow, fromRows, toRow } from './_map'
  */
 
 /** จำนวนเดือนย้อนหลังที่โหลดตอนเปิดแอป — ตารางโตขึ้นเรื่อยๆ ห้ามดึงทั้งตาราง */
-export const DEFAULT_MONTHS_BACK = 24
+const DEFAULT_MONTHS_BACK = 24
 
-export function defaultRangeStart(monthsBack = DEFAULT_MONTHS_BACK) {
+function defaultRangeStart(monthsBack = DEFAULT_MONTHS_BACK) {
   const d = new Date()
   d.setMonth(d.getMonth() - monthsBack)
   d.setDate(1)

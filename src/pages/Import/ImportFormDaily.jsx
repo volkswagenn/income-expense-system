@@ -1,10 +1,9 @@
 import { useState, useRef } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { addToWallet } from '../../lib/walletEngine'
+import { importEntry, runImport } from '../../lib/importRunner'
 import { saveAppFile } from '../../lib/fileHelper'
 import { parseImportFile } from '../../lib/importParser'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
@@ -25,9 +24,10 @@ export default function ImportFormDaily({ rows, setRows, startDate, endDate, sho
   const [done, setDone] = useState(false)
   const [dlStatus, setDlStatus] = useState(null)
   const [ulMsg, setUlMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const fileRef = useRef(null)
 
-  const { addTransaction } = useTransactionStore()
   const { addLog } = useLogStore()
 
   const update = (i, key, val) =>
@@ -77,29 +77,49 @@ export default function ImportFormDaily({ rows, setRows, startDate, endDate, sho
     }
   }
 
-  const execute = () => {
-    validRows.forEach((r) => {
-      const amt = Number(r.total)
-      addTransaction({
-        date: r.date, type: 'income', amount: amt, method: 'cash',
-        itemName: 'รายรับรวม (นำเข้าข้อมูล)', note: r.note ?? '',
-      })
-      addToWallet('cash', amt, {
-        activityType: 'IMPORT_DATA',
-        description: `นำเข้ารายรับรวม ${amt.toLocaleString()} บาท (${r.date})`,
-      })
-    })
-    addLog(buildLogEntry({
-      activityType: 'IMPORT_DATA',
-      description: `นำเข้าข้อมูลรายรับรวมตามรายวัน ${validRows.length} วัน รวม ${grandTotal.toLocaleString()} บาท`,
-      newValue: { count: validRows.length, total: grandTotal },
-    }))
+  const execute = async () => {
+    if (saving) return
     setConfirm(false)
-    setDone(true)
+    setSaving(true)
+    setSaveError('')
+    try {
+      await runImport(validRows.map((r) => {
+        const amt = Number(r.total)
+        return importEntry(
+          {
+            date: r.date, type: 'income', amount: amt, method: 'cash',
+            itemName: 'รายรับรวม (นำเข้าข้อมูล)', note: r.note ?? '',
+          },
+          `นำเข้ารายรับรวม ${amt.toLocaleString()} บาท (${r.date})`
+        )
+      }))
+      addLog(buildLogEntry({
+        activityType: 'IMPORT_DATA',
+        description: `นำเข้าข้อมูลรายรับรวมตามรายวัน ${validRows.length} วัน รวม ${grandTotal.toLocaleString()} บาท`,
+        newValue: { count: validRows.length, total: grandTotal },
+      }))
+      setDone(true)
+    } catch (err) {
+      setSaveError(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <div className="space-y-4">
+      {saving && (
+        <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+          กำลังบันทึกลงเซิร์ฟเวอร์… อย่าปิดหน้านี้
+        </p>
+      )}
+
+      {saveError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          {saveError}
+        </p>
+      )}
+
       {done && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">
           ✓ นำเข้าข้อมูลสำเร็จ {validRows.length} วัน รวม {grandTotal.toLocaleString()} บาท
@@ -192,7 +212,7 @@ export default function ImportFormDaily({ rows, setRows, startDate, endDate, sho
 
       <button
         className="btn btn-primary"
-        disabled={validRows.length === 0}
+        disabled={validRows.length === 0 || saving}
         onClick={() => setConfirm(true)}
       >
         📥 นำเข้าข้อมูล ({validRows.length} วัน — รวม {grandTotal.toLocaleString()} บาท)

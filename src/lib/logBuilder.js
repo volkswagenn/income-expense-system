@@ -1,22 +1,3 @@
-import { v4 as uuid } from 'uuid'
-
-/**
- * เติมข้อมูลระบบให้ log entry จนกลายเป็น record ที่พร้อมเก็บ
- * ใช้โดย useLogStore.addLog และโดยโค้ดที่ต้องเขียน log ลง localStorage ตรงๆ
- * (เช่นตอนกู้คืน backup ซึ่งเรียก store ไม่ได้)
- */
-export function createLogRecord(entry) {
-  return {
-    id: uuid(),
-    timestamp: new Date().toISOString(),
-    status: 'success',
-    errorMessage: null,
-    deviceInfo: navigator.userAgent,
-    sessionId: sessionStorage.getItem('sessionId') ?? 'unknown',
-    ...entry,
-  }
-}
-
 export function buildLogEntry({
   activityType,
   description,
