@@ -14,7 +14,7 @@ import { selectAll } from './_page'
 /** จำนวนเดือนย้อนหลังที่โหลดตอนเปิดแอป — ตารางโตขึ้นเรื่อยๆ ห้ามดึงทั้งตาราง */
 const DEFAULT_MONTHS_BACK = 24
 
-function defaultRangeStart(monthsBack = DEFAULT_MONTHS_BACK) {
+export function defaultRangeStart(monthsBack = DEFAULT_MONTHS_BACK) {
   const d = new Date()
   d.setMonth(d.getMonth() - monthsBack)
   d.setDate(1)
@@ -65,6 +65,31 @@ export async function updateTransaction(id, changes) {
   return fromRow('transactions', await unwrap(
     supabase.from('transactions').update(row).eq('id', id).select().single()
   ))
+}
+
+/**
+ * แก้ไขรายการที่กระทบยอดเงิน — ย้อนเงินของยอด/วิธีเดิม + ตัด/เพิ่มเงินของยอดใหม่
+ * + แก้แถว + เขียน log จบใน RPC เดียว (edit_transaction)
+ *
+ * ของเดิมยิง adjust_* หลายตัวแยกกันแล้วค่อย update ถ้าเน็ตหลุดคั่นกลางยอดจะเพี้ยน
+ * โดยไม่มีทางรู้ว่าขาดขั้นไหน
+ *
+ * @param reverse { target, delta } ที่ต้องย้อนของเดิม (null ถ้าของเดิมไม่แตะกระเป๋า)
+ * @param apply   { target, delta } ของยอดใหม่ (null ถ้าไม่แตะกระเป๋า)
+ */
+export async function editTransaction(id, changes, { reverse = null, apply = null, log = null } = {}) {
+  const row = await unwrap(
+    supabase.rpc('edit_transaction', {
+      p_tx_id: id,
+      p_changes: toRow('transactions', changes),
+      p_reverse_target: reverse?.target ?? null,
+      p_reverse_delta: reverse?.delta ?? 0,
+      p_apply_target: apply?.target ?? null,
+      p_apply_delta: apply?.delta ?? 0,
+      p_log: log ?? null,
+    })
+  )
+  return fromRow('transactions', row)
 }
 
 /**

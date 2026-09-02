@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
@@ -47,7 +47,15 @@ export default function ExpenseForm() {
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
   const refreshWallet = useWalletStore((s) => s.refresh)
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+  // สิ่งที่บันทึกลงเซิร์ฟเวอร์สำเร็จแล้วในรอบนี้ (รายการ / รายการค้าง) — ถ้าขั้นถัดไปล้ม
+  // (เช่นสร้างการ์ดรอใบกำกับภาษีไม่สำเร็จ) ผู้ใช้กดบันทึกซ้ำได้โดยไม่สร้างรายการ
+  // และตัดเงินซ้ำอีกรอบ ล้างเมื่อสำเร็จครบหรือเมื่อแก้ฟอร์ม
+  const savedRef = useRef({ tx: null, pending: null })
+
+  const set = (k, v) => {
+    savedRef.current = { tx: null, pending: null }
+    setForm((f) => ({ ...f, [k]: v }))
+  }
 
   const logVendorAdd = async (name) => {
     const item = await addVendor(name)
@@ -94,7 +102,9 @@ export default function ExpenseForm() {
     setSaving(true)
     setErrMsg('')
     try {
-    if (form.method === 'pending') {
+    if (form.method === 'pending' && savedRef.current.pending) {
+      // รายการค้างถูกสร้างไปแล้วในรอบก่อน (ล้มที่ขั้นถัดไป) — ข้ามไปทำขั้นที่เหลือ
+    } else if (form.method === 'pending') {
       const missingDueDateNote = form.dueDate ? '' : 'ไม่ได้ลงกำหนดชำระเงิน'
       const pending = await addPending({
         amount: amt,
@@ -123,6 +133,10 @@ export default function ExpenseForm() {
         newValue: { pendingId: pending.id, itemName: form.itemName, amount: amt, dueDate: form.dueDate || date, openDate: date, missingDueDate: !form.dueDate },
         walletEffect: null,
       }))
+      savedRef.current.pending = pending
+    } else if (savedRef.current.tx) {
+      // รายการถูกบันทึกและตัดเงินไปแล้วในรอบก่อน — ห้ามสร้างซ้ำ
+      tx = savedRef.current.tx
     } else {
       // บันทึกรายการ + ตัดเงิน + เขียน log จบในคำสั่งเดียวที่ฐานข้อมูล
       // ถ้าแยกยิงแล้วเน็ตหลุดกลางทาง จะได้รายการที่ไม่ตัดเงิน หรือเงินหายโดยไม่มีรายการ
@@ -148,6 +162,7 @@ export default function ExpenseForm() {
           newValue: { itemName: form.itemName, amount: amt, method: form.method, date },
         }),
       })
+      savedRef.current.tx = tx
       // ยอดเงินถูกแก้ที่เซิร์ฟเวอร์ ต้องดึงค่าจริงมาแสดง ไม่คำนวณเองเพราะอาจมีคนอื่นแก้พร้อมกัน
       await refreshWallet()
     }
@@ -168,6 +183,7 @@ export default function ExpenseForm() {
       }))
     }
 
+    savedRef.current = { tx: null, pending: null }
     clearDraft()
     setSaved(true)
     setUploadStatus(null)
@@ -175,6 +191,7 @@ export default function ExpenseForm() {
     setTimeout(() => setSaved(false), 2000)
     } catch (err) {
       // ยังไม่ล้างฟอร์ม ผู้ใช้จะได้กดบันทึกซ้ำได้โดยไม่ต้องกรอกใหม่
+      // (ขั้นที่สำเร็จไปแล้วจะถูกข้าม ไม่สร้างรายการหรือตัดเงินซ้ำ)
       setErrMsg(err.message)
     } finally {
       setSaving(false)

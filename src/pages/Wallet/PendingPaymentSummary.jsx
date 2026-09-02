@@ -28,6 +28,7 @@ export default function PendingPaymentSummary({ fullPage = false }) {
   const [payConfirm, setPayConfirm] = useState(null)  // { id, method, amount, description }
   const [negConfirm, setNegConfirm] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const unpaid = getPendingUnpaid()
   const total = getPendingTotal()
@@ -36,8 +37,12 @@ export default function PendingPaymentSummary({ fullPage = false }) {
   const requestPay = (id, method) => {
     const item = pendingPayments.find((p) => p.id === id)
     if (!item) return
-    const payload = { id, method, amount: item.amount, description: item.description }
-    if (willGoNegative(method, item.amount)) {
+    // ส่ง defaultTransferAccountId ไปด้วย popup จะได้เลือกบัญชีที่ผูกไว้ให้ก่อน
+    const payload = {
+      id, method, amount: item.amount, description: item.description,
+      defaultTransferAccountId: item.defaultTransferAccountId ?? null,
+    }
+    if (willGoNegative(method, item.amount, item.defaultTransferAccountId)) {
       setNegConfirm(payload)
     } else {
       setPayConfirm(payload)
@@ -54,24 +59,31 @@ export default function PendingPaymentSummary({ fullPage = false }) {
     * ข้อมูลรายการ (ชื่อ ผู้ขาย เลขที่บิล ไฟล์แนบ ฯลฯ) ไม่ต้องส่งไปแล้ว เพราะ RPC
     * คัดลอกจากแถว pending_payments ให้เอง จึงไม่มีทางหลุดไม่ตรงกัน
     */
-  const executePay = async (id, method, amount, description, paidDate) => {
+  const executePay = async (id, method, amount, description, paidDate, accountId = null) => {
     if (busy) return
     setBusy(true)
+    setActionError('')
     try {
+      // จ่ายด้วยเงินโอนต้องส่งบัญชีที่ผู้ใช้เลือกใน popup ไปด้วย ไม่งั้น RPC ปฏิเสธทันที
       await payPendingAtomic(id, {
         method,
-        accountId: null,
+        accountId,
         date: paidDate,
         log: buildLogEntry({
           activityType: 'PAY_PENDING',
           description: `ชำระค้างชำระ "${description}" ${amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${paidDate}`,
-          walletEffect: { target: 'cash', delta: -amount },
-          newValue: { pendingId: id, paidDate },
+          walletEffect: {
+            target: method === 'cash' ? 'cash' : `transfer:${accountId}`,
+            delta: -amount,
+            transferAccountId: accountId,
+          },
+          newValue: { pendingId: id, paidDate, transferAccountId: accountId },
         }),
       })
-      await useWalletStore.getState().refresh()
       setPayConfirm(null)
       setNegConfirm(null)
+    } catch (err) {
+      setActionError(err.message)
     } finally {
       setBusy(false)
     }
@@ -97,6 +109,12 @@ export default function PendingPaymentSummary({ fullPage = false }) {
             </button>
           )}
         </div>
+      )}
+
+      {actionError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-3">
+          ทำรายการไม่สำเร็จ — {actionError}
+        </p>
       )}
 
       <div className="space-y-2">
@@ -147,7 +165,7 @@ export default function PendingPaymentSummary({ fullPage = false }) {
         open={!!payConfirm}
         item={payConfirm}
         method={payConfirm?.method}
-        onConfirm={(paidDate) => executePay(payConfirm.id, payConfirm.method, payConfirm.amount, payConfirm.description, paidDate)}
+        onConfirm={(paidDate, accountId) => executePay(payConfirm.id, payConfirm.method, payConfirm.amount, payConfirm.description, paidDate, accountId)}
         onCancel={() => setPayConfirm(null)}
       />
 
@@ -156,7 +174,7 @@ export default function PendingPaymentSummary({ fullPage = false }) {
         item={negConfirm}
         method={negConfirm?.method}
         danger
-        onConfirm={(paidDate) => executePay(negConfirm.id, negConfirm.method, negConfirm.amount, negConfirm.description, paidDate)}
+        onConfirm={(paidDate, accountId) => executePay(negConfirm.id, negConfirm.method, negConfirm.amount, negConfirm.description, paidDate, accountId)}
         onCancel={() => setNegConfirm(null)}
       />
     </>

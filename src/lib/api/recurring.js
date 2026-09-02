@@ -1,5 +1,5 @@
 import { supabase, unwrap } from '../supabase'
-import { getShopId } from './context'
+import { canEditShop, getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
 import { selectAll } from './_page'
 import { billedAmount, occursInMonth, pauseInfo } from '../recurringSchedule'
@@ -101,6 +101,9 @@ export async function listRecurringEntries() {
  * แบบ ignoreDuplicates ให้ฐานข้อมูลเป็นคนตัดสิน ไม่ใช่เช็คใน JS แล้วแข่งกันเขียน
  */
 export async function generateEntries(month, computeDueDate) {
+  // viewer ไม่มีสิทธิ์ insert — ถ้ายิงไป RLS จะปฏิเสธแล้วเด้ง error ทุกครั้งที่เปิดปฏิทิน
+  // รอบของเดือนนั้นจะถูกสร้างเมื่อ owner/editor เปิดดูแทน
+  if (!canEditShop()) return []
   const shopId = getShopId()
   const [year, mon] = month.split('-').map(Number)
   // รายปีสร้าง entry เฉพาะเดือนที่ตรงกับเดือนเรียกเก็บ รายเดือนสร้างทุกเดือน

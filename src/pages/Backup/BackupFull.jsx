@@ -6,6 +6,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { loadAllData } from '../../lib/api'
 import { clearShopData } from '../../lib/api/settings'
 import { listAllLogsForExport } from '../../lib/api/logs'
+import { listTransactions } from '../../lib/api/transactions'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { downloadJson } from '../../lib/downloadJson'
 import { localDateStr } from '../../lib/dateUtils'
@@ -39,8 +40,15 @@ export function BackupFull() {
     setError('')
     setOkMsg('')
     try {
-      // ดึงสองชุดพร้อมกัน: ข้อมูลใช้งานทั้งหมด + ประวัติการใช้งาน (ทีละหน้าจนครบ)
-      const [data, logs] = await Promise.all([loadAllData(), listAllLogsForExport()])
+      // ดึงสามชุดพร้อมกัน: ข้อมูลใช้งาน + รายการ "ทุกปี" + ประวัติการใช้งาน (ทีละหน้าจนครบ)
+      // loadAllData โหลดรายการแค่ 24 เดือนล่าสุด (พอสำหรับเปิดแอป) แต่ไฟล์สำรอง
+      // ต้องมีครบทุกปี ไม่งั้นไฟล์ที่เขียนว่า "ทั้งหมด" จะขาดข้อมูลเก่าไปเงียบๆ
+      const [data, allTransactions, logs] = await Promise.all([
+        loadAllData(),
+        listTransactions({ from: '2000-01-01' }),
+        listAllLogsForExport(),
+      ])
+      data.transactions = allTransactions
       const payload = {
         _backupType: 'jodflow-shop',
         _backupAt: new Date().toISOString(),

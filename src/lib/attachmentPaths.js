@@ -1,10 +1,10 @@
+import { attachmentFolder } from './api/attachments'
+
 /**
- * โครงพาธของไฟล์แนบ: attachments/<ประเภท>/<ปี>/<เดือน>/<ชื่อไฟล์>
+ * โครงพาธของไฟล์แนบบน Storage: <shop_id>/<ประเภท>/<ปี>/<เดือน>/<ชื่อไฟล์>
  * ต้องตรงกับที่ policy ของ bucket 'attachments' คาดไว้ (ดู policies.sql)
+ * ตัวจริงอยู่ที่ api/attachments.js — ไฟล์นี้เหลือไว้ให้โค้ดเดิมที่ import ชื่อนี้อยู่
  */
 export function getDatedAttachmentFolder(folderBase, createdAt) {
-  const d = new Date(createdAt ?? Date.now())
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  return `attachments/${folderBase}/${year}/${month}`
+  return attachmentFolder(folderBase, createdAt)
 }

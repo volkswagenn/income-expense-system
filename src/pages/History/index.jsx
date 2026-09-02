@@ -58,10 +58,13 @@ function AllTab() {
   const [typeFilter, setTypeFilter] = useState('')
   const [search, setSearch] = useState('')
 
+  // log ที่ post_transaction เขียนจะมี newValue.transactionId (ฐานข้อมูลใส่ให้)
+  // ส่วน log รุ่นเก่าเก็บทั้งรายการไว้ใน newValue จึงมี newValue.id — รับทั้งสองแบบ
   const loggedTransactionIds = new Set(
     logs
-      .filter((log) => TX_LOG_TYPES.has(log.activityType) && log.newValue?.id)
-      .map((log) => log.newValue.id)
+      .filter((log) => TX_LOG_TYPES.has(log.activityType))
+      .map((log) => log.newValue?.transactionId ?? log.newValue?.id)
+      .filter(Boolean)
   )
 
   const transactionEvents = transactions
@@ -403,8 +406,16 @@ const TABS = [
 export default function HistoryPage() {
   const [tab, setTab] = useState(TABS[0].key)
   const loadFirstPage = useLogStore((s) => s.loadFirstPage)
+  const loadMore = useLogStore((s) => s.loadMore)
   const loading = useLogStore((s) => s.loading)
+  const hasMore = useLogStore((s) => s.hasMore)
+  const loadedCount = useLogStore((s) => s.logs.length)
+  const total = useLogStore((s) => s.total)
   const [loadError, setLoadError] = useState('')
+
+  const handleLoadMore = () => {
+    loadMore().catch((err) => setLoadError(err.message))
+  }
 
   /**
    * ประวัติไม่ได้ถูกโหลดตอนเปิดแอป (hydrate.js ข้ามไว้ เพราะตารางโตได้เป็นหมื่นแถว)
@@ -442,7 +453,7 @@ export default function HistoryPage() {
       </div>
 
       <SectionCard>
-        {loading ? (
+        {loading && loadedCount === 0 ? (
           <div className="flex items-center justify-center py-14">
             <div className="w-7 h-7 rounded-full border-[3px] border-hairline border-t-ink animate-spin" />
           </div>
@@ -453,6 +464,19 @@ export default function HistoryPage() {
           </>
         )}
       </SectionCard>
+
+      {/* ประวัติโหลดทีละหน้า (หน้าละ 100) — ถ้าเลือกช่วงวันที่ย้อนหลังแล้วไม่เจอ
+          ให้กดโหลดเพิ่มจนครอบคลุมช่วงนั้น ไม่งั้นจะเข้าใจผิดว่าไม่มีประวัติ */}
+      {hasMore && (
+        <div className="flex items-center justify-center gap-3">
+          <button className="btn btn-secondary text-sm" onClick={handleLoadMore} disabled={loading}>
+            {loading ? 'กำลังโหลด…' : 'โหลดประวัติเก่ากว่านี้'}
+          </button>
+          <span className="text-xs text-gray-400">
+            โหลดแล้ว {loadedCount.toLocaleString()} / {total.toLocaleString()} รายการ
+          </span>
+        </div>
+      )}
     </div>
   )
 }

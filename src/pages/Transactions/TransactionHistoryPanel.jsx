@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useTransactionStore from '../../store/useTransactionStore'
@@ -30,9 +30,23 @@ function TxCard({ tx, onEdit }) {
   const hasDetails = tx.vendor || tx.receiptNo || tx.detail || tx.dueDate || tx.taxStatus !== 'none' || tx.otherIncomeType || attachment
   const cancelEffects = describeTxCancelEffects(tx, { pendingPayments, taxInvoices, pendingIncomes })
 
-  const handleDelete = () => {
-    cancelTransaction(tx)
-    setConfirmDelete(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  // รอให้ฐานข้อมูลยกเลิกเสร็จก่อนปิดกล่อง — ถ้าล้ม (เช่นไม่มีสิทธิ์) ต้องเห็นตรงนี้
+  // ไม่ใช่กล่องปิดเหมือนสำเร็จแล้วรายการยังอยู่
+  const handleDelete = async () => {
+    if (deleting) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await cancelTransaction(tx)
+      setConfirmDelete(false)
+    } catch (err) {
+      setDeleteError(err.message)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -105,16 +119,21 @@ function TxCard({ tx, onEdit }) {
         title="ยืนยันการยกเลิกรายการ"
         message={`ยกเลิกรายการ "${tx.itemName}" ${tx.amount.toLocaleString()} บาท\n\nผลที่จะเกิด:\n${cancelEffects.map(e => `• ${e}`).join('\n')}`}
         onConfirm={handleDelete}
-        onCancel={() => setConfirmDelete(false)}
-        confirmLabel="ยืนยันยกเลิก"
+        onCancel={() => { setConfirmDelete(false); setDeleteError('') }}
+        confirmLabel={deleting ? 'กำลังยกเลิก…' : 'ยืนยันยกเลิก'}
         danger
       />
+      {deleteError && confirmDelete && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[80] text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 shadow-lg">
+          ยกเลิกรายการไม่สำเร็จ — {deleteError}
+        </div>
+      )}
     </>
   )
 }
 
 export default function TransactionHistoryPanel() {
-  const { transactions } = useTransactionStore()
+  const { transactions, ensureRange } = useTransactionStore()
   const categories = useCategoryStore((s) => s.categories)
   const [filter, setFilter] = useState('month')
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
@@ -124,6 +143,11 @@ export default function TransactionHistoryPanel() {
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState(null)
   const PAGE_SIZE = 30
+
+  // เลือกช่วงย้อนหลังเกิน 24 เดือนที่โหลดไว้ → ดึงรายการเก่ามาเพิ่มก่อนกรอง
+  useEffect(() => {
+    ensureRange(startDate).catch((err) => console.warn('โหลดรายการย้อนหลังไม่สำเร็จ:', err))
+  }, [startDate, ensureRange])
 
   // หมวดหมู่แยกตามประเภท จึงกรองด้วยหมวดหมู่ได้เมื่อเลือกรายรับหรือรายจ่ายแล้วเท่านั้น
   const catTree = useMemo(

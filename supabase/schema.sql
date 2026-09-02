@@ -151,6 +151,8 @@ create table if not exists recurring_entries (
   paid_method        text check (paid_method in ('cash', 'transfer', 'pending')),
   transaction_id     uuid,
   pending_payment_id uuid,
+  transfer_account_id uuid references transfer_accounts(id) on delete set null, -- บัญชีที่จ่ายจริง (ใช้ตอนยกเลิกการจ่าย)
+  amount_updated_at  timestamptz,                 -- ครั้งล่าสุดที่ผู้ใช้กรอกยอดของรอบนี้
   created_at         timestamptz not null default now(),
   unique (recurring_id, month)                    -- generateEntries เรียกซ้ำได้โดยไม่เกิดรายการซ้ำ
 );

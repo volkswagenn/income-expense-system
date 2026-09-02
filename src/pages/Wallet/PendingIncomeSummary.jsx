@@ -12,29 +12,37 @@ export default function PendingIncomeSummary({ fullPage = false }) {
   const { pendingIncomes = [], receivePendingIncomeAtomic, getPendingIncomeTotal } = usePendingStore()
   const [receiveConfirm, setReceiveConfirm] = useState(null) // { item, method }
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const unpaid = pendingIncomes.filter((p) => p.status === 'pending')
   const total = getPendingIncomeTotal()
   const list = fullPage ? unpaid : unpaid.slice(0, 5)
 
   /** กดรับเงินจากหน้ากระเป๋าเงิน — RPC เดียวจบเหมือนหน้ารายการรอดำเนินการ */
-  const executeReceive = async (item, method, receivedDate) => {
+  const executeReceive = async (item, method, receivedDate, accountId = null) => {
     if (busy) return
     setBusy(true)
+    setActionError('')
     try {
+      // รับด้วยเงินโอนต้องส่งบัญชีที่ผู้ใช้เลือกใน popup ไปด้วย ไม่งั้น RPC ปฏิเสธทันที
       await receivePendingIncomeAtomic(item.id, {
         method,
-        accountId: null,
+        accountId,
         date: receivedDate,
         log: buildLogEntry({
           activityType: 'RECEIVE_INCOME',
           description: `รับเงิน "${item.description}" ${item.amount.toLocaleString()} บาท (${method === 'cash' ? 'เงินสด' : 'เงินโอน'}) วันที่ ${receivedDate}`,
-          walletEffect: { target: 'cash', delta: +item.amount },
-          newValue: { pendingIncomeId: item.id, receivedDate },
+          walletEffect: {
+            target: method === 'cash' ? 'cash' : `transfer:${accountId}`,
+            delta: +item.amount,
+            transferAccountId: accountId,
+          },
+          newValue: { pendingIncomeId: item.id, receivedDate, transferAccountId: accountId },
         }),
       })
-      await useWalletStore.getState().refresh()
       setReceiveConfirm(null)
+    } catch (err) {
+      setActionError(err.message)
     } finally {
       setBusy(false)
     }
@@ -55,6 +63,12 @@ export default function PendingIncomeSummary({ fullPage = false }) {
             </p>
           </div>
         </div>
+      )}
+
+      {actionError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-3">
+          ทำรายการไม่สำเร็จ — {actionError}
+        </p>
       )}
 
       <div className="space-y-2">
@@ -99,7 +113,7 @@ export default function PendingIncomeSummary({ fullPage = false }) {
         open={!!receiveConfirm}
         item={receiveConfirm?.item}
         method={receiveConfirm?.method}
-        onConfirm={(receivedDate) => executeReceive(receiveConfirm.item, receiveConfirm.method, receivedDate)}
+        onConfirm={(receivedDate, accountId) => executeReceive(receiveConfirm.item, receiveConfirm.method, receivedDate, accountId)}
         onCancel={() => setReceiveConfirm(null)}
       />
     </>

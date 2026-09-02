@@ -86,8 +86,17 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
     }
   }
 
+  // มีเงินโอนแต่ยังไม่ได้เลือกบัญชี — ห้ามนำเข้า ไม่งั้นยอดโอนถูกข้ามเงียบๆ
+  // ทั้งที่ข้อความสรุปและ log บอกว่านำเข้าครบ
+  const transferNeedsAccount = grandTransfer > 0 && !resolveAccount(accountId)
+
   const execute = async () => {
     if (saving) return
+    if (transferNeedsAccount) {
+      setConfirm(false)
+      setSaveError('มียอดเงินโอน กรุณาเลือกบัญชีที่จะรับเงินโอนก่อนนำเข้า')
+      return
+    }
     // เงินโอนที่นำเข้าทั้งชุดจะลงบัญชีเดียวกันที่เลือกไว้ด้านบน
     const acct = resolveAccount(accountId)
     const entries = []
@@ -153,8 +162,11 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
 
       {/* บัญชีปลายทางของยอดเงินโอนทั้งชุด */}
       {grandTransfer > 0 && (
-        <div className="max-w-sm">
+        <div className="max-w-sm space-y-1.5">
           <TransferAccountPicker value={accountId} onChange={setAccountId} label="เงินโอนเข้าบัญชี" />
+          {transferNeedsAccount && (
+            <p className="text-xs text-amber-700">ต้องเลือกบัญชีก่อน ไม่งั้นยอดเงินโอนจะไม่ถูกนำเข้า</p>
+          )}
         </div>
       )}
 

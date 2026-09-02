@@ -39,12 +39,16 @@ export default function LogDownloader() {
     setBusy(true)
     setError(null)
     try {
+      // ลบให้สำเร็จก่อนค่อยบันทึกประวัติ — ไม่งั้นถ้าลบล้ม (เช่นไม่ใช่เจ้าของร้าน)
+      // จะมี log บอกว่าล้างแล้วทั้งที่ไม่มีอะไรถูกลบ
+      const countBefore = getLogsCount()
+      await clearOldLogs(365)
       await addLog(buildLogEntry({
         activityType: 'LOG_CLEAR_OLD',
         description: 'ล้างประวัติเก่ากว่า 1 ปี',
-        oldValue: { countBefore: getLogsCount() },
+        oldValue: { countBefore },
+        newValue: { countAfter: getLogsCount() },
       }))
-      await clearOldLogs(365)
     } catch (err) {
       setError(err.message)
     } finally {

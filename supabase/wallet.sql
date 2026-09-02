@@ -23,19 +23,22 @@ begin
   perform assert_can_edit(p_shop);
   if p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่า 0'; end if;
 
+  -- ตรวจ `found` ทันทีหลัง update บัญชีเงินโอน — ถ้าไปตรวจหลัง update wallet_state
+  -- (ซึ่งเจอแถวเสมอ) ฝั่ง โอน→สด จะบวกเงินสดให้ทั้งที่บัญชีต้นทางไม่มีอยู่จริง
   if p_to = 'transfer' then
     update wallet_state set cash = cash - p_amount, updated_at = now() where shop_id = p_shop;
     update transfer_accounts set balance = balance + p_amount
      where id = p_account and shop_id = p_shop;
+    if not found then raise exception 'ไม่พบบัญชีเงินโอนของร้านนี้'; end if;
   elsif p_to = 'cash' then
     update transfer_accounts set balance = balance - p_amount
      where id = p_account and shop_id = p_shop;
+    if not found then raise exception 'ไม่พบบัญชีเงินโอนของร้านนี้'; end if;
     update wallet_state set cash = cash + p_amount, updated_at = now() where shop_id = p_shop;
   else
     raise exception 'ปลายทางไม่ถูกต้อง: %', p_to;
   end if;
 
-  if not found then raise exception 'ไม่พบบัญชีเงินโอนของร้านนี้'; end if;
   perform write_log(p_shop, p_log);
 end;
 $$;
@@ -165,7 +168,12 @@ begin
     if not found then raise exception 'ไม่พบบัญชีเงินโอนของร้านนี้'; end if;
   end if;
 
+  -- กระเป๋าย่อยที่ยืมมาอาจถูกลบไปแล้ว (FK เป็น set null) — ถ้าเป็นแบบนั้นห้ามตัดเงินหลัก
+  -- ทิ้งโดยไม่มีที่ให้คืน ต้องบอกผู้ใช้ให้ลบรายการยืมแทน
   update sub_wallets set balance = balance + v_loan.amount where id = v_loan.sub_wallet_id;
+  if not found then
+    raise exception 'กระเป๋าตังค์ย่อยที่ยืมมาถูกลบไปแล้ว คืนเงินไม่ได้ — ให้ลบรายการยืมนี้แทน';
+  end if;
 
   update loans
      set returned = true, returned_at = now(), return_method = p_method, return_account_id = p_account
@@ -217,7 +225,8 @@ begin
   if v_p.recurring_entry_id is not null then
     update recurring_entries
        set status = 'paid', paid_at = now(), paid_method = p_method,
-           transaction_id = v_tx.id, amount = v_p.amount
+           transaction_id = v_tx.id, amount = v_p.amount,
+           transfer_account_id = p_account
      where id = v_p.recurring_entry_id;
   end if;
 

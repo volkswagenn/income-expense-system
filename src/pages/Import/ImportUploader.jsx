@@ -4,7 +4,7 @@ import { th } from 'date-fns/locale'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { clearDates, importEntry, runImport } from '../../lib/importRunner'
+import { clearDates, earliestDate, importEntry, runImport } from '../../lib/importRunner'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import useWalletStore from '../../store/useWalletStore'
 import { parseImportFile } from '../../lib/importParser'
@@ -63,10 +63,16 @@ export default function ImportUploader({ formType, onDone }) {
   const [saving, setSaving] = useState(false)
   const inputRef = useRef(null)
 
-  const { transactions } = useTransactionStore()
+  const { transactions, ensureRange } = useTransactionStore()
   const { addLog } = useLogStore()
   const [accountId, setAccountId] = useState('')
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+
+  // แถวที่มีเงินโอนแต่ยังไม่ได้เลือกบัญชี — ห้ามนำเข้า ไม่งั้นยอดโอนจะถูกข้ามเงียบๆ
+  // ทั้งที่ข้อความสรุปบอกว่านำเข้าครบ
+  const transferRowsNeedAccount = formType === 'bytype'
+    && !resolveAccount(accountId)
+    && (parsedRows ?? []).some((r) => (Number(r.transfer) || 0) > 0)
 
   const datesWithData = parsedRows
     ? new Set(parsedRows.filter((r) => transactions.some((t) => t.date === r.date)).map((r) => r.date))
@@ -82,8 +88,12 @@ export default function ImportUploader({ formType, onDone }) {
       const buf = await f.arrayBuffer()
       const rows = parseImportFile(buf, COL_MAPS[formType])
       if (rows.length === 0) { setError('ไม่พบข้อมูลในไฟล์ หรือรูปแบบคอลัมน์ไม่ถูกต้อง'); return }
+      // store มีแค่ 24 เดือนล่าสุด — ไฟล์ที่ย้อนหลังกว่านั้นต้องโหลดรายการเก่ามาก่อน
+      // ไม่งั้นตรวจไม่เจอว่ามีข้อมูลเดิม แล้วนำเข้าซ้ำจนยอดเบิ้ล
+      await ensureRange(earliestDate(rows))
+      const loaded = useTransactionStore.getState().transactions
       setParsedRows(rows)
-      const existing = new Set(rows.filter((r) => transactions.some((t) => t.date === r.date)).map((r) => r.date))
+      const existing = new Set(rows.filter((r) => loaded.some((t) => t.date === r.date)).map((r) => r.date))
       setOverwriteDates(existing)
     } catch (err) {
       setError(err.message || 'อ่านไฟล์ไม่สำเร็จ')
@@ -116,6 +126,11 @@ export default function ImportUploader({ formType, onDone }) {
    */
   const execute = async () => {
     if (saving) return
+    if (transferRowsNeedAccount) {
+      setConfirm(false)
+      setError('มีแถวที่มียอดเงินโอน กรุณาเลือกบัญชีที่จะรับเงินโอนก่อนนำเข้า')
+      return
+    }
     // เงินโอนที่นำเข้าทั้งชุดจะลงบัญชีเดียวกันที่เลือกไว้
     const acct = resolveAccount(accountId)
 
@@ -300,9 +315,14 @@ export default function ImportUploader({ formType, onDone }) {
 
               <p className="text-xs text-gray-500">{parsedRows.length} แถวทั้งหมด — มีข้อมูล {validRows.length} แถว</p>
 
+              {transferRowsNeedAccount && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ไฟล์นี้มียอดเงินโอน — เลือกบัญชีที่จะรับเงินโอนด้านบนก่อน ไม่งั้นยอดโอนจะไม่ถูกนำเข้า
+                </p>
+              )}
               <button
                 className="btn btn-primary"
-                disabled={validRows.length === 0}
+                disabled={validRows.length === 0 || transferRowsNeedAccount}
                 onClick={() => setConfirm(true)}
               >
                 📥 นำเข้าข้อมูล ({validRows.length} แถว)

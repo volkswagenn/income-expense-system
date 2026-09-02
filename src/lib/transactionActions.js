@@ -1,6 +1,7 @@
 import useWalletStore from '../store/useWalletStore'
 import usePendingStore from '../store/usePendingStore'
 import useTransactionStore from '../store/useTransactionStore'
+import useRecurringStore from '../store/useRecurringStore'
 import { buildLogEntry } from './logBuilder'
 
 // ชื่อบัญชีเงินโอนสำหรับต่อท้ายข้อความอธิบายผล
@@ -116,10 +117,11 @@ export async function cancelTransaction(tx) {
     }),
   })
 
-  // ฐานข้อมูลเพิ่งแก้ยอดเงินและสถานะรายการค้าง/รอรับเงินไปหลายตาราง
-  // ดึงกลับมาให้ตรงกันทั้งชุด แทนที่จะเดาว่าอะไรเปลี่ยนไปบ้าง
+  // ฐานข้อมูลเพิ่งแก้ยอดเงิน สถานะรายการค้าง/รอรับเงิน และย้อนรอบรายการประจำ
+  // ที่ผูกอยู่ไปหลายตาราง — ดึงกลับมาให้ตรงกันทั้งชุด แทนที่จะเดาว่าอะไรเปลี่ยนไปบ้าง
   await Promise.all([
     useWalletStore.getState().refresh(),
     usePendingStore.getState().refresh(),
+    useRecurringStore.getState().refresh(),
   ])
 }

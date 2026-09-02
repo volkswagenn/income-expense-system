@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { Link } from 'react-router-dom'
@@ -10,7 +10,7 @@ import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import usePendingStore from '../../store/usePendingStore'
 import useWalletStore from '../../store/useWalletStore'
-import { addToWallet } from '../../lib/walletEngine'
+import { walletTarget } from '../../lib/api/transactions'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 
@@ -67,8 +67,17 @@ export default function IncomeForm() {
   const { addTransaction } = useTransactionStore()
   const { addLog } = useLogStore()
   const { addPendingIncome } = usePendingStore()
+  const refreshWallet = useWalletStore((s) => s.refresh)
+  // ระบบออนไลน์อย่างเดียว ต้องรอผลจริงจากเซิร์ฟเวอร์ จึงต้องกันกดซ้ำระหว่างรอ
+  const [saving, setSaving] = useState(false)
+  // ช่องที่บันทึกลงเซิร์ฟเวอร์สำเร็จแล้วในรอบนี้ — ถ้าช่องถัดไปล้ม ผู้ใช้กดบันทึกซ้ำ
+  // ได้โดยไม่สร้างรายการของช่องแรกซ้ำอีกรอบ (ล้างเมื่อสำเร็จครบหรือแก้ฟอร์ม)
+  const savedPartsRef = useRef(new Set())
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+  const set = (k, v) => {
+    savedPartsRef.current = new Set()
+    setForm((f) => ({ ...f, [k]: v }))
+  }
 
   const cashAmt = Number(form.cash) || 0
   const transferAmt = Number(form.transfer) || 0
@@ -76,7 +85,33 @@ export default function IncomeForm() {
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
 
-  const handleSave = () => {
+  const docFields = attachments.length > 0 ? {
+    attachments,
+    documentPath: attachments[0].path,
+    documentType: attachments[0].type,
+    documentLabel: attachments[0].label,
+  } : {}
+
+  const finishSaved = (msg, ms) => {
+    savedPartsRef.current = new Set()
+    clearDraft()
+    setSavedMsg(msg)
+    setSaved(true)
+    setUploadStatus(null)
+    setAttachments([])
+    setTimeout(() => setSaved(false), ms)
+  }
+
+  /**
+   * บันทึกรายรับ — แต่ละช่อง (สด / โอน / อื่นๆ) = 1 รายการ + เพิ่มเงิน + log
+   * จบใน RPC เดียว (post_transaction) เหมือนหน้ารายจ่าย
+   *
+   * ของเดิมเรียก addTransaction แล้ว addToWallet แยกกันโดยไม่ await สักตัว:
+   * ถ้า insert ล้ม เงินก็ยังถูกบวก, log เก็บ Promise แทนรายการ, และหน้าจอขึ้น
+   * "บันทึกสำเร็จ" ก่อนที่เซิร์ฟเวอร์จะตอบอะไรเลย
+   */
+  const handleSave = async () => {
+    if (saving) return
     if (!cashAmt && !transferAmt && !otherAmt) return setErrMsg('กรุณาใส่จำนวนเงินอย่างน้อย 1 ช่อง')
     if (otherAmt > 0 && !form.otherType) return setErrMsg('กรุณาระบุประเภทรายรับอื่นๆ')
     if (otherAmt > 0 && !isPendingMode && !form.otherMethod) return setErrMsg('กรุณาเลือกว่ารายรับอื่นๆ เข้ากระเป๋าไหน')
@@ -91,83 +126,102 @@ export default function IncomeForm() {
       }
     }
     setErrMsg('')
+    setSaving(true)
 
-    // ── PENDING MODE: รวมทุกยอดเป็น pendingIncome เดียว ──
-    if (isPendingMode) {
-      const totalAmt = cashAmt + transferAmt + otherAmt
+    try {
+      // ── PENDING MODE: รวมทุกยอดเป็น pendingIncome เดียว ──
+      if (isPendingMode) {
+        const totalAmt = cashAmt + transferAmt + otherAmt
+        const parts = []
+        if (cashAmt > 0) parts.push(`สด ${cashAmt.toLocaleString()}`)
+        if (transferAmt > 0) parts.push(`โอน ${transferAmt.toLocaleString()}`)
+        if (otherAmt > 0) parts.push(`${form.otherType || 'อื่นๆ'} ${otherAmt.toLocaleString()}`)
+
+        const noteText = [form.note, parts.join(' / ')].filter(Boolean).join(' | ')
+        const item = await addPendingIncome({
+          date,
+          amount: totalAmt,
+          description: `เปิดบิลรอรับเงิน ${date}`,
+          note: noteText,
+          source: !cashAmt && !transferAmt ? 'other' : 'main',
+          category: form.category || undefined,
+          otherIncomeType: otherAmt > 0 ? (form.otherType || 'อื่นๆ') : undefined,
+          // ผูกบัญชีไว้ล่วงหน้า เวลากดรับเงินโอนจะเข้าบัญชีนี้ทันที
+          ...(form.transferAccountId ? { defaultTransferAccountId: form.transferAccountId } : {}),
+          ...docFields,
+        })
+        await addLog(buildLogEntry({
+          activityType: 'OPEN_BILL_INCOME',
+          description: `เปิดบิลรอรับเงิน ${totalAmt.toLocaleString()} บาท (${date}) — ${parts.join(' / ')}`,
+          newValue: { pendingIncomeId: item.id, amount: totalAmt, billDate: date },
+        }))
+
+        setIsPendingMode(false)
+        finishSaved('✓ สร้างรายการรอรับเงินแล้ว', 3000)
+        return
+      }
+
+      // ── NORMAL MODE ──
+      const common = { date, type: 'income', category: form.category || undefined, note: form.note, detail: form.detail, ...docFields }
       const parts = []
-      if (cashAmt > 0) parts.push(`สด ${cashAmt.toLocaleString()}`)
-      if (transferAmt > 0) parts.push(`โอน ${transferAmt.toLocaleString()}`)
-      if (otherAmt > 0) parts.push(`${form.otherType || 'อื่นๆ'} ${otherAmt.toLocaleString()}`)
+      if (cashAmt > 0) {
+        parts.push({
+          key: 'cash',
+          tx: { ...common, amount: cashAmt, method: 'cash', itemName: 'รายรับเงินสด' },
+          activityType: 'ADD_INCOME_MAIN',
+          description: `รับเงินสด ${cashAmt.toLocaleString()} บาท`,
+        })
+      }
+      if (transferAmt > 0) {
+        parts.push({
+          key: 'transfer',
+          tx: { ...common, amount: transferAmt, method: 'transfer', transferAccountId, itemName: 'รายรับเงินโอน' },
+          activityType: 'ADD_INCOME_MAIN',
+          description: `รับเงินโอน ${transferAmt.toLocaleString()} บาท`,
+        })
+      }
+      if (otherAmt > 0) {
+        const method = form.otherMethod || 'cash'
+        const accountId = method === 'transfer' ? otherAccountId : null
+        parts.push({
+          key: 'other',
+          tx: {
+            ...common, amount: otherAmt, method,
+            ...(accountId ? { transferAccountId: accountId } : {}),
+            otherIncomeType: form.otherType,
+            itemName: form.otherType || 'รายรับอื่นๆ',
+          },
+          activityType: 'ADD_OTHER_INCOME',
+          description: `${form.otherType} ${otherAmt.toLocaleString()} บาท → กระเป๋า${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
+        })
+      }
 
-      const noteText = [form.note, parts.join(' / ')].filter(Boolean).join(' | ')
-      const item = addPendingIncome({
-        date,
-        amount: totalAmt,
-        description: `เปิดบิลรอรับเงิน ${date}`,
-        note: noteText,
-        source: !cashAmt && !transferAmt ? 'other' : 'main',
-        category: form.category || undefined,
-        otherIncomeType: otherAmt > 0 ? (form.otherType || 'อื่นๆ') : undefined,
-        // ผูกบัญชีไว้ล่วงหน้า เวลากดรับเงินโอนจะเข้าบัญชีนี้ทันที
-        ...(form.transferAccountId ? { defaultTransferAccountId: form.transferAccountId } : {}),
-        ...(attachments.length > 0 ? {
-          attachments,
-          documentPath: attachments[0].path,
-          documentType: attachments[0].type,
-          documentLabel: attachments[0].label,
-        } : {}),
-      })
-      addLog(buildLogEntry({
-        activityType: 'OPEN_BILL_INCOME',
-        description: `เปิดบิลรอรับเงิน ${totalAmt.toLocaleString()} บาท (${date}) — ${parts.join(' / ')}`,
-        newValue: { pendingIncomeId: item.id, amount: totalAmt, billDate: date },
-      }))
+      for (const part of parts) {
+        if (savedPartsRef.current.has(part.key)) continue
+        const target = walletTarget(part.tx.method, { transferAccountId: part.tx.transferAccountId ?? null })
+        await addTransaction(part.tx, {
+          effect: target ? { target, delta: +part.tx.amount } : null,
+          log: buildLogEntry({
+            activityType: part.activityType,
+            description: part.description,
+            walletEffect: target
+              ? { target: part.tx.method, delta: +part.tx.amount, transferAccountId: part.tx.transferAccountId ?? null }
+              : null,
+            newValue: { itemName: part.tx.itemName, amount: part.tx.amount, method: part.tx.method, date },
+          }),
+        })
+        savedPartsRef.current.add(part.key)
+      }
 
-      clearDraft()
-      setIsPendingMode(false)
-      setSavedMsg('✓ สร้างรายการรอรับเงินแล้ว')
-      setSaved(true)
-      setUploadStatus(null)
-      setAttachments([])
-      setTimeout(() => setSaved(false), 3000)
-      return
+      // ยอดเงินถูกแก้ที่เซิร์ฟเวอร์ ต้องดึงค่าจริงมาแสดง ไม่คำนวณเองเพราะอาจมีคนอื่นแก้พร้อมกัน
+      await refreshWallet()
+      finishSaved('✓ บันทึกสำเร็จ', 2000)
+    } catch (err) {
+      // ยังไม่ล้างฟอร์ม ผู้ใช้จะได้กดบันทึกซ้ำได้ (ช่องที่สำเร็จแล้วจะถูกข้าม)
+      setErrMsg(err.message)
+    } finally {
+      setSaving(false)
     }
-
-    // ── NORMAL MODE ──
-    if (cashAmt > 0) {
-      const tx = addTransaction({ date, type: 'income', amount: cashAmt, method: 'cash', category: form.category || undefined, note: form.note, detail: form.detail, itemName: 'รายรับเงินสด', ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}) })
-      addToWallet('cash', cashAmt, { activityType: 'ADD_INCOME_MAIN', description: `รับเงินสด ${cashAmt.toLocaleString()} บาท`, newValue: tx })
-    }
-    if (transferAmt > 0) {
-      const tx = addTransaction({ date, type: 'income', amount: transferAmt, method: 'transfer', transferAccountId, category: form.category || undefined, note: form.note, detail: form.detail, itemName: 'รายรับเงินโอน', ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}) })
-      addToWallet('transfer', transferAmt, { activityType: 'ADD_INCOME_MAIN', description: `รับเงินโอน ${transferAmt.toLocaleString()} บาท`, newValue: tx }, transferAccountId)
-    }
-    if (otherAmt > 0) {
-      const method = form.otherMethod || 'cash'
-      const accountId = method === 'transfer' ? otherAccountId : null
-      const tx = addTransaction({
-        date, type: 'income', amount: otherAmt, method,
-        ...(accountId ? { transferAccountId: accountId } : {}),
-        category: form.category || undefined,
-        otherIncomeType: form.otherType,
-        note: form.note, detail: form.detail,
-        itemName: form.otherType || 'รายรับอื่นๆ',
-        ...(attachments.length > 0 ? { attachments, documentPath: attachments[0].path, documentType: attachments[0].type, documentLabel: attachments[0].label } : {}),
-      })
-      addToWallet(method, otherAmt, {
-        activityType: 'ADD_OTHER_INCOME',
-        description: `${form.otherType} ${otherAmt.toLocaleString()} บาท → กระเป๋า${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
-        newValue: tx,
-      }, accountId)
-    }
-
-    clearDraft()
-    setSavedMsg('✓ บันทึกสำเร็จ')
-    setSaved(true)
-    setUploadStatus(null)
-    setAttachments([])
-    setTimeout(() => setSaved(false), 2000)
   }
 
   const isTaxUpload = form.docType === 'taxinvoice'
@@ -333,17 +387,20 @@ export default function IncomeForm() {
       {/* Action bar */}
       <div className="flex items-center gap-3 flex-wrap">
         {isPendingMode ? (
-          <button className="btn btn-warning px-6" onClick={handleSave}>
-            📋 สร้างรายการรอรับเงิน ({(cashAmt + transferAmt + otherAmt).toLocaleString()} บาท)
+          <button className="btn btn-warning px-6" onClick={handleSave} disabled={saving}>
+            {saving ? 'กำลังบันทึก…' : `📋 สร้างรายการรอรับเงิน (${(cashAmt + transferAmt + otherAmt).toLocaleString()} บาท)`}
           </button>
         ) : (
-          <button className="btn btn-success px-6" onClick={handleSave}>💾 บันทึกรายรับ</button>
+          <button className="btn btn-success px-6" onClick={handleSave} disabled={saving}>
+            {saving ? 'กำลังบันทึก…' : '💾 บันทึกรายรับ'}
+          </button>
         )}
 
         <button
           type="button"
           className={`btn text-sm ${isPendingMode ? 'btn-secondary' : 'btn-warning'}`}
           onClick={() => setIsPendingMode((v) => !v)}
+          disabled={saving}
         >
           {isPendingMode ? 'ยกเลิกโหมดรอรับเงิน' : 'เปิดบิลรอรับเงิน'}
         </button>

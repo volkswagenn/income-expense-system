@@ -3,6 +3,7 @@ import useTransactionStore from '../../store/useTransactionStore'
 import useWalletStore from '../../store/useWalletStore'
 import usePendingStore from '../../store/usePendingStore'
 import useLogStore from '../../store/useLogStore'
+import { walletTarget } from '../../lib/api/transactions'
 import { buildLogEntry } from '../../lib/logBuilder'
 import ConfirmPopup from './ConfirmPopup'
 import CategorySelect from './CategorySelect'
@@ -13,18 +14,8 @@ function walletAffected(method) {
   return method === 'cash' || method === 'transfer'
 }
 
-function applyWalletDelta(ws, method, delta, transferAccountId = null) {
-  if (method === 'cash') {
-    if (delta > 0) ws.addCash(delta)
-    else ws.deductCash(-delta)
-  } else if (method === 'transfer') {
-    if (delta > 0) ws.addTransfer(delta, transferAccountId)
-    else ws.deductTransfer(-delta, transferAccountId)
-  }
-}
-
 export default function EditTransactionPopup({ transaction, onClose }) {
-  const { updateTransaction } = useTransactionStore()
+  const { editTransaction } = useTransactionStore()
   const {
     pendingPayments, taxInvoices,
     addPending, deletePendingByTxId, syncPendingByTxId,
@@ -33,6 +24,8 @@ export default function EditTransactionPopup({ transaction, onClose }) {
   const { addLog } = useLogStore()
   const [form, setForm] = useState({ ...transaction })
   const [confirm, setConfirm] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -44,133 +37,146 @@ export default function EditTransactionPopup({ transaction, onClose }) {
     (t) => t.transactionId === transaction.id && t.status === 'waiting'
   )
 
-  const handleConfirm = () => {
-    const ws = useWalletStore.getState()
-    const oldAmt = Number(transaction.amount)
-    const newAmt = Number(form.amount)
+  /**
+   * แก้ไขรายการ — ย้อนเงินของยอด/วิธีเดิม + ตัด/เพิ่มเงินของยอดใหม่ + แก้แถว + log
+   * จบใน RPC เดียว (edit_transaction) แล้วค่อยซิงก์รายการค้าง/ใบกำกับที่ผูกอยู่
+   *
+   * ของเดิมยิง adjust_* 2–4 ตัวแยกกันโดยไม่ await แล้วค่อย update — เน็ตหลุดคั่นกลาง
+   * = ยอดเพี้ยนครึ่งทาง และ addTransfer คืน false เงียบๆ เมื่อหาบัญชีไม่เจอ
+   */
+  const handleConfirm = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const ws = useWalletStore.getState()
+      const oldAmt = Number(transaction.amount)
+      const newAmt = Number(form.amount)
+      if (!(newAmt > 0)) throw new Error('กรุณาใส่จำนวนเงินให้ถูกต้อง')
 
-    // เงินโอนต้องถอนคืนบัญชีเดิม แล้วลงบัญชีใหม่ที่ผู้ใช้เลือก
-    const oldAccountId = transaction.transferAccountId
-    const newAccountId = ws.resolveTransferAccountId(form.transferAccountId)
+      // เงินโอนต้องถอนคืนบัญชีเดิม แล้วลงบัญชีใหม่ที่ผู้ใช้เลือก
+      const oldAccountId = transaction.transferAccountId ?? null
+      const newAccountId = form.method === 'transfer' ? ws.resolveTransferAccountId(form.transferAccountId) : null
+      if (form.method === 'transfer' && !newAccountId) throw new Error('กรุณาเลือกบัญชีเงินโอน')
 
-    // ── Reverse the original wallet effect ──
-    if (transaction.type === 'income' && walletAffected(transaction.method)) {
-      applyWalletDelta(ws, transaction.method, -oldAmt, oldAccountId)
-    } else if (transaction.type === 'expense' && transaction.method !== 'pending' && walletAffected(transaction.method)) {
-      applyWalletDelta(ws, transaction.method, +oldAmt, oldAccountId)
-    }
+      const sign = (type) => (type === 'income' ? 1 : -1)
+      // 'pending' และ 'other' ไม่เคยแตะกระเป๋าเงิน → walletTarget คืน null
+      const oldTarget = walletAffected(transaction.method)
+        ? walletTarget(transaction.method, { transferAccountId: oldAccountId }) : null
+      const newTarget = walletAffected(form.method)
+        ? walletTarget(form.method, { transferAccountId: newAccountId }) : null
+      const reverse = oldTarget ? { target: oldTarget, delta: -sign(transaction.type) * oldAmt } : null
+      const apply = newTarget ? { target: newTarget, delta: sign(form.type) * newAmt } : null
 
-    // ── Apply the new wallet effect ──
-    if (form.type === 'income' && walletAffected(form.method)) {
-      applyWalletDelta(ws, form.method, +newAmt, newAccountId)
-    } else if (form.type === 'expense' && form.method !== 'pending' && walletAffected(form.method)) {
-      applyWalletDelta(ws, form.method, -newAmt, newAccountId)
-    }
-
-    const walletDesc = []
-    if (transaction.method !== form.method || oldAmt !== newAmt) {
-      if (walletAffected(transaction.method) && transaction.method !== 'pending') {
-        walletDesc.push(`คืน ${oldAmt.toLocaleString()} → ${transaction.method === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
+      const walletDesc = []
+      if (transaction.method !== form.method || oldAmt !== newAmt || oldAccountId !== newAccountId) {
+        if (reverse) walletDesc.push(`คืน ${oldAmt.toLocaleString()} → ${transaction.method === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
+        if (apply) walletDesc.push(`หัก ${newAmt.toLocaleString()} จาก${form.method === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
       }
-      if (walletAffected(form.method) && form.method !== 'pending') {
-        walletDesc.push(`หัก ${newAmt.toLocaleString()} จาก${form.method === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
-      }
-    }
 
-    updateTransaction(transaction.id, {
-      date: form.date,
-      amount: newAmt,
-      method: form.method,
-      itemName: form.itemName,
-      category: form.category,
-      vendor: form.vendor,
-      receiptNo: form.receiptNo,
-      taxStatus: form.taxStatus,
-      dueDate: form.dueDate,
-      taxDueDate: form.taxDueDate,
-      note: form.note,
-      detail: form.detail,
-      otherIncomeType: form.otherIncomeType,
-      transferAccountId: form.method === 'transfer' ? newAccountId : null,
-    })
-
-    // ── Pending payment sync (4-case) ──
-    const oldMethod = transaction.method
-    const newMethod = form.method
-    if (oldMethod === 'pending' && newMethod !== 'pending') {
-      deletePendingByTxId(transaction.id)
-      addLog(buildLogEntry({
-        activityType: 'DELETE_PENDING',
-        description: `ยกเลิกบิลค้างชำระ: "${form.itemName}" (เปลี่ยนวิธีชำระเป็น${newMethod === 'cash' ? 'เงินสด' : 'เงินโอน'})`,
-        oldValue: { transactionId: transaction.id, itemName: transaction.itemName },
-      }))
-    } else if (oldMethod !== 'pending' && newMethod === 'pending') {
-      addPending({
-        transactionId: transaction.id,
+      await editTransaction(transaction.id, {
+        date: form.date,
         amount: newAmt,
+        method: form.method,
+        itemName: form.itemName,
+        category: form.category || null,
+        vendor: form.vendor ?? null,
+        receiptNo: form.receiptNo ?? null,
+        taxStatus: form.taxStatus ?? null,
         dueDate: form.dueDate || null,
-        description: form.itemName,
-        openDate: form.date,
+        taxDueDate: form.taxDueDate || null,
+        note: form.note ?? null,
+        detail: form.detail ?? null,
+        otherIncomeType: form.otherIncomeType ?? null,
+        transferAccountId: newAccountId,
+      }, {
+        reverse,
+        apply,
+        log: buildLogEntry({
+          activityType: form.type === 'income' ? 'EDIT_INCOME' : 'EDIT_EXPENSE',
+          description: `แก้ไขรายการ "${form.itemName}" ${oldAmt.toLocaleString()} → ${newAmt.toLocaleString()} บาท (${transaction.method} → ${form.method})${walletDesc.length ? ' · ' + walletDesc.join(', ') : ''}`,
+          oldValue: transaction,
+          newValue: { ...form, amount: newAmt, transferAccountId: newAccountId, transactionId: transaction.id },
+          walletEffect: apply ? { target: form.method, delta: apply.delta, transferAccountId: newAccountId } : null,
+        }),
       })
-      addLog(buildLogEntry({
-        activityType: 'CREATE_PENDING',
-        description: `สร้างบิลค้างชำระ: "${form.itemName}" ${newAmt.toLocaleString()} บาท`,
-        newValue: { transactionId: transaction.id, amount: newAmt },
-      }))
-    } else if (oldMethod === 'pending' && newMethod === 'pending') {
-      syncPendingByTxId(transaction.id, {
-        description: form.itemName,
-        amount: newAmt,
-        dueDate: form.dueDate,
-      })
+
+      // ── Pending payment sync (4-case) ──
+      const oldMethod = transaction.method
+      const newMethod = form.method
+      if (oldMethod === 'pending' && newMethod !== 'pending') {
+        await deletePendingByTxId(transaction.id)
+        addLog(buildLogEntry({
+          activityType: 'DELETE_PENDING',
+          description: `ยกเลิกบิลค้างชำระ: "${form.itemName}" (เปลี่ยนวิธีชำระเป็น${newMethod === 'cash' ? 'เงินสด' : 'เงินโอน'})`,
+          oldValue: { transactionId: transaction.id, itemName: transaction.itemName },
+        }))
+      } else if (oldMethod !== 'pending' && newMethod === 'pending') {
+        await addPending({
+          transactionId: transaction.id,
+          amount: newAmt,
+          dueDate: form.dueDate || null,
+          description: form.itemName,
+          itemName: form.itemName,
+          openDate: form.date,
+        })
+        addLog(buildLogEntry({
+          activityType: 'CREATE_PENDING',
+          description: `สร้างบิลค้างชำระ: "${form.itemName}" ${newAmt.toLocaleString()} บาท`,
+          newValue: { transactionId: transaction.id, amount: newAmt },
+        }))
+      } else if (oldMethod === 'pending' && newMethod === 'pending') {
+        await syncPendingByTxId(transaction.id, {
+          description: form.itemName,
+          itemName: form.itemName,
+          amount: newAmt,
+          dueDate: form.dueDate || null,
+        })
+      }
+
+      // ── Tax invoice sync (4-case) ──
+      const oldTax = transaction.taxStatus
+      const newTax = form.taxStatus
+      if (newTax === 'waiting' && oldTax !== 'waiting') {
+        await addTaxInvoice({
+          transactionId: transaction.id,
+          itemName: form.itemName,
+          receiptNo: form.receiptNo,
+          amount: newAmt,
+          dueDate: form.taxDueDate || null,
+          createdAt: new Date().toISOString(),
+        })
+        addLog(buildLogEntry({
+          activityType: 'CREATE_TAX_INVOICE',
+          description: `สร้างการ์ดรอใบกำกับภาษี: "${form.itemName}" ${newAmt.toLocaleString()} บาท`,
+          newValue: { transactionId: transaction.id, itemName: form.itemName },
+        }))
+      } else if (oldTax === 'waiting' && newTax !== 'waiting') {
+        await deleteTaxInvoiceByTxId(transaction.id)
+        addLog(buildLogEntry({
+          activityType: 'DELETE_TAX_INVOICE',
+          description: `ยกเลิกการรอใบกำกับภาษี: "${form.itemName}"`,
+          oldValue: { transactionId: transaction.id, itemName: transaction.itemName },
+        }))
+      } else if (oldTax === 'waiting' && newTax === 'waiting') {
+        await syncTaxInvoiceByTxId(transaction.id, {
+          itemName: form.itemName,
+          receiptNo: form.receiptNo,
+          amount: newAmt,
+          dueDate: form.taxDueDate || null,
+        })
+      }
+
+      // ยอดเงินถูกฐานข้อมูลปรับแล้ว ดึงค่าจริงกลับมาแสดง
+      await ws.refresh()
+      setConfirm(false)
+      onClose()
+    } catch (err) {
+      setConfirm(false)
+      setError(err.message)
+    } finally {
+      setBusy(false)
     }
-
-    // ── Tax invoice sync (4-case) ──
-    const oldTax = transaction.taxStatus
-    const newTax = form.taxStatus
-    if (newTax === 'waiting' && oldTax !== 'waiting') {
-      addTaxInvoice({
-        transactionId: transaction.id,
-        itemName: form.itemName,
-        receiptNo: form.receiptNo,
-        amount: newAmt,
-        dueDate: form.taxDueDate || null,
-        createdAt: new Date().toISOString(),
-      })
-      addLog(buildLogEntry({
-        activityType: 'CREATE_TAX_INVOICE',
-        description: `สร้างการ์ดรอใบกำกับภาษี: "${form.itemName}" ${newAmt.toLocaleString()} บาท`,
-        newValue: { transactionId: transaction.id, itemName: form.itemName },
-      }))
-    } else if (oldTax === 'waiting' && newTax !== 'waiting') {
-      deleteTaxInvoiceByTxId(transaction.id)
-      addLog(buildLogEntry({
-        activityType: 'DELETE_TAX_INVOICE',
-        description: `ยกเลิกการรอใบกำกับภาษี: "${form.itemName}"`,
-        oldValue: { transactionId: transaction.id, itemName: transaction.itemName },
-      }))
-    } else if (oldTax === 'waiting' && newTax === 'waiting') {
-      syncTaxInvoiceByTxId(transaction.id, {
-        itemName: form.itemName,
-        receiptNo: form.receiptNo,
-        amount: newAmt,
-        dueDate: form.taxDueDate || null,
-      })
-    }
-
-    addLog(buildLogEntry({
-      activityType: form.type === 'income' ? 'EDIT_INCOME' : 'EDIT_EXPENSE',
-      description: `แก้ไขรายการ "${form.itemName}" ${oldAmt.toLocaleString()} → ${newAmt.toLocaleString()} บาท (${transaction.method} → ${form.method})${walletDesc.length ? ' · ' + walletDesc.join(', ') : ''}`,
-      oldValue: transaction,
-      newValue: { ...form, amount: newAmt },
-      walletEffect: walletAffected(form.method) ? {
-        target: form.method,
-        delta: form.type === 'income' ? newAmt : -newAmt,
-      } : null,
-    }))
-
-    setConfirm(false)
-    onClose()
   }
 
   return (
@@ -316,10 +322,19 @@ export default function EditTransactionPopup({ transaction, onClose }) {
             )}
           </div>
 
+          {/* ผลลัพธ์ที่ล้ม ต้องเห็นในป๊อปอัพ ไม่ใช่ปิดเงียบเหมือนสำเร็จ */}
+          {error && (
+            <p className="mx-5 mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 flex-shrink-0">
+              แก้ไขไม่สำเร็จ — {error}
+            </p>
+          )}
+
           {/* Footer */}
           <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end flex-shrink-0">
-            <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-            <button className="btn btn-primary" onClick={() => setConfirm(true)}>ยืนยันการแก้ไข</button>
+            <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
+            <button className="btn btn-primary" onClick={() => setConfirm(true)} disabled={busy}>
+              {busy ? 'กำลังบันทึก…' : 'ยืนยันการแก้ไข'}
+            </button>
           </div>
         </div>
       </div>

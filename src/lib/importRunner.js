@@ -66,6 +66,9 @@ export async function runImport(entries, onProgress) {
         }),
       })
     } catch (err) {
+      // แถวก่อนหน้าขยับยอดไปแล้ว ต้องดึงยอดจริงกลับมาก่อนโยน error
+      // ไม่งั้นหน้าจอโชว์ยอดเก่าจนกว่าจะรีโหลด
+      await useWalletStore.getState().refresh().catch(() => {})
       throw new Error(`นำเข้าไม่สำเร็จที่แถววันที่ ${tx.date} (บันทึกไปแล้ว ${saved} รายการ) — ${err.message}`)
     }
     saved += 1
@@ -75,4 +78,9 @@ export async function runImport(entries, onProgress) {
   // ยอดเงินถูกฐานข้อมูลขยับไปหลายรอบ ดึงกลับมาทั้งชุดให้ตรงกับของจริง
   await useWalletStore.getState().refresh()
   return saved
+}
+
+/** วันแรกสุดในชุดแถวที่นำเข้า — ใช้บอก store ให้โหลดรายการย้อนหลังถึงวันนั้นก่อนตรวจซ้ำ */
+export function earliestDate(rows) {
+  return (rows ?? []).reduce((min, r) => (r?.date && (!min || r.date < min) ? r.date : min), null)
 }

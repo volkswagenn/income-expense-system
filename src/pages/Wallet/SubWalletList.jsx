@@ -15,40 +15,43 @@ export default function SubWalletList() {
   const [sortOrder, setSortOrder] = useState([])
   const [sortConfirm, setSortConfirm] = useState(false)
 
-  const handleCreate = () => {
+  // ทุก action ต้องรอเซิร์ฟเวอร์ตอบก่อน — ของเดิมใช้ค่าที่คืนมาเป็น Promise
+  // (w.balance เป็น undefined → พังกลางทาง ฟอร์มไม่ปิด กดซ้ำได้กระเป๋าซ้ำ)
+  // และเขียน log ก่อนรู้ผล ทำให้ประวัติบอกว่าสำเร็จทั้งที่เซิร์ฟเวอร์ปฏิเสธ
+  const handleCreate = async () => {
     if (!newName.trim()) return
-    const w = createSubWallet(newName.trim(), Number(initBal) || 0)
+    const w = await createSubWallet(newName.trim(), Number(initBal) || 0)
     addLog(buildLogEntry({
       activityType: 'SUB_CREATE',
-      description: `สร้างกระเป๋า "${w.name}" ยอดเริ่มต้น ${w.balance.toLocaleString()} บาท`,
-      walletEffect: { target: `sub:${w.id}`, delta: w.balance },
+      description: `สร้างกระเป๋า "${w.name}" ยอดเริ่มต้น ${Number(w.balance).toLocaleString()} บาท`,
+      walletEffect: { target: `sub:${w.id}`, delta: Number(w.balance) || 0 },
     }))
     setNewName('')
     setInitBal('')
     setCreating(false)
   }
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const w = subWallets.find((sw) => sw.id === id)
     if (!w) return
+    await deleteSubWallet(id)
     addLog(buildLogEntry({
       activityType: 'SUB_DELETE',
-      description: `ลบกระเป๋า "${w.name}" (ยอดคงเหลือ ${w.balance.toLocaleString()} บาท)`,
+      description: `ลบกระเป๋า "${w.name}" (ยอดคงเหลือ ${Number(w.balance).toLocaleString()} บาท)`,
       oldValue: { name: w.name, balance: w.balance, subWalletId: id },
     }))
-    deleteSubWallet(id)
   }
 
-  const handleRename = (id, newNameVal) => {
+  const handleRename = async (id, newNameVal) => {
     const w = subWallets.find((sw) => sw.id === id)
     if (!w) return
+    await renameSubWallet(id, newNameVal)
     addLog(buildLogEntry({
       activityType: 'SUB_RENAME',
       description: `เปลี่ยนชื่อกระเป๋า "${w.name}" → "${newNameVal}"`,
       oldValue: { name: w.name },
       newValue: { name: newNameVal, subWalletId: id },
     }))
-    renameSubWallet(id, newNameVal)
   }
 
   const startSort = () => {

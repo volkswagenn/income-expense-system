@@ -1,7 +1,85 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getAttachmentUrl, isCloudPath } from '../../lib/api/attachments'
 
 function fileNameFromPath(path = '') {
   return String(path).split(/[\\/]/).filter(Boolean).pop() || 'ไฟล์แนบ'
+}
+
+function fileKind(path = '') {
+  const ext = fileNameFromPath(path).split('.').pop()?.toLowerCase() ?? ''
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic'].includes(ext)) return 'image'
+  if (ext === 'pdf') return 'pdf'
+  return 'other'
+}
+
+/**
+ * แสดงไฟล์จาก Storage — bucket เป็น private จึงต้องขอ signed URL ทุกครั้งที่เปิด
+ * พาธรุ่นเก่า (ไม่ได้ขึ้นต้นด้วย shop_id) คือไฟล์ที่เคยดาวน์โหลดเก็บไว้ในเครื่องผู้ใช้
+ * ระบบไม่มีไฟล์นั้น จึงบอกตรงๆ แทนที่จะพยายามโหลดแล้วขึ้น error
+ */
+function AttachmentPreview({ path }) {
+  const [url, setUrl] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const cloud = isCloudPath(path)
+  const kind = fileKind(path)
+  const fileName = fileNameFromPath(path)
+
+  useEffect(() => {
+    let alive = true
+    setUrl(null)
+    setError('')
+    if (!cloud) return undefined
+    setLoading(true)
+    getAttachmentUrl(path)
+      .then((u) => { if (alive) setUrl(u) })
+      .catch((err) => { if (alive) setError(err.message) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [path, cloud])
+
+  if (!cloud) {
+    return (
+      <div className="text-center px-6 py-10">
+        <p className="text-5xl mb-3">📄</p>
+        <p className="font-semibold text-gray-700">{fileName}</p>
+        <p className="text-sm text-gray-400 mt-1">
+          ไฟล์นี้ถูกเก็บไว้ในเครื่องที่บันทึกรายการ (ระบบรุ่นก่อนหน้า) เปิดจากเครื่องอื่นไม่ได้
+        </p>
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-7 h-7 rounded-full border-[3px] border-gray-200 border-t-gray-700 animate-spin" />
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="text-center px-6 py-10">
+        <p className="text-5xl mb-3">⚠️</p>
+        <p className="text-sm text-red-600">{error}</p>
+      </div>
+    )
+  }
+  if (!url) return null
+  if (kind === 'image') {
+    return <img src={url} alt={fileName} className="max-h-[60vh] w-auto max-w-full object-contain" />
+  }
+  if (kind === 'pdf') {
+    return <iframe src={url} title={fileName} className="w-full h-[60vh] bg-white" />
+  }
+  return (
+    <div className="text-center px-6 py-10">
+      <p className="text-5xl mb-3">📎</p>
+      <p className="font-semibold text-gray-700">{fileName}</p>
+      <a href={url} target="_blank" rel="noreferrer" className="btn btn-primary text-sm mt-3 inline-flex">
+        เปิดไฟล์
+      </a>
+    </div>
+  )
 }
 
 export function getPrimaryAttachment(record) {
@@ -85,13 +163,7 @@ export default function AttachmentViewerPopup({ attachment, attachments, onClose
 
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
           <div className="rounded-xl border border-gray-200 bg-gray-50 min-h-80 flex items-center justify-center overflow-hidden">
-            <div className="text-center px-6 py-10">
-              <p className="text-5xl mb-3">📄</p>
-              <p className="font-semibold text-gray-700">{fileName}</p>
-              <p className="text-sm text-gray-400 mt-1">
-                ไฟล์แนบถูกดาวน์โหลดเก็บไว้ในเครื่องของคุณ ระบบบันทึกไว้เฉพาะชื่อไฟล์
-              </p>
-            </div>
+            <AttachmentPreview key={activeAttachment?.path} path={activeAttachment?.path} />
           </div>
 
           {attachmentList.length > 1 && (
@@ -123,6 +195,14 @@ export default function AttachmentViewerPopup({ attachment, attachments, onClose
         </div>
 
         <div className="px-5 py-4 border-t bg-gray-50 flex flex-wrap gap-2 justify-end">
+          {isCloudPath(activeAttachment?.path) && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => getAttachmentUrl(activeAttachment.path).then((u) => window.open(u, '_blank', 'noopener')).catch(() => {})}
+            >
+              เปิดในแท็บใหม่
+            </button>
+          )}
           <button className="btn btn-primary" onClick={onClose}>ปิด</button>
         </div>
       </div>

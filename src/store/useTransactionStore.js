@@ -1,7 +1,9 @@
 import { create } from 'zustand'
+import { format, subDays } from 'date-fns'
 import * as txApi from '../lib/api/transactions'
 
-export const INITIAL = { transactions: [] }
+// loadedFrom = วันแรกสุดที่โหลดมาไว้ใน store แล้ว (รายการเก่ากว่านี้ยังอยู่ในฐานข้อมูล)
+export const INITIAL = { transactions: [], loadedFrom: null }
 
 /**
  * ธุรกรรมทั้งหมด
@@ -16,11 +18,26 @@ const useTransactionStore = create((set, get) => ({
   ...INITIAL,
   _reset: () => set(INITIAL),
 
-  _hydrate: (transactions) => set({ transactions: transactions ?? [] }),
+  _hydrate: (transactions) =>
+    set({ transactions: transactions ?? [], loadedFrom: txApi.defaultRangeStart() }),
+
+  /** ดึงช่วงที่โหลดไว้ใหม่ทั้งชุด — ใช้เมื่อ realtime แจ้งว่าเครื่องอื่นแก้รายการ */
+  refresh: async () => {
+    const from = get().loadedFrom ?? txApi.defaultRangeStart()
+    const rows = await txApi.listTransactions({ from })
+    set({ transactions: rows, loadedFrom: from })
+  },
+
+  /**
+   * ใส่รายการที่ฐานข้อมูลสร้างให้จาก RPC อื่น (จ่ายรายการค้าง / รับเงินรอรับ)
+   * เข้า store โดยไม่ต้องดึงใหม่ทั้งชุด — ข้ามถ้ามีอยู่แล้ว (realtime อาจใส่ให้ก่อน)
+   */
+  insertLocal: (tx) =>
+    set((s) => (s.transactions.some((t) => t.id === tx.id) ? s : { transactions: [tx, ...s.transactions] })),
 
   addTransaction: async (data, { effect = null, log = null } = {}) => {
     const tx = await txApi.createTransaction(data, { effect, log })
-    set((s) => ({ transactions: [tx, ...s.transactions] }))
+    get().insertLocal(tx)
     return tx
   },
 
@@ -28,6 +45,27 @@ const useTransactionStore = create((set, get) => ({
     const tx = await txApi.updateTransaction(id, changes)
     set((s) => ({ transactions: s.transactions.map((t) => (t.id === id ? { ...t, ...tx } : t)) }))
     return tx
+  },
+
+  /** แก้ไขรายการพร้อมย้อน/ปรับยอดเงินใน RPC เดียว (ดู editTransaction ใน api) */
+  editTransaction: async (id, changes, { reverse = null, apply = null, log = null } = {}) => {
+    const tx = await txApi.editTransaction(id, changes, { reverse, apply, log })
+    set((s) => ({ transactions: s.transactions.map((t) => (t.id === id ? { ...t, ...tx } : t)) }))
+    return tx
+  },
+
+  /**
+   * ทำให้ store มีรายการตั้งแต่วันที่ระบุ — เรียกก่อนกรอง/รายงาน/ตรวจซ้ำที่ย้อนหลัง
+   * เกินช่วง 24 เดือนที่โหลดตอนเปิดแอป ไม่งั้นจะขึ้นว่า "ไม่มีข้อมูล" ทั้งที่มีอยู่จริง
+   */
+  ensureRange: async (from) => {
+    const { loadedFrom } = get()
+    if (!from) return
+    if (loadedFrom && from >= loadedFrom) return
+    // ดึงเฉพาะส่วนที่ยังไม่มี: จาก `from` ถึงวันก่อนหน้าช่วงที่โหลดไว้แล้ว
+    const to = loadedFrom ? format(subDays(new Date(loadedFrom + 'T00:00:00'), 1), 'yyyy-MM-dd') : null
+    await get().loadRange(from, to)
+    set({ loadedFrom: from })
   },
 
   /**

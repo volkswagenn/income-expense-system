@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ReportSelector, { REPORT_TYPES } from './ReportSelector'
 import ReportTable from './ReportTable'
 import ReportChart from './ReportChart'
@@ -35,7 +35,13 @@ export default function ReportsPage() {
   const [showChart, setShowChart] = useState(true)
   const [groupBy, setGroupBy] = useState('day')
 
-  const { transactions } = useTransactionStore()
+  const { transactions, ensureRange } = useTransactionStore()
+
+  // store โหลดแค่ 24 เดือนล่าสุด — เลือกช่วงย้อนหลังกว่านั้นต้องดึงเพิ่มจากเซิร์ฟเวอร์
+  // ไม่งั้นรายงานขึ้นว่า "ไม่มีข้อมูล" และไฟล์ที่ส่งออกขาดข้อมูลเก่าเงียบๆ
+  useEffect(() => {
+    ensureRange(startDate).catch((err) => console.warn('โหลดรายการย้อนหลังไม่สำเร็จ:', err))
+  }, [startDate, ensureRange])
 
   const filtered = useMemo(
     () => transactions.filter((t) => t.date >= startDate && t.date <= endDate),

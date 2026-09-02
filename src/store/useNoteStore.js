@@ -19,6 +19,9 @@ const useNoteStore = create((set, get) => ({
   /** เรียกตอนเปิดแอป ด้วยข้อมูลที่โหลดมาแล้วจาก loadAllData() */
   _hydrate: (notes) => set({ notes: notes ?? {} }),
 
+  /** ดึงใหม่ทั้งชุด — ใช้เมื่อ realtime แจ้งว่าเครื่องอื่นแก้โน้ต */
+  refresh: async () => set({ notes: await notesApi.listNotes() }),
+
   setNote: async (date, text) => {
     const previous = get().notes[date]
 

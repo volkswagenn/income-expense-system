@@ -112,8 +112,10 @@ export default function CategoriesPage() {
     if (node) setSelectedId(node.id)
   }
 
-  const handleCreate = (name, parentId) => {
-    const item = addCategory(name, catType, parentId)
+  // store action เป็น async — ต้องรอผลก่อนใช้ค่าและก่อนเขียน log
+  // ของเดิม item เป็น Promise → log ได้ {} และ selectedId เป็น undefined
+  const handleCreate = async (name, parentId) => {
+    const item = await addCategory(name, catType, parentId)
     const parent = parentId ? categories.find((c) => c.id === parentId) : null
     addLog(buildLogEntry({
       activityType: 'CATEGORY_CREATE',
@@ -126,9 +128,9 @@ export default function CategoriesPage() {
     setSelectedId(item.id)
   }
 
-  const handleRename = (id, name) => {
+  const handleRename = async (id, name) => {
     const old = categories.find((c) => c.id === id)
-    updateCategory(id, name)
+    await updateCategory(id, name)
     addLog(buildLogEntry({
       activityType: 'CATEGORY_UPDATE',
       description: `แก้ไขหมวดหมู่${theme.label} "${old?.name ?? id}" → "${name}"`,
@@ -138,10 +140,10 @@ export default function CategoriesPage() {
     setRenamingId(null)
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     const node = deleteTarget
     const subCount = node.children?.length ?? 0
-    softDeleteCategory(node.id)
+    await softDeleteCategory(node.id)
     addLog(buildLogEntry({
       activityType: 'CATEGORY_DELETE',
       description: subCount > 0

@@ -19,6 +19,12 @@ const useAppStore = create((set) => ({
 
   _hydrate: (settings) => set({ notifyDaysBefore: settings?.notifyDaysBefore ?? 3 }),
 
+  /** ดึงใหม่ — ใช้เมื่อ realtime แจ้งว่าเจ้าของร้านแก้ค่าตั้งค่าจากเครื่องอื่น */
+  refresh: async () => {
+    const settings = await settingsApi.loadSettings()
+    set({ notifyDaysBefore: settings?.notifyDaysBefore ?? 3 })
+  },
+
   setNotifyDaysBefore: async (n) => {
     const previous = useAppStore.getState().notifyDaysBefore
     const value = Number(n) || 0

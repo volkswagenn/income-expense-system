@@ -157,7 +157,7 @@ function MovePopup({ accounts, onConfirm, onClose }) {
 
 export default function TransferAccountList() {
   const accounts = useWalletStore((s) => s.transferAccounts)
-  const { createTransferAccount, updateTransferAccount, deleteTransferAccount } = useWalletStore()
+  const { createTransferAccount, updateTransferAccount, deleteTransferAccount, adjustTransferAccount } = useWalletStore()
   const { addLog } = useLogStore()
 
   const [formOpen, setFormOpen] = useState(false)
@@ -165,46 +165,51 @@ export default function TransferAccountList() {
   const [deleting, setDeleting] = useState(null)
   const [moveOpen, setMoveOpen] = useState(false)
 
-  const handleSave = (data) => {
+  // ทุก action เป็น async ต้องรอเซิร์ฟเวอร์ตอบก่อนปิดฟอร์ม/เขียน log
+  // ของเดิมใช้ค่าที่คืนมาเป็น Promise (account.balance เป็น undefined → พังกลางทาง
+  // ฟอร์มไม่ปิด กดซ้ำได้บัญชีซ้ำ) และยอดที่แก้ถูกทิ้งเงียบๆ เพราะ api ไม่รับ balance
+  const handleSave = async (data) => {
     if (editing) {
       const before = { ...editing }
-      updateTransferAccount(editing.id, {
-        bankName: data.bankName,
-        name: data.name,
-        balance: data.initialBalance,
-      })
+      const newBalance = Number(data.initialBalance) || 0
+      const delta = newBalance - (Number(before.balance) || 0)
+      await updateTransferAccount(editing.id, { bankName: data.bankName, name: data.name })
+      // ยอดต้องขยับผ่าน RPC แบบ balance + delta ไม่ใช่เขียนทับ (กันคนอื่นแก้พร้อมกัน)
+      if (delta !== 0) await adjustTransferAccount(editing.id, delta)
       addLog(buildLogEntry({
         activityType: 'TRANSFER_ACCOUNT_UPDATE',
         description: `แก้ไขบัญชีเงินโอน "${formatAccount(before)}" → "${data.bankName} — ${data.name}"`
-          + (before.balance !== data.initialBalance
-            ? ` (ปรับยอด ${before.balance.toLocaleString()} → ${data.initialBalance.toLocaleString()} บาท)` : ''),
+          + (delta !== 0
+            ? ` (ปรับยอด ${Number(before.balance).toLocaleString()} → ${newBalance.toLocaleString()} บาท)` : ''),
         oldValue: before,
-        newValue: data,
+        newValue: { ...data, balance: newBalance },
+        walletEffect: delta !== 0 ? { target: 'transfer', delta, transferAccountId: editing.id } : null,
       }))
       setEditing(null)
     } else {
-      const account = createTransferAccount(data)
+      const account = await createTransferAccount(data)
       addLog(buildLogEntry({
         activityType: 'TRANSFER_ACCOUNT_CREATE',
-        description: `สร้างบัญชีเงินโอน "${formatAccount(account)}" ยอดเริ่มต้น ${account.balance.toLocaleString()} บาท`,
+        description: `สร้างบัญชีเงินโอน "${formatAccount(account)}" ยอดเริ่มต้น ${Number(account.balance).toLocaleString()} บาท`,
         newValue: account,
       }))
       setFormOpen(false)
     }
   }
 
-  const handleDelete = () => {
-    deleteTransferAccount(deleting.id)
+  const handleDelete = async () => {
+    const target = deleting
+    await deleteTransferAccount(target.id)
     addLog(buildLogEntry({
       activityType: 'TRANSFER_ACCOUNT_DELETE',
-      description: `ลบบัญชีเงินโอน "${formatAccount(deleting)}"`,
-      oldValue: deleting,
+      description: `ลบบัญชีเงินโอน "${formatAccount(target)}"`,
+      oldValue: target,
     }))
     setDeleting(null)
   }
 
-  const handleMove = (fromId, toId, amount) => {
-    moveBetweenTransferAccounts(fromId, toId, amount)
+  const handleMove = async (fromId, toId, amount) => {
+    await moveBetweenTransferAccounts(fromId, toId, amount)
     setMoveOpen(false)
   }
 

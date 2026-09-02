@@ -8,23 +8,25 @@
 
 ---
 
-## 0. สถานะปัจจุบัน (ตรวจจากโค้ดจริงแล้ว)
+## 0. สถานะปัจจุบัน (อัปเดต 2 ก.ย. 2026)
 
 | ส่วน | สถานะ |
 |---|---|
 | แบบสถาปัตยกรรม `ARCHITECTURE.md` | ✅ เสร็จ |
-| SQL schema `supabase/01_schema.sql` (327 บรรทัด) | ✅ เสร็จ ยังไม่เคยรัน |
-| RLS `supabase/02_policies.sql` (133 บรรทัด) | ✅ เสร็จ ยังไม่เคยรัน |
-| RPC `supabase/03_functions.sql` (222 บรรทัด) | ⚠️ ครอบไม่ครบ — ดูข้อ 1.3 |
-| `vercel.json` + `.env.example` | ✅ พร้อม |
-| แพ็กเกจ `@supabase/supabase-js` | ❌ ยังไม่ได้ติดตั้ง (ไม่มีใน package.json) |
-| `src/lib/supabase.js`, `src/lib/api/`, `src/auth/` | ❌ ยังไม่มีไฟล์เหล่านี้เลย |
-| store ทั้ง 8 ตัว (899 บรรทัด) | ❌ ยังใช้ `persist` → localStorage ทุกตัว |
-| `src/main.jsx` | ❌ ยัง `fetch('./SettingApp.txt')` และไม่มี auth |
-| โค้ดที่ยังอ้าง localStorage/sessionStorage | 9 ไฟล์ |
-| โค้ดที่ยังสร้าง id เองด้วย `uuid` | 9 ไฟล์ |
+| ฐานข้อมูล `supabase/setup.sql` (= schema + columns + policies + functions + wallet) | ✅ ติดตั้งบน Supabase แล้ว |
+| **แพตช์ `supabase/fix.sql`** (post_transaction, คอลัมน์ recurring_entries, edit_transaction, bucket) | ⚠️ **ต้องรันบนฐานข้อมูลที่ติดตั้งไว้แล้ว** — ไม่รัน = รายการที่บันทึกไม่มีชื่อ/หมวด และหน้ารายการประจำใช้ไม่ได้ |
+| `vercel.json` + `.env.example` + `.env.local` | ✅ พร้อม |
+| `src/lib/supabase.js`, `src/lib/api/`, `src/auth/` | ✅ เสร็จ |
+| store ทั้ง 8 ตัว | ✅ ไม่มี `persist` แล้ว เป็นแคชของเซิร์ฟเวอร์ |
+| งานที่แตะเงิน | ✅ ผ่าน RPC ทั้งหมด (post/edit/cancel_transaction, pay/receive, move_*, borrow/return) |
+| Realtime (`src/lib/realtime.js`) | ✅ ฟัง postgres_changes ทุกตารางของร้าน + refetch ตอนกลับมาที่แท็บ |
+| ไฟล์แนบ (`src/lib/api/attachments.js`) | ✅ อัปโหลดขึ้น bucket `attachments` + ดูผ่าน signed URL |
+| สิทธิ์ตาม role ใน UI | ⚠️ viewer ยังเห็นปุ่มแก้ไข (ฐานข้อมูลปฏิเสธให้ แต่ UI ยังไม่ซ่อน) |
+| เช็คลิสต์ก่อนใช้จริง (ข้อ 4) | ❌ ยังไม่ได้ทดสอบ |
 
-**แปลว่า**: งานที่เหลือคือฝั่ง client เกือบทั้งหมด (~13,000 บรรทัด โดยแกนที่ต้องรื้อจริงคือ store + lib/walletEngine)
+ไฟล์ SQL ในโฟลเดอร์ `supabase/` ตอนนี้: `setup.sql` (ติดตั้งครั้งแรกทั้งชุด), `fix.sql` (แพตช์ฐานข้อมูลเดิม),
+`check.sql` / `access.sql` (ตรวจ/ซ่อมสิทธิ์), `keep.sql` / `yearly.sql` (แพตช์ย่อยที่รวมอยู่ใน setup.sql แล้ว)
+ชื่อไฟล์ `01_schema.sql` … `05_wallet_functions.sql` ที่อ้างถึงด้านล่างคือชื่อเดิมของ `schema.sql` … `wallet.sql`
 
 ---
 

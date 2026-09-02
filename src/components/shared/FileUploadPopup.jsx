@@ -2,6 +2,10 @@ import { useState, useRef } from 'react'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { getDatedAttachmentFolder } from '../../lib/attachmentPaths'
+import { uploadAttachment } from '../../lib/api/attachments'
+
+// ขนาดสูงสุดต่อไฟล์ — ใบเสร็จ/ใบกำกับที่ถ่ายจากมือถือปกติไม่เกินนี้ กันไฟล์วิดีโอหลุดมา
+const MAX_FILE_BYTES = 15 * 1024 * 1024
 
 /**
  * props:
@@ -48,25 +52,21 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
       return
     }
 
+    const tooBig = files.find((f) => f.size > MAX_FILE_BYTES)
+    if (tooBig) {
+      setError(`ไฟล์ "${tooBig.name}" ใหญ่เกิน ${MAX_FILE_BYTES / 1024 / 1024} MB`)
+      return
+    }
+
     setSaving(true)
     setError('')
     try {
+      // อัปโหลดขึ้น Supabase Storage ทีละไฟล์ — คืนพาธที่เก็บจริงบนเซิร์ฟเวอร์
+      // ทุกเครื่องในร้านจึงเปิดดูได้ (ของเดิมดาวน์โหลดลงเครื่องแล้วเก็บแค่ชื่อ)
       const savedPaths = []
-
       for (let i = 0; i < files.length; i += 1) {
-        const file = files[i]
-        const filename = filenames[i]
-        const buffer = await file.arrayBuffer()
-        const filePath = `${folder}/${filename}`
-
-        const blob = new Blob([buffer])
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        a.click()
-        URL.revokeObjectURL(url)
-        savedPaths.push(filePath)
+        const path = await uploadAttachment(files[i], { folderBase, filename: filenames[i], createdAt })
+        savedPaths.push(path)
       }
       onConfirm(savedPaths)
     } catch (err) {
@@ -133,7 +133,7 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
                 ))}
               </div>
               <p className="text-blue-600 text-xs">
-                ไฟล์จะถูกดาวน์โหลดลงเครื่อง และบันทึกชื่อไว้ในระบบเป็น {folder}/
+                ไฟล์จะถูกอัปโหลดขึ้นเซิร์ฟเวอร์ที่ {folder.replace(/^[^/]+\//, '')}/ — ทุกเครื่องในร้านเปิดดูได้
               </p>
             </div>
           )}
@@ -158,7 +158,7 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
             onClick={handleConfirm}
             disabled={saving}
           >
-            {saving ? 'กำลังบันทึก…' : files.length > 0 ? `💾 บันทึกไฟล์ (${files.length})` : 'ยืนยัน'}
+            {saving ? 'กำลังอัปโหลด…' : files.length > 0 ? `☁️ อัปโหลด (${files.length})` : 'ยืนยัน'}
           </button>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { setShopId } from '../lib/api/context'
+import { setShopId, setShopRole } from '../lib/api/context'
 import { configError, supabase, toThaiError } from '../lib/supabase'
 import { resetStores } from '../store/hydrate'
 
@@ -62,8 +62,15 @@ export function AuthProvider({ children }) {
 
     // หมายเหตุ: ห้าม await supabase ตัวอื่นใน callback นี้ (supabase-js จะค้าง)
     // จึงแค่เก็บ session ไว้ แล้วให้ effect ข้างล่างเป็นคนโหลดข้อมูลต่อ
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      if (alive) setSession(s ?? null)
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (!alive) return
+      // เซสชันหลุดเอง (token หมดอายุ / ถูกเพิกถอน) ไม่ได้ผ่าน signOut() ของเรา
+      // ต้องล้าง store ตรงนี้ด้วย ไม่งั้นข้อมูลร้านเดิมค้างให้คนที่ล็อกอินต่อเห็น
+      if (event === 'SIGNED_OUT' || !s) {
+        resetStores()
+        setShopId(null)
+      }
+      setSession(s ?? null)
     })
 
     return () => {
@@ -101,6 +108,7 @@ export function AuthProvider({ children }) {
         }
         // ต้องตั้งก่อน render แอป เพราะทุก api/* อ่าน shopId จากตรงนี้
         setShopId(shop.id)
+        setShopRole(role)
         setState({ status: 'ready', profile, shop, role, error: null })
       })
       .catch((err) => {
@@ -125,7 +133,12 @@ export function AuthProvider({ children }) {
     // แล้วโผล่ให้คนที่ล็อกอินต่อจากนี้เห็นชั่วขณะก่อน hydrate รอบใหม่จะเสร็จ
     resetStores()
     setShopId(null)
-    await supabase.auth.signOut()
+    try {
+      await supabase.auth.signOut()
+    } finally {
+      // ถ้าเซิร์ฟเวอร์ตอบไม่ได้ (ออฟไลน์) ก็ต้องออกจากหน้าจอให้จริง ไม่ค้างอยู่กับ store ว่างเปล่า
+      setSession(null)
+    }
   }, [])
 
   const changePassword = useCallback(async (newPassword) => {

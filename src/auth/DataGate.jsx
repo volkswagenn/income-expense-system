@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import Icon from '../components/shared/Icon'
 import { hydrateStores } from '../store/hydrate'
+import { subscribeRealtime } from '../lib/realtime'
+import { useAuth } from './AuthProvider'
 
 /**
  * โหลดข้อมูลของร้านให้ครบก่อนเข้าแอป
@@ -9,9 +11,17 @@ import { hydrateStores } from '../store/hydrate'
  * ไม่ใช่ปล่อยให้เข้าไปแล้วเห็นหน้าจอว่างเปล่าซึ่งแยกไม่ออกว่าข้อมูลหายจริงหรือแค่โหลดไม่มา
  */
 export default function DataGate({ children }) {
+  const { shopId } = useAuth()
   const [status, setStatus] = useState('loading') // loading | ready | error
   const [error, setError] = useState(null)
   const [attempt, setAttempt] = useState(0)
+
+  // โหลดข้อมูลครบแล้วค่อยเริ่มฟัง realtime — เปิดก่อนหน้านั้นไม่มีประโยชน์
+  // (hydrate จะเขียนทับอยู่ดี) และต้องหยุดฟังเมื่อออกจากระบบ/สลับร้าน
+  useEffect(() => {
+    if (status !== 'ready' || !shopId) return undefined
+    return subscribeRealtime(shopId)
+  }, [status, shopId])
 
   const retry = useCallback(() => {
     setStatus('loading')

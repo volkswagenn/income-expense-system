@@ -45,6 +45,16 @@ const useCategoryStore = create((set, get) => ({
       quickItems: quickItems ?? [],
     }),
 
+  /** ดึงใหม่ทั้งชุด — ใช้เมื่อ realtime แจ้งว่าเครื่องอื่นแก้หมวดหมู่/ผู้ขาย/รายการด่วน */
+  refresh: async () => {
+    const [categories, vendors, quickItems] = await Promise.all([
+      categoriesApi.listCategories(),
+      categoriesApi.listVendors(),
+      categoriesApi.listQuickItems(),
+    ])
+    set({ categories, vendors, quickItems })
+  },
+
   // ── หมวดหมู่ ──────────────────────────────────────────────────────────────
 
   addCategory: async (name, type, parentId = null) => {

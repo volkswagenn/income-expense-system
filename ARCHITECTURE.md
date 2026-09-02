@@ -56,9 +56,13 @@ Supabase ตรงๆ ผ่าน anon key ส่วนความปลอด
 
 | ไฟล์ | เนื้อหา |
 |---|---|
-| [supabase/01_schema.sql](supabase/01_schema.sql) | ตารางทั้งหมด + index + trigger + เปิด realtime |
-| [supabase/02_policies.sql](supabase/02_policies.sql) | RLS ทุกตาราง + policy ของ Storage |
-| [supabase/03_functions.sql](supabase/03_functions.sql) | RPC สำหรับงานที่ต้องจบในครั้งเดียว |
+| [supabase/setup.sql](supabase/setup.sql) | **ติดตั้งครั้งแรกทั้งชุด** — รวมทุกไฟล์ด้านล่างไว้ในไฟล์เดียว |
+| [supabase/fix.sql](supabase/fix.sql) | แพตช์สำหรับฐานข้อมูลที่ติดตั้งไปก่อนแล้ว (รันซ้ำได้) |
+| [supabase/schema.sql](supabase/schema.sql) | ตารางทั้งหมด + index + trigger + เปิด realtime |
+| [supabase/columns.sql](supabase/columns.sql) | คอลัมน์ที่เติมภายหลังจากการไล่เทียบกับหน้าจอ |
+| [supabase/policies.sql](supabase/policies.sql) | RLS ทุกตาราง + policy ของ Storage |
+| [supabase/functions.sql](supabase/functions.sql) | RPC สำหรับงานที่ต้องจบในครั้งเดียว (post/edit/cancel_transaction ฯลฯ) |
+| [supabase/wallet.sql](supabase/wallet.sql) | RPC ที่ย้ายเงินสองก้อนพร้อมกัน + จ่าย/รับรายการค้าง |
 
 ### ตารางข้อมูล (ทุกตารางมี `shop_id`)
 
@@ -154,8 +158,11 @@ supabase.channel(`shop:${shopId}`)
   .subscribe()
 ```
 
-- ตารางที่เปิด realtime ไว้แล้วอยู่ท้ายไฟล์ `01_schema.sql`
+- ตารางที่เปิด realtime ไว้แล้วอยู่ท้ายไฟล์ `schema.sql`
 - เมื่อ tab กลับมา active (`visibilitychange`) ให้ refetch ข้อมูลใหม่ทั้งชุด กัน event ที่ตกหล่นตอนหลับ
+- ของจริงอยู่ที่ `src/lib/realtime.js` — ไม่แพตช์ทีละแถวจาก payload แต่ "ดึงใหม่ทั้งชุด" ของ store
+  ที่เกี่ยวกับตารางนั้น (debounce 400ms) เพราะงานที่แตะเงินแก้หลายตารางในทรานแซกชันเดียว
+  ถ้าแพตช์ทีละ event หน้าจอจะมีจังหวะเห็นครึ่งเดียว; `DataGate` เป็นคน subscribe หลัง hydrate เสร็จ
 
 ## 6. ไฟล์แนบ (Supabase Storage)
 

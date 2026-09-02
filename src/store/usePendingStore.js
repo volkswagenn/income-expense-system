@@ -1,5 +1,21 @@
 import { create } from 'zustand'
 import * as pendingApi from '../lib/api/pending'
+import useTransactionStore from './useTransactionStore'
+import useWalletStore from './useWalletStore'
+import useRecurringStore from './useRecurringStore'
+
+/**
+ * หลัง RPC จ่าย/รับเงิน ฐานข้อมูลสร้าง transaction + ขยับยอด + (อาจ) ปิดรอบรายการประจำ
+ * ให้ในทีเดียว — store อื่นต้องรู้ด้วย ไม่งั้นรายการใหม่ไม่โผล่ในแดชบอร์ด/ประวัติ
+ * และรายการประจำยังขึ้น "รอจ่าย" จนกว่าจะรีโหลด
+ */
+async function propagateAtomicResult(tx) {
+  useTransactionStore.getState().insertLocal(tx)
+  await Promise.all([
+    useWalletStore.getState().refresh(),
+    useRecurringStore.getState().refresh(),
+  ])
+}
 
 export const INITIAL = { pendingPayments: [], taxInvoices: [], pendingIncomes: [] }
 
@@ -62,10 +78,14 @@ const usePendingStore = create((set, get) => ({
     set((s) => ({
       pendingIncomes: s.pendingIncomes.map((p) =>
         p.id === id
-          ? { ...p, status: 'received', receivedAt: new Date().toISOString(), receivedMethod: method, transactionId: tx.id }
+          ? {
+            ...p, status: 'received', receivedAt: new Date().toISOString(),
+            receivedMethod: method, transferAccountId: accountId, transactionId: tx.id,
+          }
           : p
       ),
     }))
+    await propagateAtomicResult(tx)
     return tx
   },
 
@@ -111,10 +131,14 @@ const usePendingStore = create((set, get) => ({
     set((s) => ({
       pendingPayments: s.pendingPayments.map((p) =>
         p.id === id
-          ? { ...p, status: 'paid', paidAt: new Date().toISOString(), paidMethod: method, transactionId: tx.id }
+          ? {
+            ...p, status: 'paid', paidAt: new Date().toISOString(),
+            paidMethod: method, transferAccountId: accountId, transactionId: tx.id,
+          }
           : p
       ),
     }))
+    await propagateAtomicResult(tx)
     return tx
   },
 
