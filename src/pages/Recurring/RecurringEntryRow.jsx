@@ -12,7 +12,7 @@ const STATUS = {
   pending: { dot: 'bg-amber-400',   text: 'text-amber-600',   label: 'รอจ่าย' },
 }
 
-export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSkip, onEdit, onDelete }) {
+export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const cat = getCategories('expense').find((c) => c.id === item.category)
   const catName = cat ? cat.name : getCategoryName(item.category) || 'หมวดหมู่ถูกลบ'
@@ -57,7 +57,7 @@ export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSki
       </span>
 
       {/* ปุ่ม */}
-      <div className="flex gap-1 flex-shrink-0 w-[172px] justify-end whitespace-nowrap">
+      <div className="flex gap-1 flex-shrink-0 w-[208px] justify-end whitespace-nowrap">
         {isPending && (
           <>
             <button
@@ -70,9 +70,16 @@ export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSki
             <button
               onClick={() => onSkip(entry.id)}
               className="btn btn-secondary text-xs !h-7 px-2"
-              title="ข้ามเดือนนี้"
+              title="ข้ามเฉพาะเดือนนี้"
             >
               ⏭
+            </button>
+            <button
+              onClick={() => onPause(item)}
+              className="btn btn-secondary text-xs !h-7 px-2"
+              title="พักการเรียกเก็บหลายเดือน"
+            >
+              ⏸
             </button>
           </>
         )}

@@ -18,7 +18,7 @@ const OVERRIDES = {
 
 /** ฟิลด์ที่ต้องเป็นตัวเลขเสมอ — numeric ของ Postgres อาจกลับมาเป็น string */
 const NUMERIC_FIELDS = new Set([
-  'amount', 'balance', 'cash', 'fixedAmount', 'notifyDaysBefore', 'billingDay', 'billingMonth', 'sortOrder',
+  'amount', 'balance', 'cash', 'fixedAmount', 'notifyDaysBefore', 'billingDay', 'billingMonth', 'vatRate', 'sortOrder',
 ])
 
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())

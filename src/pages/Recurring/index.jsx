@@ -6,11 +6,16 @@ import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
-import { deductWallet, addToWallet, willGoNegative } from '../../lib/walletEngine'
+import { addToWallet, willGoNegative } from '../../lib/walletEngine'
+import { walletTarget } from '../../lib/api/transactions'
+import { cancelTransaction } from '../../lib/transactionActions'
+import useWalletStore from '../../store/useWalletStore'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import RecurringEntryCard from './RecurringEntryCard'
 import RecurringEntryRow from './RecurringEntryRow'
-import { isYearly, scheduleLabel } from '../../lib/recurringSchedule'
+import { isYearly, pauseInfo, pauseLabel, scheduleLabel } from '../../lib/recurringSchedule'
+import PausePopup from './PausePopup'
+import RecurringPausedCard from './RecurringPausedCard'
 import { localMonthStr } from '../../lib/dateUtils'
 import RecurringItemForm from './RecurringItemForm'
 import PayEntryPopup from './PayEntryPopup'
@@ -39,16 +44,23 @@ export default function RecurringPage() {
   const [negativeWarn, setNegativeWarn] = useState(null) // { amount, method, proceed }
   const [showItemList, setShowItemList] = useState(false)
   const [view, setView] = useState(loadView)
+  const [pauseTarget, setPauseTarget] = useState(null)
   const changeView = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} }
 
   const {
     items, entries, addItem, updateItem, toggleItem, deleteItem,
     generateEntries, updateEntry, markSkipped, getPendingCountCurrentMonth, syncPendingEntries,
+    pauseItem, resumeItem,
     syncEntryFromTransaction,
   } = useRecurringStore()
-  const { addTransaction, deleteTransaction } = useTransactionStore()
+  const { addTransaction, transactions } = useTransactionStore()
   const { addPending, deletePending, pendingPayments } = usePendingStore()
   const { addLog } = useLogStore()
+  const refreshWallet = useWalletStore((s) => s.refresh)
+  const refreshPending = usePendingStore((s) => s.refresh)
+  // งานที่แตะเงินต้องรอเซิร์ฟเวอร์ตอบ — กันกดซ้ำและแสดงผลที่ล้มบนหน้าจอ
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const month = monthKey(viewYear, viewMonth)
 
@@ -75,6 +87,16 @@ export default function RecurringPage() {
       .filter((x) => x.item)
       .sort((a, b) => a.item.billingDay - b.item.billingDay)
   }, [entries, items, month])
+
+  // เดือนที่ถูกพักไม่มี entry ในฐานข้อมูลเลย (ไม่ได้ออกบิล) จึงต้องหยิบจากแม่แบบมาแสดงเอง
+  // ตั้งใจให้ยังเห็นอยู่ เพราะต้องรู้ว่ารายการนี้ยังมีและจะกลับมาเมื่อไหร่
+  const pausedThisMonth = useMemo(() => {
+    return items
+      .filter((it) => it.enabled && !it.deleted)
+      .map((it) => ({ item: it, info: pauseInfo(it, month) }))
+      .filter((x) => x.info)
+      .sort((a, b) => a.item.billingDay - b.item.billingDay)
+  }, [items, month])
 
   const summary = useMemo(() => {
     const paid = monthEntries.filter((x) => x.entry.status === 'paid')
@@ -122,55 +144,103 @@ export default function RecurringPage() {
 
   const handlePay = (entry, item) => setPayTarget({ entry, item })
 
-  const executeMarkPaid = (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null) => {
-    let tx = null
+  const paidThisMonthFor = (itemId) =>
+    entries.some((e) => e.recurringId === itemId && e.month === localMonthStr() && e.status === 'paid')
 
-    let pendingPaymentId = null
-    if (paidMethod === 'pending') {
-      const p = addPending({
-        description: item.name,
-        itemName: item.name,
+  const handlePause = async (months) => {
+    const item = pauseTarget
+    const { from, until } = await pauseItem(item.id, months)
+    addLog(buildLogEntry({
+      activityType: 'RECURRING_UPDATE',
+      description: `พักการเรียกเก็บ "${item.name}" ${months} เดือน (ตั้งแต่ ${from} ถึงก่อน ${until})`,
+      newValue: { recurringId: item.id, pausedFrom: from, pausedUntil: until, months },
+    }))
+    setPauseTarget(null)
+  }
+
+  const handleResume = async (item) => {
+    await resumeItem(item.id)
+    addLog(buildLogEntry({
+      activityType: 'RECURRING_UPDATE',
+      description: `ยกเลิกการพักเรียกเก็บ "${item.name}" กลับมาเรียกเก็บตามปกติ`,
+    }))
+    // พักอยู่แปลว่าเดือนนี้ไม่มีรอบ พอเลิกพักต้องสร้างรอบให้ใหม่ทันที
+    await generateEntries(month)
+  }
+
+  /**
+   * กดจ่ายรอบรายการประจำ
+   *
+   * จ่ายสด/โอน: บันทึกรายการ + ตัดเงิน + log จบใน RPC เดียว (post_transaction)
+   * แล้วค่อยผูก entry กับรายการที่ได้ — ของเดิมเรียก addTransaction/deductWallet
+   * โดยไม่ await ทำให้ tx.id เป็น undefined entry จึงไม่เคยผูกกับรายการ (ยกเลิกไม่ได้)
+   * และเงินถูกตัดแยกอีกคำสั่ง ถ้าอันใดอันหนึ่งล้มยอดจะไม่ตรง
+   */
+  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null) => {
+    if (busy) return
+    setBusy(true)
+    setActionError('')
+    try {
+      let tx = null
+      let pendingPaymentId = null
+
+      if (paidMethod === 'pending') {
+        const p = await addPending({
+          description: item.name,
+          itemName: item.name,
+          amount,
+          dueDate: entry.dueDate,
+          category: item.category,
+          vendor: item.vendor,
+          note: item.note,
+          recurringEntryId: entry.id,
+          // พกวิธีจ่าย/บัญชีที่ตั้งไว้ไปด้วย เพื่อให้ตอนกดชำระใช้ได้ทันที
+          ...(item.defaultMethod && item.defaultMethod !== 'pending' ? { defaultMethod: item.defaultMethod } : {}),
+          ...(item.defaultTransferAccountId ? { defaultTransferAccountId: item.defaultTransferAccountId } : {}),
+        })
+        pendingPaymentId = p.id
+      } else {
+        const target = walletTarget(paidMethod, { transferAccountId: accountId })
+        if (!target) throw new Error('กรุณาเลือกบัญชีเงินโอน')
+        tx = await addTransaction({
+          type: 'expense',
+          date: paidDate,
+          amount,
+          category: item.category,
+          method: paidMethod,
+          ...(accountId ? { transferAccountId: accountId } : {}),
+          itemName: item.name,
+          vendor: item.vendor,
+          note: item.note,
+          recurringEntryId: entry.id,
+        }, {
+          effect: { target, delta: -amount },
+          log: buildLogEntry({
+            activityType: 'RECURRING_PAID',
+            description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
+            walletEffect: { target: paidMethod, delta: -amount, transferAccountId: accountId },
+            newValue: { recurringEntryId: entry.id, recurringId: item.id, amount, paidDate },
+          }),
+        })
+        await refreshWallet()
+      }
+
+      await updateEntry(entry.id, {
+        status: 'paid',
         amount,
-        dueDate: entry.dueDate,
-        category: item.category,
-        vendor: item.vendor,
-        note: item.note,
-        recurringEntryId: entry.id,
-        // พกวิธีจ่าย/บัญชีที่ตั้งไว้ไปด้วย เพื่อให้ตอนกดชำระใช้ได้ทันที
-        ...(item.defaultMethod && item.defaultMethod !== 'pending' ? { defaultMethod: item.defaultMethod } : {}),
-        ...(item.defaultTransferAccountId ? { defaultTransferAccountId: item.defaultTransferAccountId } : {}),
+        paidMethod,
+        transferAccountId: accountId,
+        paidAt: new Date(`${paidDate}T12:00:00`).toISOString(),
+        transactionId: tx?.id ?? null,
+        pendingPaymentId,
       })
-      pendingPaymentId = p.id
-    } else {
-      tx = addTransaction({
-        type: 'expense',
-        date: paidDate,
-        amount,
-        category: item.category,
-        method: paidMethod,
-        ...(accountId ? { transferAccountId: accountId } : {}),
-        itemName: item.name,
-        vendor: item.vendor,
-        note: item.note,
-        recurringEntryId: entry.id,
-      })
-      deductWallet(paidMethod, amount, {
-        activityType: 'RECURRING_PAID',
-        description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
-      }, accountId)
+
+      setPayTarget(null)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setBusy(false)
     }
-
-    updateEntry(entry.id, {
-      status: 'paid',
-      amount,
-      paidMethod,
-      transferAccountId: accountId,
-      paidAt: new Date(`${paidDate}T12:00:00`).toISOString(),
-      transactionId: tx?.id ?? null,
-      pendingPaymentId,
-    })
-
-    setPayTarget(null)
   }
 
   const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null) => {
@@ -189,15 +259,20 @@ export default function RecurringPage() {
     setNegativeWarn(null)
   }
 
-  const handleSaveEntryAmount = (amount) => {
+  const handleSaveEntryAmount = async (amount) => {
     const { entry, item } = payTarget
-    updateEntry(entry.id, { amount, amountUpdatedAt: new Date().toISOString() })
-    addLog(buildLogEntry({
-      activityType: 'RECURRING_UPDATE',
-      description: `บันทึกยอดรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
-      newValue: { recurringEntryId: entry.id, recurringId: item.id, amount },
-    }))
-    setPayTarget(null)
+    setActionError('')
+    try {
+      await updateEntry(entry.id, { amount, amountUpdatedAt: new Date().toISOString() })
+      addLog(buildLogEntry({
+        activityType: 'RECURRING_UPDATE',
+        description: `บันทึกยอดรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
+        newValue: { recurringEntryId: entry.id, recurringId: item.id, amount },
+      }))
+      setPayTarget(null)
+    } catch (err) {
+      setActionError(err.message)
+    }
   }
 
   const handleUndoPay = (entry) => setUndoTarget(entry)
@@ -223,57 +298,101 @@ export default function RecurringPage() {
     return lines
   }
 
-  const executeUndoPay = () => {
+  /**
+   * รายการที่ผูกกับ entry อาจอยู่นอกช่วง 24 เดือนที่โหลดไว้ — ประกอบข้อมูลขั้นต่ำ
+   * ที่ cancelTransaction ต้องใช้คำนวณเงินคืน (type/method/amount/บัญชี) จากตัว entry แทน
+   */
+  const txForCancel = (transactionId, { method, amount, transferAccountId, itemName, date }) =>
+    transactions.find((t) => t.id === transactionId) ?? {
+      id: transactionId, type: 'expense', method, amount, transferAccountId: transferAccountId ?? null,
+      itemName, date,
+    }
+
+  /**
+   * ยกเลิกการจ่าย — ทุกขั้นรอเซิร์ฟเวอร์ตอบตามลำดับ
+   *
+   * การคืนเงินใช้ RPC cancel_transaction (คืนเงินตาม effect + ลบรายการ + ลบรายการค้าง
+   * ที่ผูก + ย้อน entry ในทรานแซกชันเดียว) ไม่ใช่ addToWallet แยกอีกคำสั่งแบบเดิม
+   * ซึ่งยิงพร้อมกัน 4–5 คำสั่งแล้วแข่งกันเขียน entry เดียวกับที่ RPC ย้อนให้
+   */
+  const executeUndoPay = async () => {
+    if (busy) return
     const entry = undoTarget
     const item = items.find((it) => it.id === entry.recurringId)
+    setBusy(true)
+    setActionError('')
+    try {
+      const linked = linkedPendingOf(entry)
 
-    if (entry.transactionId) deleteTransaction(entry.transactionId)
-
-    // จ่ายผ่านช่องทาง "ค้างชำระ" แล้วไปกดชำระที่หน้ารายการรอ — ต้องคืนเงินและลบ
-    // transaction ของการชำระด้วย ไม่งั้นเงินยังถูกหักอยู่แต่ entry กลับเป็น "รอจ่าย" → จ่ายซ้ำได้
-    const linked = linkedPendingOf(entry)
-    if (linked?.status === 'paid') {
-      if (linked.transactionId) deleteTransaction(linked.transactionId)
-      if (linked.paidMethod) {
-        addToWallet(linked.paidMethod, linked.amount, {
+      // 1. จ่ายสด/โอนโดยตรง → ยกเลิกรายการ = คืนเงิน + ย้อน entry ให้ที่ฐานข้อมูล
+      if (entry.transactionId) {
+        await cancelTransaction(txForCancel(entry.transactionId, {
+          method: entry.paidMethod, amount: entry.amount, transferAccountId: entry.transferAccountId,
+          itemName: item?.name, date: entry.dueDate,
+        }))
+      } else if (entry.paidMethod && entry.paidMethod !== 'pending' && entry.amount > 0) {
+        // entry รุ่นเก่าที่ไม่ได้ผูกรายการไว้ — คืนเงินตรงๆ
+        await addToWallet(entry.paidMethod, entry.amount, {
           activityType: 'RECURRING_UNPAID',
-          description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${linked.amount.toLocaleString()} บาท (ชำระผ่านรายการค้างจ่าย)`,
-        }, linked.transferAccountId)
+          description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${entry.amount.toLocaleString()} บาท`,
+        }, entry.transferAccountId)
       }
-    }
-    if (entry.pendingPaymentId) deletePending(entry.pendingPaymentId)
 
-    if (entry.paidMethod && entry.paidMethod !== 'pending') {
-      addToWallet(entry.paidMethod, entry.amount, {
+      // 2. จ่ายผ่าน "ค้างชำระ" แล้วไปกดชำระที่หน้ารายการรอ — ต้องคืนเงินและลบรายการ
+      //    ของการชำระด้วย ไม่งั้นเงินยังถูกหักอยู่แต่ entry กลับเป็น "รอจ่าย" → จ่ายซ้ำได้
+      if (linked?.status === 'paid' && linked.transactionId) {
+        // cancel_transaction ลบ pending_payments ที่ผูกกับรายการนั้นให้ด้วย
+        await cancelTransaction(txForCancel(linked.transactionId, {
+          method: linked.paidMethod, amount: linked.amount, transferAccountId: linked.transferAccountId,
+          itemName: item?.name, date: entry.dueDate,
+        }))
+      } else if (linked) {
+        if (linked.status === 'paid' && linked.paidMethod) {
+          await addToWallet(linked.paidMethod, linked.amount, {
+            activityType: 'RECURRING_UNPAID',
+            description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${linked.amount.toLocaleString()} บาท (ชำระผ่านรายการค้างจ่าย)`,
+          }, linked.transferAccountId)
+        }
+        await deletePending(linked.id)
+      }
+
+      // 3. ย้อน entry (RPC ย้อนให้แล้วถ้ามีรายการผูก แต่ต้องตั้งยอดคงที่และล้างการผูกให้ครบ)
+      await updateEntry(entry.id, {
+        status: 'pending',
+        paidAt: null,
+        paidMethod: null,
+        transactionId: null,
+        pendingPaymentId: null,
+        transferAccountId: null,
+        amount: item?.amountType === 'fixed' ? (item.fixedAmount ?? 0) : 0,
+      })
+
+      await Promise.all([refreshWallet(), refreshPending()])
+      addLog(buildLogEntry({
         activityType: 'RECURRING_UNPAID',
-        description: `ยกเลิกการจ่าย "${item?.name}" คืนเงิน ${entry.amount.toLocaleString()} บาท`,
-      }, entry.transferAccountId)
+        description: `ยกเลิกการจ่ายรายการประจำ "${item?.name}"`,
+        newValue: { recurringEntryId: entry.id, recurringId: item?.id },
+      }))
+      setUndoTarget(null)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setBusy(false)
     }
-
-    updateEntry(entry.id, {
-      status: 'pending',
-      paidAt: null,
-      paidMethod: null,
-      transactionId: null,
-      pendingPaymentId: null,
-      transferAccountId: null,
-      amount: item?.amountType === 'fixed' ? (item.fixedAmount ?? 0) : 0,
-    })
-
-    addLog(buildLogEntry({
-      activityType: 'RECURRING_UNPAID',
-      description: `ยกเลิกการจ่ายรายการประจำ "${item?.name}"`,
-    }))
-    setUndoTarget(null)
   }
 
-  const handleSkip = (entryId) => {
+  const handleSkip = async (entryId) => {
     const e = entries.find((x) => x.id === entryId)
-    if (e?.status === 'skipped') {
-      updateEntry(entryId, { status: 'pending' })
-    } else {
-      markSkipped(entryId)
-      addLog(buildLogEntry({ activityType: 'RECURRING_SKIPPED', description: `ข้ามรายการประจำเดือน ${month}` }))
+    setActionError('')
+    try {
+      if (e?.status === 'skipped') {
+        await updateEntry(entryId, { status: 'pending' })
+      } else {
+        await markSkipped(entryId)
+        addLog(buildLogEntry({ activityType: 'RECURRING_SKIPPED', description: `ข้ามรายการประจำเดือน ${month}` }))
+      }
+    } catch (err) {
+      setActionError(err.message)
     }
   }
 
@@ -319,6 +438,13 @@ export default function RecurringPage() {
         </div>
       </div>
 
+      {/* ผลลัพธ์ที่ล้ม ต้องเห็นบนหน้าจอ ไม่ใช่จมอยู่ใน console */}
+      {actionError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          ทำรายการไม่สำเร็จ — {actionError}
+        </p>
+      )}
+
       {/* Summary */}
       {monthEntries.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
@@ -341,7 +467,7 @@ export default function RecurringPage() {
       )}
 
       {/* Entry list */}
-      {monthEntries.length === 0 ? (
+      {monthEntries.length === 0 && pausedThisMonth.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <p className="text-4xl mb-3">🔁</p>
           <p className="text-sm">ยังไม่มีรายการประจำเดือนนี้</p>
@@ -361,9 +487,22 @@ export default function RecurringPage() {
                 onSkip={handleSkip}
                 onEdit={setEditItem}
                 onDelete={(it) => setDeleteItemId(it.id)}
+                onPause={setPauseTarget}
               />
             )
           })}
+
+          {/* รายการที่พักอยู่ — ยังเห็นได้และบอกว่าเหลืออีกกี่เดือน แต่ไม่นับเป็นยอดรอจ่าย */}
+          {pausedThisMonth.map(({ item, info }) => (
+            <RecurringPausedCard
+              key={`paused-${item.id}`}
+              item={item}
+              info={info}
+              compact={view === 'compact'}
+              onResume={handleResume}
+              onEdit={setEditItem}
+            />
+          ))}
         </div>
       )}
 
@@ -386,6 +525,9 @@ export default function RecurringPage() {
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${item.enabled ? 'bg-emerald-400' : 'bg-gray-300'}`} />
                       <span className="text-sm font-medium text-gray-800 truncate">{item.name}</span>
+                      {pauseInfo(item, month) && (
+                        <span className="text-[10px] font-medium px-1.5 rounded bg-gray-200 text-gray-600 flex-shrink-0">⏸ พัก</span>
+                      )}
                       {isYearly(item) && (
                         <span className="text-[10px] font-medium px-1.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">รายปี</span>
                       )}
@@ -396,7 +538,10 @@ export default function RecurringPage() {
                         <span className="text-xs text-gray-400 italic">ยอดเปลี่ยนแปลง</span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 ml-4">{scheduleLabel(item)}</p>
+                    <p className="text-xs text-gray-400 ml-4">
+                      {scheduleLabel(item)}
+                      {pauseInfo(item, month) && ` · ${pauseLabel(pauseInfo(item, month))}`}
+                    </p>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <button
@@ -435,6 +580,14 @@ export default function RecurringPage() {
       )}
       {editItem && (
         <RecurringItemForm item={editItem} onSave={handleUpdateItem} onClose={() => setEditItem(null)} />
+      )}
+      {pauseTarget && (
+        <PausePopup
+          item={pauseTarget}
+          paidThisMonth={paidThisMonthFor(pauseTarget.id)}
+          onConfirm={handlePause}
+          onClose={() => setPauseTarget(null)}
+        />
       )}
       {payTarget && (
         <PayEntryPopup

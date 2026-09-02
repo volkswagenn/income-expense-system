@@ -84,17 +84,33 @@ alter table recurring_items add column if not exists billing_month int
 -- ลบแม่แบบที่เคยจ่ายไปแล้วต้องเป็นการ "ซ่อน" ไม่ใช่ลบแถวจริง เพราะ recurring_entries
 -- ผูกด้วย on delete cascade — ลบแถวเดียวจะพารอบที่จ่ายไปแล้วหายตามไปทั้งหมด
 alter table recurring_items add column if not exists deleted boolean not null default false;
+-- พักการเรียกเก็บชั่วคราว (until = เดือนที่กลับมาเรียกเก็บ) และบวก VAT ให้ยอด
+-- fixed_amount ยังเก็บยอดก่อน VAT เสมอ เพื่อให้ปิด VAT แล้วได้ยอดเดิมกลับมาตรงๆ
+alter table recurring_items add column if not exists paused_from  date;
+alter table recurring_items add column if not exists paused_until date;
+alter table recurring_items add column if not exists vat_rate     numeric(5,2) not null default 0;
+
+-- ── recurring_entries (รอบรายเดือนของรายการประจำ) ──────────────────────────
+-- transfer_account_id : บัญชีที่จ่ายจริงในรอบนั้น (ใช้คืนเงินให้ถูกบัญชีตอนยกเลิกการจ่าย)
+-- amount_updated_at   : ครั้งล่าสุดที่ผู้ใช้กรอกยอดของรอบนี้ (รายการยอดไม่คงที่)
+-- หน้าจอส่งสองฟิลด์นี้มาตั้งแต่แรก แต่ schema เดิมไม่มี → PostgREST ปฏิเสธทั้ง request
+-- ทำให้กดจ่าย / ยกเลิกจ่าย / บันทึกยอด ของรายการประจำล้มทั้งหมด
+
+alter table recurring_entries add column if not exists transfer_account_id uuid
+  references transfer_accounts(id) on delete set null;
+alter table recurring_entries add column if not exists amount_updated_at timestamptz;
 
 -- ── ตรวจผล ─────────────────────────────────────────────────────────────────
--- ควรได้ 31 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
+-- ควรได้ 33 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
 select table_name, column_name
   from information_schema.columns
  where table_schema = 'public'
    and (
-     (table_name = 'transactions'     and column_name in ('detail','other_income_type','tax_due_date','document_path','document_type','document_label'))
-  or (table_name = 'pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
-  or (table_name = 'pending_incomes'  and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
-  or (table_name = 'tax_invoices'     and column_name in ('due_date','document_path','document_type','document_label'))
-  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted'))
+     (table_name = 'transactions'      and column_name in ('detail','other_income_type','tax_due_date','document_path','document_type','document_label'))
+  or (table_name = 'pending_payments'  and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
+  or (table_name = 'pending_incomes'   and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
+  or (table_name = 'tax_invoices'      and column_name in ('due_date','document_path','document_type','document_label'))
+  or (table_name = 'recurring_items'   and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted','paused_from','paused_until','vat_rate'))
+  or (table_name = 'recurring_entries' and column_name in ('transfer_account_id','amount_updated_at'))
    )
  order by table_name, column_name;

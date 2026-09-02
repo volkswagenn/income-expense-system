@@ -2,7 +2,7 @@ import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
 import { selectAll } from './_page'
-import { occursInMonth } from '../recurringSchedule'
+import { billedAmount, occursInMonth, pauseInfo } from '../recurringSchedule'
 
 // รายการประจำ (แม่แบบ) + entries รายเดือนที่งอกจากแม่แบบ
 
@@ -75,6 +75,18 @@ export async function deletePendingEntriesOutsideMonth(recurringId, billingMonth
   return ids
 }
 
+/** ลบรอบที่ยังไม่จ่ายในช่วงเดือน [fromMonth, untilMonth) — ใช้ตอนสั่งพักเรียกเก็บ */
+export async function deletePendingEntriesInRange(recurringId, fromMonth, untilMonth) {
+  const rows = await unwrap(
+    supabase.from('recurring_entries').select('id, month')
+      .eq('recurring_id', recurringId).eq('status', 'pending')
+      .gte('month', fromMonth).lt('month', untilMonth)
+  )
+  const ids = (rows ?? []).map((r) => r.id)
+  if (ids.length > 0) await unwrap(supabase.from('recurring_entries').delete().in('id', ids))
+  return ids
+}
+
 // ── entries รายเดือน ────────────────────────────────────────────────────────
 
 export async function listRecurringEntries() {
@@ -92,7 +104,10 @@ export async function generateEntries(month, computeDueDate) {
   const shopId = getShopId()
   const [year, mon] = month.split('-').map(Number)
   // รายปีสร้าง entry เฉพาะเดือนที่ตรงกับเดือนเรียกเก็บ รายเดือนสร้างทุกเดือน
-  const items = (await listRecurringItems()).filter((it) => it.enabled && !it.deleted && occursInMonth(it, mon))
+  // เดือนที่ถูกพักไว้ไม่ต้องออกบิล — ต่างจากปิดใช้งานตรงที่พักมีวันกลับมาเอง
+  const items = (await listRecurringItems()).filter(
+    (it) => it.enabled && !it.deleted && occursInMonth(it, mon) && !pauseInfo(it, month)
+  )
   if (items.length === 0) return []
 
   const rows = items.map((item) => ({
@@ -101,7 +116,7 @@ export async function generateEntries(month, computeDueDate) {
     month,
     due_date: computeDueDate(year, mon, item.billingDay),
     status: 'pending',
-    amount: item.amountType === 'fixed' ? (item.fixedAmount ?? 0) : 0,
+    amount: item.amountType === 'fixed' ? billedAmount(item) : 0,
   }))
 
   return fromRows('recurring_entries', await unwrap(

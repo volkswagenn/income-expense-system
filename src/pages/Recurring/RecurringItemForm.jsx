@@ -2,7 +2,7 @@ import { useState } from 'react'
 import CategorySelect from '../../components/shared/CategorySelect'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import NumpadPopup from '../../components/shared/NumpadPopup'
-import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL } from '../../lib/recurringSchedule'
+import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL, VAT_RATE, withVat } from '../../lib/recurringSchedule'
 
 const EMPTY = {
   name: '',
@@ -12,6 +12,7 @@ const EMPTY = {
   billingDay: '',
   frequency: 'monthly',       // monthly | yearly
   billingMonth: '',            // ใช้เฉพาะรายปี (1–12)
+  vatRate: 0,                 // 0 = ไม่บวก VAT, 7 = บวก VAT ไทย (fixedAmount เก็บยอดก่อนภาษี)
   vendor: '',
   note: '',
   enabled: true,
@@ -34,6 +35,7 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
           fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '',
           frequency: item.frequency ?? 'monthly',
           billingMonth: item.billingMonth ?? '',
+          vatRate: Number(item.vatRate ?? 0),
         }
       : { ...EMPTY }
   )
@@ -72,12 +74,15 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
         billingDay: Number(form.billingDay),
         frequency: form.frequency === 'yearly' ? 'yearly' : 'monthly',
         billingMonth: form.frequency === 'yearly' ? Number(form.billingMonth) : null,
-        fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : undefined,
-        vendor: form.vendor.trim() || undefined,
-        note: form.note.trim() || undefined,
-        defaultMethod: form.defaultMethod || undefined,
+        vatRate: form.amountType === 'fixed' ? Number(form.vatRate) || 0 : 0,
+        // ช่องที่ผู้ใช้ล้างต้องส่งเป็น null ไม่ใช่ undefined — toRow() ทิ้งคีย์ undefined
+        // ทำให้ค่าเดิมค้างอยู่ในฐานข้อมูล (ลบโน้ตแล้วโน้ตไม่หาย, ยกเลิกวิธีจ่ายประจำแล้วยังถูกเลือกให้)
+        fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : null,
+        vendor: form.vendor.trim() || null,
+        note: form.note.trim() || null,
+        defaultMethod: form.defaultMethod || null,
         defaultTransferAccountId:
-          form.defaultMethod === 'transfer' ? (form.defaultTransferAccountId || undefined) : undefined,
+          form.defaultMethod === 'transfer' ? (form.defaultTransferAccountId || null) : null,
       })
     } finally {
       // ปลดล็อกเสมอ แม้บันทึกล้ม ผู้ใช้จะได้แก้แล้วกดใหม่ได้
@@ -159,6 +164,38 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
                 placeholder="0.00"
               />
               {error.fixedAmount && <p className="text-xs text-red-500 mt-1">{error.fixedAmount}</p>}
+
+              {/* VAT — ยอดที่กรอกคือยอดก่อนภาษี ระบบบวกให้ตอนออกบิล
+                  เก็บแยกกันแบบนี้เพื่อให้ปิด VAT แล้วได้ยอดเดิมกลับมา ไม่บวกซ้อนกันเอง */}
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-700">เพิ่ม VAT {VAT_RATE}%</p>
+                  <p className="text-xs text-gray-400">ยอดที่กรอกคือยอดก่อนภาษี</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Number(form.vatRate) > 0}
+                  onClick={() => set('vatRate', Number(form.vatRate) > 0 ? 0 : VAT_RATE)}
+                  className={`relative w-11 h-6 flex-shrink-0 rounded-full transition-colors ${
+                    Number(form.vatRate) > 0 ? 'bg-blue-500' : 'bg-gray-300'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    Number(form.vatRate) > 0 ? 'translate-x-5' : 'translate-x-0'
+                  }`} />
+                </button>
+              </div>
+
+              {Number(form.vatRate) > 0 && Number(form.fixedAmount) > 0 && (
+                <p className="text-xs text-blue-600 mt-1.5 text-right">
+                  ยอดที่จะเรียกเก็บ{' '}
+                  <span className="font-bold tabular-nums">
+                    {withVat(form.fixedAmount, form.vatRate).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                  </span>{' '}
+                  บาท ({Number(form.fixedAmount).toLocaleString('th-TH')} + VAT {VAT_RATE}%)
+                </p>
+              )}
             </div>
           )}
 
@@ -287,9 +324,15 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
 
           {/* Enabled toggle */}
           <div className="flex items-center justify-between py-2 border-t border-gray-100">
-            <div>
+            <div className="pr-3">
               <p className="text-sm font-medium text-gray-700">เปิดใช้งาน</p>
-              <p className="text-xs text-gray-400">ปิดเพื่อหยุดพักโดยไม่ลบ</p>
+              {/* ต้องแยกให้ชัดจาก "พักการเรียกเก็บ" ไม่งั้นผู้ใช้เลือกผิดตัว
+                  ปิดใช้งาน = หายไปเลยไม่มีกำหนด / พัก = ยังเห็นอยู่และกลับมาเอง */}
+              <p className="text-xs text-gray-400">
+                {form.enabled
+                  ? 'ปิดแล้วรายการจะหายไปจากทุกหน้า ไม่นับเป็นยอดรอจ่าย จนกว่าจะกดเปิดเอง'
+                  : 'ตอนนี้ปิดอยู่ รายการไม่แสดงที่ไหนเลย ถ้าอยากหยุดชั่วคราวแบบยังเห็นอยู่ ให้ใช้ปุ่มพักการเรียกเก็บแทน'}
+              </p>
             </div>
             <button
               type="button"

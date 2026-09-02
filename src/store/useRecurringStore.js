@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { getDaysInMonth } from 'date-fns'
 import * as recurringApi from '../lib/api/recurring'
 import { localMonthStr } from '../lib/dateUtils'
+import { addMonths, billedAmount, monthFirstDay } from '../lib/recurringSchedule'
 
 export function computeDueDate(year, month, billingDay) {
   const lastDay = getDaysInMonth(new Date(year, month - 1))
@@ -17,6 +18,18 @@ const useRecurringStore = create((set, get) => ({
 
   _hydrate: ({ recurringItems, recurringEntries }) =>
     set({ items: recurringItems ?? [], entries: recurringEntries ?? [] }),
+
+  /**
+   * ดึงใหม่ทั้งชุดจากเซิร์ฟเวอร์ — ใช้หลัง RPC ที่แก้ recurring_entries เองในฐานข้อมูล
+   * (จ่ายรายการค้างที่ผูกกับรายการประจำ / ยกเลิกรายการ) และเมื่อ realtime แจ้งว่ามีคนอื่นแก้
+   */
+  refresh: async () => {
+    const [recurringItems, recurringEntries] = await Promise.all([
+      recurringApi.listRecurringItems(),
+      recurringApi.listRecurringEntries(),
+    ])
+    set({ items: recurringItems, entries: recurringEntries })
+  },
 
   // ── แม่แบบรายการประจำ ─────────────────────────────────────────────────────
 
@@ -85,6 +98,41 @@ const useRecurringStore = create((set, get) => ({
   markSkipped: async (entryId) => get().updateEntry(entryId, { status: 'skipped' }),
 
   /**
+   * พักการเรียกเก็บ n เดือน
+   *
+   * เริ่มนับจากเดือนนี้ ยกเว้นเดือนนี้จ่ายไปแล้ว — ย้อนไปยกเลิกบิลที่จ่ายแล้วไม่ได้
+   * จึงเลื่อนไปเริ่มเดือนถัดไปแทน รอบที่ยังไม่จ่ายในช่วงพักจะถูกลบออก
+   * ส่วนรอบที่จ่ายแล้วไม่ถูกแตะ ยอดเงินและประวัติจึงไม่เปลี่ยน
+   *
+   * @returns { from, until } เดือนเริ่มพักและเดือนที่กลับมาเรียกเก็บ
+   */
+  pauseItem: async (id, months) => {
+    const n = Math.max(1, Math.min(24, Math.round(Number(months) || 0)))
+    const thisMonth = localMonthStr()
+
+    const paidThisMonth = get().entries.some(
+      (e) => e.recurringId === id && e.month === thisMonth && e.status === 'paid'
+    )
+    const from = paidThisMonth ? addMonths(thisMonth, 1) : thisMonth
+    const until = addMonths(from, n)
+
+    await get().updateItem(id, {
+      pausedFrom: monthFirstDay(from),
+      pausedUntil: monthFirstDay(until),
+    })
+
+    const removed = await recurringApi.deletePendingEntriesInRange(id, from, until)
+    if (removed.length > 0) {
+      const gone = new Set(removed)
+      set((s) => ({ entries: s.entries.filter((e) => !gone.has(e.id)) }))
+    }
+    return { from, until, months: n }
+  },
+
+  /** ยกเลิกการพัก กลับมาเรียกเก็บทันที (รอบของเดือนนี้จะงอกใหม่ตอน generateEntries) */
+  resumeItem: async (id) => get().updateItem(id, { pausedFrom: null, pausedUntil: null }),
+
+  /**
    * แก้แม่แบบแล้วให้รอบที่ "ยังไม่จ่าย" ตามไปด้วย
    *
    * entry เก็บยอดกับวันครบกำหนดเป็นสำเนาของตัวเอง (เพราะยอดแต่ละเดือนต่างกันได้)
@@ -107,7 +155,7 @@ const useRecurringStore = create((set, get) => ({
       const [year, mon] = e.month.split('-').map(Number)
       const patch = { dueDate: computeDueDate(year, mon, item.billingDay) }
       // ยอดคงที่เท่านั้นที่ลอกจากแม่แบบได้ ยอดเปลี่ยนแปลงต้องรอกรอกตอนจ่าย
-      if (item.amountType === 'fixed') patch.amount = item.fixedAmount ?? 0
+      if (item.amountType === 'fixed') patch.amount = billedAmount(item)
       if (patch.dueDate === e.dueDate && patch.amount === e.amount) continue
       await get().updateEntry(e.id, patch)
       changed++
