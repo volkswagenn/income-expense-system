@@ -19,6 +19,7 @@ const STATUS_STYLE = {
   paid:      { label: 'จ่ายแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   billed:    { label: 'อยู่ในบิล รอจ่าย', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   pending:   { label: 'ยังไม่ถึงรอบ', cls: 'bg-gray-50 text-gray-500 border-gray-200' },
+  prepaid:   { label: 'จ่ายมาก่อนใช้ระบบ', cls: 'bg-slate-50 text-slate-500 border-slate-200' },
   cancelled: { label: 'ยกเลิก', cls: 'bg-gray-50 text-gray-400 border-gray-200 line-through' },
 }
 
@@ -83,7 +84,8 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
   const principal = Number(installment.principalAmount ?? installment.totalAmount)
   const interest = Math.round((total - principal) * 100) / 100
   const hasInterest = interest > 0
-  const done = progress.paidCount + progress.billedCount
+  const hasTiers = Array.isArray(installment.tiers) && installment.tiers.length > 1
+  const done = progress.paidCount + progress.billedCount + progress.prepaidCount
   const pct = installment.months > 0 ? (done / installment.months) * 100 : 0
   // "งวดถัดไป" คืองวดที่ยังไม่ถูกเรียกเก็บ งวดที่อยู่ในบิลแล้วถือว่าเลยไปแล้ว
   const nextRow = progress.rows.find((r) => r.status === 'pending')
@@ -113,7 +115,12 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
       <div>
         <div className="flex items-center justify-between text-xs text-gray-500 mb-1 gap-3">
           <span>
-            {hasInterest ? (
+            {hasTiers ? (
+              <>
+                ขั้นบันได {installment.tiers.length} ช่วง · ยอดรวม <strong className="text-gray-700">{fmt(total)}</strong>
+                {' '}({installment.tiers.map((t) => `งวด ${t.from}-${t.to} ละ ${fmt(t.amount)}`).join(' · ')})
+              </>
+            ) : hasInterest ? (
               <>
                 ราคา {fmt(principal)} + ดอกเบี้ย {fmt(interest)} ({installment.interestRate}% ต่อเดือน)
                 {' '}= <strong className="text-gray-700">{fmt(total)}</strong> · งวดละ {fmt(installment.monthlyAmount)}

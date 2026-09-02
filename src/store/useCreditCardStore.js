@@ -181,10 +181,14 @@ const useCreditCardStore = create((set, get) => ({
     })
 
     const paid = rows.filter((r) => r.status === 'paid')
+    // prepaid = ผ่อนมาก่อนเริ่มใช้แอป ถือว่าผ่านไปแล้วเหมือนกัน แต่แยกนับไว้
+    // เพราะไม่มีรายจ่ายและไม่เคยขยับยอดหนี้ในระบบเรา
+    const prepaid = rows.filter((r) => r.status === 'prepaid')
     const remaining = rows.filter((r) => r.status === 'pending')
     return {
       rows,
       paidCount: paid.length,
+      prepaidCount: prepaid.length,
       billedCount: rows.filter((r) => r.status === 'billed').length,
       remainingCount: remaining.length,
       remainingAmount: remaining.reduce((s, r) => s + Number(r.amount || 0), 0),

@@ -57,14 +57,20 @@ export async function createInstallment(cardId, data, schedule, log = null) {
       months: data.months,
       monthly_amount: data.monthlyAmount,
       interest_rate: data.interestRate ?? 0,
+      // ช่วงราคาของโปรฯ เก็บไว้ดูย้อนหลังและใช้ตอนแก้ไข ยอดจริงอยู่ในตารางงวด
+      tiers: data.tiers ?? null,
+      prepaid_count: data.prepaidCount ?? 0,
       purchase_date: data.purchaseDate,
       first_cycle: schedule[0].cycle,
     },
+    // งวดที่ผ่อนมาก่อนเริ่มใช้แอปส่งเป็น 'prepaid' — close_card_statement กรอง
+    // เฉพาะ 'pending' จึงข้ามให้เอง ไม่สร้างรายจ่ายย้อนหลังและไม่ขยับยอดหนี้
     p_entries: schedule.map((e) => ({
       seq: e.seq,
       cycle: e.cycle,
       due_date: toDateString(e.dueDate),
       amount: e.amount,
+      status: e.seq <= (data.prepaidCount ?? 0) ? 'prepaid' : 'pending',
     })),
     p_log: log,
   }))

@@ -12,7 +12,10 @@ import TransferAccountPicker from '../../components/shared/TransferAccountPicker
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
-import { nextDueDate, formatThaiDate, installmentSchedule, installmentTotal } from '../../lib/cardCycle'
+import {
+  nextDueDate, formatThaiDate, installmentSchedule, installmentTotal,
+  tieredSchedule, scheduleTotal, validateTiers, maxPrepaidCount, latestPurchaseDateFor, toDateString,
+} from '../../lib/cardCycle'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -26,12 +29,36 @@ import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 const EMPTY = {
   itemName: '', category: '', amount: '', method: 'cash', transferAccountId: '', pendingAccountId: '',
   cardId: '', installment: false, installmentMonths: '6', installmentRate: '0',
+  // 'even' = หารเท่ากันทุกงวด, 'tiered' = ค่างวดตามโปรโมชั่น (ขั้นบันได)
+  installmentMode: 'even',
+  installmentTiers: [{ from: 1, to: 6, amount: '' }, { from: 7, to: 6, amount: '' }],
+  installmentPrepaid: false, installmentPrepaidCount: '',
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
 
 const MONTH_PRESETS = [3, 6, 10]
 
 const fmtBaht = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
+
+/**
+ * ทำช่วงราคาให้ต่อกันสนิทเสมอ
+ *
+ * ต้นช่วงถัดไปถูกคำนวณจากปลายช่วงก่อนหน้า ผู้ใช้แก้เองไม่ได้ และช่วงสุดท้าย
+ * ยืดไปจบที่งวดสุดท้ายให้อัตโนมัติ จึงไม่มีทางกรอกให้ขาดตอนหรือทับกันได้เลย
+ */
+function normalizedTiers(tiers, months) {
+  const out = []
+  let from = 1
+  tiers.forEach((t, i) => {
+    if (from > months) return
+    const isLast = i === tiers.length - 1
+    const to = isLast ? months : Math.min(Math.max(Number(t.to) || from, from), months)
+    out.push({ from, to, amount: t.amount })
+    from = to + 1
+  })
+  if (out.length > 0) out[out.length - 1].to = months
+  return out
+}
 
 export default function ExpenseForm() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -158,8 +185,20 @@ export default function ExpenseForm() {
       //
       // ช่องจำนวนเงินคือราคาสินค้า ส่วนยอดที่ผ่อนจริงคือราคาบวกดอกเบี้ยแบบคงที่
       // ผลรวมของทุกงวดจึงเท่ากับ total ไม่ใช่ราคาสินค้า ซึ่งตรงกับเงินที่ไหลออกจริง
-      const money = installmentTotal(amt, months, Number(form.installmentRate) || 0)
-      const schedule = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), months, money.total)
+      //
+      // โหมดขั้นบันได ยอดรวมถูกกำหนดโดยค่างวดที่กรอก ไม่ได้หารจากราคาสินค้า
+      const buyDate = new Date(date + 'T00:00:00')
+      const tiers = form.installmentMode === 'tiered'
+        ? normalizedTiers(form.installmentTiers, months).map((t) => ({ ...t, amount: Number(t.amount) || 0 }))
+        : null
+      const schedule = tiers
+        ? tieredSchedule(selectedCard, buyDate, months, tiers)
+        : installmentSchedule(selectedCard, buyDate, months, installmentTotal(amt, months, Number(form.installmentRate) || 0).total)
+      const money = tiers
+        ? { principal: scheduleTotal(schedule), interest: 0, total: scheduleTotal(schedule), ratePerMonth: 0 }
+        : installmentTotal(amt, months, Number(form.installmentRate) || 0)
+      const prepaidCount = installmentPreview?.prepaidCount ?? 0
+
       const ins = await createInstallment(cardId, {
         name: form.itemName,
         vendor: form.vendor,
@@ -168,23 +207,28 @@ export default function ExpenseForm() {
         principalAmount: money.principal,
         totalAmount: money.total,
         months,
-        monthlyAmount: schedule[0].amount,
+        monthlyAmount: schedule[prepaidCount]?.amount ?? schedule[0].amount,
         interestRate: money.ratePerMonth,
+        tiers,
+        prepaidCount,
         purchaseDate: date,
       }, schedule, buildLogEntry({
         activityType: 'INSTALLMENT_CREATE',
         description:
-          `ผ่อน "${form.itemName}" ราคา ${money.principal.toLocaleString()} บาท ${months} งวด ` +
-          (money.interest > 0
-            ? `ดอกเบี้ย ${money.ratePerMonth}% ต่อเดือน รวม ${money.total.toLocaleString()} บาท `
-            : 'ผ่อน 0% ') +
-          `งวดละ ${schedule[0].amount.toLocaleString()} บาท`,
+          `ผ่อน "${form.itemName}" ${months} งวด รวม ${money.total.toLocaleString()} บาท ` +
+          (tiers
+            ? `แบบขั้นบันได ${tiers.length} ช่วง (${tiers.map((t) => `งวด ${t.from}-${t.to} ละ ${t.amount.toLocaleString()}`).join(', ')})`
+            : money.interest > 0
+              ? `ดอกเบี้ย ${money.ratePerMonth}% ต่อเดือน งวดละ ${schedule[0].amount.toLocaleString()} บาท`
+              : `ผ่อน 0% งวดละ ${schedule[0].amount.toLocaleString()} บาท`) +
+          (prepaidCount > 0 ? ` · ผ่อนมาก่อนแล้ว ${prepaidCount} งวด` : ''),
         newValue: {
           itemName: form.itemName,
           principal: money.principal,
           interest: money.interest,
           total: money.total,
           ratePerMonth: money.ratePerMonth,
+          tiers, prepaidCount,
           months, cardId, date,
         },
       }))
@@ -268,7 +312,22 @@ export default function ExpenseForm() {
     }
     if (form.method === 'card' && form.installment) {
       const m = Math.round(Number(form.installmentMonths) || 0)
-      if (!(m >= 1) || m > 60) return setErrMsg('จำนวนงวดต้องอยู่ระหว่าง 1 ถึง 60')
+      if (!(m >= 1) || m > 120) return setErrMsg('จำนวนงวดต้องอยู่ระหว่าง 1 ถึง 120')
+      if (form.installmentMode === 'tiered') {
+        const tiers = normalizedTiers(form.installmentTiers, m)
+        const err = validateTiers(tiers, m)
+        if (err) return setErrMsg(err)
+        if (!tiers.every((t) => Number(t.amount) > 0)) return setErrMsg('กรอกยอดต่องวดให้ครบทุกช่วงราคา')
+      }
+      // งวดที่บอกว่าจ่ายมาแล้วต้องครบกำหนดไปแล้วจริง ไม่งั้นยอดคงเหลือจะผิดตั้งแต่ต้น
+      if (installmentPreview?.prepaidOver) {
+        return setErrMsg(
+          `วันเปิดบิลย้อนหลังไม่พอ ระบุว่าจ่ายมาแล้วได้มากสุด ${installmentPreview.maxPrepaid} งวด` +
+          (installmentPreview.suggestDate
+            ? ` — เลือกวันเปิดบิลไม่เกิน ${formatThaiDate(installmentPreview.suggestDate)}`
+            : '')
+        )
+      }
     }
     setErrMsg('')
     // บัตรเครดิตไม่ต้องเช็คยอดติดลบ — เป็นหนี้อยู่แล้วโดยธรรมชาติ และไม่บล็อกเรื่องวงเงิน
@@ -296,19 +355,50 @@ export default function ExpenseForm() {
   // ช่องจำนวนเงินคือ "ราคาสินค้า" ส่วนยอดที่ผ่อนจริงคือราคาบวกดอกเบี้ย
   const installmentPreview = (() => {
     if (!form.installment || !selectedCard) return null
-    const principal = Number(form.amount)
     const m = Math.round(Number(form.installmentMonths) || 0)
-    const rate = Number(form.installmentRate) || 0
-    if (!(principal > 0) || !(m >= 1) || m > 60 || rate < 0) return null
-    const money = installmentTotal(principal, m, rate)
-    const rows = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), m, money.total)
+    if (!(m >= 1) || m > 120) return null
+    const buyDate = new Date(date + 'T00:00:00')
+
+    let rows, money, tierError = null
+    if (form.installmentMode === 'tiered') {
+      // ยอดรวมถูกกำหนดโดยค่างวด ไม่ใช่หารจากยอดรวม จึงไม่มีเศษให้ปัด
+      const tiers = normalizedTiers(form.installmentTiers, m)
+      tierError = validateTiers(tiers, m)
+      if (tierError) return { invalid: true, months: m, tierError }
+      if (!tiers.every((t) => Number(t.amount) > 0)) return null
+      rows = tieredSchedule(selectedCard, buyDate, m, tiers)
+      const total = scheduleTotal(rows)
+      money = { principal: total, interest: 0, total, ratePerMonth: 0, months: m }
+    } else {
+      const principal = Number(form.amount)
+      const rate = Number(form.installmentRate) || 0
+      if (!(principal > 0) || rate < 0) return null
+      money = installmentTotal(principal, m, rate)
+      rows = installmentSchedule(selectedCard, buyDate, m, money.total)
+    }
+
     const first = rows[0]
     const last = rows[rows.length - 1]
+
+    // งวดที่บอกว่าจ่ายมาแล้ว ต้องเป็นงวดที่ครบกำหนดไปแล้วจริงเมื่อนับจากวันเปิดบิล
+    const maxPrepaid = Math.min(maxPrepaidCount(selectedCard, buyDate), m)
+    const wantPrepaid = form.installmentPrepaid
+      ? Math.max(0, Math.round(Number(form.installmentPrepaidCount) || 0))
+      : 0
+    const prepaidOver = wantPrepaid > maxPrepaid
+    const suggestDate = prepaidOver ? latestPurchaseDateFor(selectedCard, wantPrepaid) : null
+    const prepaidCount = prepaidOver ? 0 : wantPrepaid
+
+    const remainingRows = rows.slice(prepaidCount)
     return {
       ...money,
-      first,
-      last,
+      rows, first, last,
       hasRemainder: rows.length > 1 && last.amount !== first.amount,
+      maxPrepaid, wantPrepaid, prepaidOver, suggestDate, prepaidCount,
+      paidAlready: scheduleTotal(rows.slice(0, prepaidCount)),
+      remainingTotal: scheduleTotal(remainingRows),
+      nextRow: remainingRows[0] ?? null,
+      tierError,
     }
   })()
 
@@ -446,6 +536,27 @@ export default function ExpenseForm() {
 
             {form.installment && (
               <div className="space-y-2">
+                {/* โปรฯ ผ่อนจริงมักไม่ได้จ่ายเท่ากันทุกงวด ต้องกรอกกลับทาง
+                    คือรู้ค่างวดอยู่แล้วแล้วรวมกลับเป็นยอด จึงแยกเป็นคนละโหมด */}
+                <div>
+                  <label className="label">รูปแบบการผ่อน</label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[
+                      { v: 'even', t: 'หารเท่ากันทุกงวด' },
+                      { v: 'tiered', t: 'ค่างวดตามโปรโมชั่น' },
+                    ].map((o) => (
+                      <button
+                        key={o.v}
+                        type="button"
+                        className={`btn text-xs py-1 px-3 ${form.installmentMode === o.v ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => set('installmentMode', o.v)}
+                      >
+                        {o.t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="flex items-end gap-2 flex-wrap">
                   <div className="w-28">
                     <label className="label">จำนวนงวด</label>
@@ -453,7 +564,7 @@ export default function ExpenseForm() {
                       className="input"
                       type="number"
                       min="1"
-                      max="60"
+                      max="120"
                       value={form.installmentMonths}
                       onChange={(e) => set('installmentMonths', e.target.value)}
                     />
@@ -472,6 +583,83 @@ export default function ExpenseForm() {
                   </div>
                 </div>
 
+                {/* ── ค่างวดตามโปรโมชั่น (ขั้นบันได) ── */}
+                {form.installmentMode === 'tiered' && (
+                  <div>
+                    <label className="label">ค่างวดตามโปรโมชั่น</label>
+                    {normalizedTiers(form.installmentTiers, Math.round(Number(form.installmentMonths) || 1)).map((t, i, arr) => (
+                      <div key={i} className="flex items-center gap-1.5 flex-wrap bg-white/70 border border-rose-200 rounded-lg px-2 py-1.5 mb-1.5">
+                        <span className="text-xs text-rose-800">งวดที่</span>
+                        {/* ต้นช่วงคำนวณจากช่วงก่อนหน้าเสมอ แก้เองไม่ได้ กันกรอกขาดตอน */}
+                        <span className="text-xs tabular-nums bg-rose-50 border border-rose-200 rounded px-2 py-0.5 min-w-[34px] text-center">{t.from}</span>
+                        <span className="text-xs text-rose-800">–</span>
+                        {i === arr.length - 1 ? (
+                          <span className="text-xs tabular-nums bg-rose-50 border border-rose-200 rounded px-2 py-0.5 min-w-[34px] text-center" title="ช่วงสุดท้ายยืดไปจบที่งวดสุดท้ายให้เอง">{t.to}</span>
+                        ) : (
+                          <input
+                            className="input !h-7 w-16 text-xs text-center px-1"
+                            type="number"
+                            min={t.from}
+                            max={form.installmentMonths}
+                            value={form.installmentTiers[i]?.to ?? ''}
+                            onChange={(e) => {
+                              const next = form.installmentTiers.map((x, k) => (k === i ? { ...x, to: e.target.value } : x))
+                              set('installmentTiers', next)
+                            }}
+                          />
+                        )}
+                        <span className="text-xs text-rose-800">งวดละ</span>
+                        <input
+                          className="input !h-7 w-24 text-xs text-right px-2"
+                          type="number"
+                          min="0"
+                          placeholder="0.00"
+                          value={form.installmentTiers[i]?.amount ?? ''}
+                          onChange={(e) => {
+                            const next = form.installmentTiers.map((x, k) => (k === i ? { ...x, amount: e.target.value } : x))
+                            set('installmentTiers', next)
+                          }}
+                        />
+                        <span className="text-xs text-rose-800">บาท</span>
+                        {arr.length > 1 && i < arr.length - 1 && (
+                          <button
+                            type="button"
+                            className="ml-auto text-rose-400 hover:text-rose-700 text-sm leading-none px-1"
+                            onClick={() => set('installmentTiers', form.installmentTiers.filter((_, k) => k !== i))}
+                            title="ลบช่วงนี้"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="w-full text-xs text-rose-700 border border-dashed border-rose-300 rounded-lg py-1.5 hover:bg-white/60"
+                      onClick={() => {
+                        const m = Math.round(Number(form.installmentMonths) || 1)
+                        const cur = normalizedTiers(form.installmentTiers, m)
+                        const last = cur[cur.length - 1]
+                        const split = Math.min(last.from + 5, m)
+                        set('installmentTiers', [
+                          ...cur.slice(0, -1),
+                          { from: last.from, to: String(split), amount: last.amount },
+                          { from: split + 1, to: m, amount: '' },
+                        ])
+                      }}
+                    >
+                      + เพิ่มช่วงราคา
+                    </button>
+                    {installmentPreview?.tierError && (
+                      <p className="text-xs text-red-600 mt-1">⚠️ {installmentPreview.tierError}</p>
+                    )}
+                    <p className="text-xs text-rose-600 mt-1">
+                      ไม่ต้องกรอกราคาสินค้า ระบบรวมยอดจากค่างวดให้เอง
+                    </p>
+                  </div>
+                )}
+
+                {form.installmentMode === 'even' && (
                 <div>
                   <label className="label">ดอกเบี้ย</label>
                   <div className="flex items-end gap-2 flex-wrap">
@@ -495,8 +683,79 @@ export default function ExpenseForm() {
                     </div>
                   </div>
                 </div>
+                )}
 
-                {installmentPreview ? (
+                {/* ── สัญญาที่ผ่อนมาก่อนเริ่มใช้แอป ── */}
+                <div className="border-t border-rose-200 pt-2">
+                  <label className="flex items-center gap-2 text-xs text-rose-800 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-rose-600"
+                      checked={form.installmentPrepaid}
+                      onChange={(e) => set('installmentPrepaid', e.target.checked)}
+                    />
+                    <span className="font-medium">เคยผ่อนมาก่อนแล้ว</span>
+                  </label>
+
+                  {form.installmentPrepaid && (
+                    <div className="mt-2 space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-rose-800">จ่ายมาแล้ว</span>
+                        <input
+                          className="input !h-8 w-20 text-sm text-center"
+                          type="number"
+                          min="0"
+                          value={form.installmentPrepaidCount}
+                          onChange={(e) => set('installmentPrepaidCount', e.target.value)}
+                          placeholder="0"
+                        />
+                        <span className="text-xs text-rose-800">
+                          งวด จากทั้งหมด {form.installmentMonths} งวด
+                        </span>
+                      </div>
+
+                      {installmentPreview?.prepaidOver ? (
+                        <div className="text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700 space-y-1">
+                          <p className="font-medium">⚠️ วันเปิดบิลย้อนหลังไม่พอ</p>
+                          <p>
+                            เปิดบิล {formatThaiDate(new Date(date + 'T00:00:00'))} มีงวดที่ครบกำหนดแล้วมากสุด{' '}
+                            <strong>{installmentPreview.maxPrepaid} งวด</strong> จะบอกว่าจ่ายมา{' '}
+                            {installmentPreview.wantPrepaid} งวดไม่ได้
+                          </p>
+                          {installmentPreview.suggestDate && (
+                            <>
+                              <p>
+                                ถ้าจ่ายมาแล้ว {installmentPreview.wantPrepaid} งวดจริง ต้องเลือกวันเปิดบิลไม่เกิน{' '}
+                                <strong>{formatThaiDate(installmentPreview.suggestDate)}</strong>
+                              </p>
+                              <button
+                                type="button"
+                                className="btn btn-primary text-xs py-1 px-3 mt-1"
+                                onClick={() => setDate(toDateString(installmentPreview.suggestDate))}
+                              >
+                                ใช้วันที่ {formatThaiDate(installmentPreview.suggestDate)} ให้เลย
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        installmentPreview && (
+                          <p className="text-xs text-rose-600">
+                            วันเปิดบิลนี้มีงวดครบกำหนดไปแล้ว {installmentPreview.maxPrepaid} งวด
+                            {' '}ระบุได้ 0 ถึง {installmentPreview.maxPrepaid} งวด
+                          </p>
+                        )
+                      )}
+
+                      <p className="text-xs text-rose-600">
+                        งวดที่จ่ายมาก่อนจะไม่ถูกบันทึกเป็นรายจ่ายย้อนหลังและไม่เพิ่มยอดหนี้บัตร
+                        เพราะจ่ายไปก่อนเริ่มใช้ระบบ มีไว้ให้เลขงวดกับยอดคงเหลือถูกต้องเท่านั้น
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {installmentPreview && !installmentPreview.invalid ? (
                   <div className="text-xs text-rose-800 bg-white/70 rounded-lg px-3 py-2 leading-relaxed space-y-0.5">
                     {installmentPreview.interest > 0 ? (
                       <>
@@ -515,19 +774,54 @@ export default function ExpenseForm() {
                           <span className="tabular-nums">{fmtBaht(installmentPreview.total)}</span>
                         </div>
                       </>
+                    ) : form.installmentMode === 'tiered' ? (
+                      <>
+                        {normalizedTiers(form.installmentTiers, installmentPreview.months).map((t, i) => (
+                          <div key={i} className="flex justify-between gap-3">
+                            <span>งวด {t.from}–{t.to} · {t.to - t.from + 1} งวด × {fmtBaht(t.amount)}</span>
+                            <span className="tabular-nums">{fmtBaht((t.to - t.from + 1) * (Number(t.amount) || 0))}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between gap-3 border-t border-rose-200 pt-0.5 font-semibold">
+                          <span>ยอดรวมทั้งสัญญา</span>
+                          <span className="tabular-nums">{fmtBaht(installmentPreview.total)}</span>
+                        </div>
+                      </>
                     ) : (
                       <div className="flex justify-between gap-3 font-semibold">
                         <span>ยอดผ่อนรวม (ผ่อน 0%)</span>
                         <span className="tabular-nums">{fmtBaht(installmentPreview.total)}</span>
                       </div>
                     )}
-                    <p className="pt-1">
-                      งวดละ <strong>{fmtBaht(installmentPreview.first.amount)}</strong> บาท{' '}
-                      {installmentPreview.months} งวด
-                      {installmentPreview.hasRemainder && (
-                        <> (งวดสุดท้าย {fmtBaht(installmentPreview.last.amount)} บาท)</>
-                      )}
-                    </p>
+
+                    {installmentPreview.prepaidCount > 0 && (
+                      <>
+                        <div className="flex justify-between gap-3 pt-0.5">
+                          <span>จ่ายมาแล้ว {installmentPreview.prepaidCount} งวด</span>
+                          <span className="tabular-nums">− {fmtBaht(installmentPreview.paidAlready)}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 font-semibold border-t border-rose-200 pt-0.5">
+                          <span>คงเหลือที่ต้องผ่อนต่อ</span>
+                          <span className="tabular-nums">{fmtBaht(installmentPreview.remainingTotal)}</span>
+                        </div>
+                      </>
+                    )}
+
+                    {installmentPreview.prepaidCount > 0 && installmentPreview.nextRow ? (
+                      <p className="pt-1">
+                        งวดถัดไปคืองวดที่ <strong>{installmentPreview.nextRow.seq}</strong>{' '}
+                        <strong>{fmtBaht(installmentPreview.nextRow.amount)}</strong> บาท ครบกำหนด{' '}
+                        <strong>{formatThaiDate(installmentPreview.nextRow.dueDate)}</strong>
+                      </p>
+                    ) : form.installmentMode === 'even' ? (
+                      <p className="pt-1">
+                        งวดละ <strong>{fmtBaht(installmentPreview.first.amount)}</strong> บาท{' '}
+                        {installmentPreview.months} งวด
+                        {installmentPreview.hasRemainder && (
+                          <> (งวดสุดท้าย {fmtBaht(installmentPreview.last.amount)} บาท)</>
+                        )}
+                      </p>
+                    ) : null}
                     <p>
                       งวดแรกอยู่ในบิลที่ครบกำหนด <strong>{formatThaiDate(installmentPreview.first.dueDate)}</strong>{' '}
                       งวดสุดท้าย <strong>{formatThaiDate(installmentPreview.last.dueDate)}</strong>

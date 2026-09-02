@@ -156,6 +156,97 @@ export function installmentSchedule(card, purchaseDate, months, totalAmount) {
   return entries
 }
 
+/**
+ * ตารางงวดผ่อนแบบขั้นบันได — ค่างวดไม่เท่ากันตามช่วงที่กำหนด
+ *
+ * tiers เป็น array ของ { from, to, amount } เรียงต่อกันสนิท เช่น
+ *   [{ from: 1, to: 6, amount: 390 }, { from: 7, to: 84, amount: 820 }]
+ * แปลว่างวด 1–6 จ่ายงวดละ 390 ที่เหลือ 820 ตรงกับที่โบรชัวร์เขียน
+ *
+ * ต่างจาก installmentSchedule ตรงที่ยอดรวมถูกกำหนดโดยค่างวด ไม่ใช่หารจากยอดรวม
+ * จึงไม่มีเศษให้ปัด ผลรวมคือผลบวกของทุกงวดตรงๆ
+ */
+export function tieredSchedule(card, purchaseDate, months, tiers) {
+  const first = nextClosingDate(card.closingDay, purchaseDate)
+  const amountOf = (seq) => {
+    const t = tiers.find((x) => seq >= Number(x.from) && seq <= Number(x.to))
+    return t ? Number(t.amount) || 0 : 0
+  }
+  const rows = []
+  for (let i = 0; i < months; i++) {
+    const end = clampedDate(first.getFullYear(), first.getMonth() + i, card.closingDay)
+    rows.push({
+      seq: i + 1,
+      cycle: cycleKey(end),
+      closingDate: end,
+      dueDate: dueDateFor(end, card.dueDay),
+      amount: amountOf(i + 1),
+    })
+  }
+  return rows
+}
+
+/** ยอดรวมของตารางงวด */
+export function scheduleTotal(rows) {
+  return Math.round(rows.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100
+}
+
+/**
+ * ช่วงราคาต่อกันสนิทและจบพอดีที่งวดสุดท้ายไหม
+ * คืนข้อความบอกปัญหา หรือ null ถ้าผ่าน
+ */
+export function validateTiers(tiers, months) {
+  if (!Array.isArray(tiers) || tiers.length === 0) return 'ต้องมีอย่างน้อยหนึ่งช่วงราคา'
+  let expect = 1
+  for (const t of tiers) {
+    const from = Number(t.from)
+    const to = Number(t.to)
+    if (from !== expect) return `ช่วงราคาต้องต่อกันสนิท ช่วงถัดไปต้องเริ่มที่งวด ${expect}`
+    if (!(to >= from)) return 'งวดปิดท้ายต้องไม่น้อยกว่างวดเริ่ม'
+    if (!(Number(t.amount) >= 0)) return 'ยอดต่องวดต้องไม่ติดลบ'
+    expect = to + 1
+  }
+  if (expect - 1 !== months) return `ช่วงสุดท้ายต้องจบที่งวด ${months} พอดี`
+  return null
+}
+
+/**
+ * จำนวนงวดที่ครบกำหนดไปแล้ว ถ้าเปิดบิลวันนั้น
+ *
+ * ใช้จำกัดช่อง "ผ่อนมาแล้วกี่งวด" — งวดที่บอกว่าจ่ายไปแล้วต้องเป็นงวดที่
+ * ครบกำหนดไปแล้วจริง ไม่งั้นจะกลายเป็นจ่ายงวดที่ยังมาไม่ถึง ซึ่งเป็นไปไม่ได้
+ */
+export function maxPrepaidCount(card, purchaseDate, from = new Date()) {
+  const today = atMidnight(from)
+  const first = nextClosingDate(card.closingDay, purchaseDate)
+  let n = 0
+  // เพดาน 600 งวด กันลูปไม่รู้จบถ้าได้ค่าประหลาดมา
+  for (let i = 0; i < 600; i++) {
+    const end = clampedDate(first.getFullYear(), first.getMonth() + i, card.closingDay)
+    if (dueDateFor(end, card.dueDay) > today) break
+    n++
+  }
+  return n
+}
+
+/**
+ * วันเปิดบิลล่าสุดที่ยังผ่อนมาแล้ว n งวดได้
+ *
+ * ผู้ใช้รู้ว่าจ่ายมาแล้วกี่งวด แต่คิดไม่ออกว่าต้องย้อนวันเปิดบิลไปวันไหน
+ * เพราะต้องถอยหลังจากวันสรุปยอดและวันครบกำหนดของบัตรใบนั้น
+ * ระบบรู้คำตอบอยู่แล้วจึงควรเสนอวันให้กดเลย ไม่ใช่แค่ขึ้นเตือน
+ */
+export function latestPurchaseDateFor(card, n, from = new Date()) {
+  if (!(n > 0)) return null
+  const today = atMidnight(from)
+  for (let m = 0; m < 600; m++) {
+    const c = clampedDate(today.getFullYear(), today.getMonth() - m, card.closingDay)
+    const lastClosing = clampedDate(c.getFullYear(), c.getMonth() + (n - 1), card.closingDay)
+    if (dueDateFor(lastClosing, card.dueDay) <= today) return c
+  }
+  return null
+}
+
 /** จำนวนวันจากวันนี้ถึงวันที่ระบุ — ติดลบแปลว่าเลยมาแล้ว */
 export function daysUntil(date, from = new Date()) {
   const MS_PER_DAY = 86_400_000
