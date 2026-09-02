@@ -1,0 +1,131 @@
+import { supabase, unwrap, toThaiError } from '../supabase'
+import { getShopId } from './context'
+import { fromRow, fromRows, toRow } from './_map'
+
+/**
+ * บัตรเครดิต
+ *
+ * กติกาเดียวกับกระเป๋าเงินอื่น: **ห้ามอ่านยอดมาบวกลบใน JS แล้วเขียนทับ**
+ * ยอดหนี้คงค้าง (outstanding) ขยับผ่าน apply_wallet_effect ฝั่งฐานข้อมูลเท่านั้น
+ * ซึ่งถูกเรียกจาก post_transaction / edit_transaction / cancel_transaction อีกที
+ * ที่นี่จึงมีแต่การสร้าง แก้ข้อมูลบัตร และลบ — ไม่มีฟังก์ชันตั้งยอดหนี้โดยตรง
+ *
+ * ข้อยกเว้นเดียวคือ adjustOutstanding() สำหรับตอนผู้ใช้แก้ยอดยกมาเองในฟอร์มแก้ไขบัตร
+ * ซึ่งก็ยังส่งเป็น delta ให้ฐานข้อมูลบวกให้ ไม่ได้เขียนทับยอด
+ */
+
+/** ฐานข้อมูลยังไม่มีตาราง credit_cards (ยังไม่ได้รัน supabase/card.sql) */
+function isMissingTable(error) {
+  // 42P01 = undefined_table ของ Postgres, PGRST205 = PostgREST หาตารางใน schema cache ไม่เจอ
+  return error?.code === '42P01' || error?.code === 'PGRST205'
+}
+
+/**
+ * บัตรที่ยังไม่ถูกลบ เรียงตามลำดับที่ผู้ใช้จัด
+ *
+ * ตัวนี้ตัวเดียวที่ไม่ใช้ unwrap เพราะต้องแยกให้ออกว่า "ตารางยังไม่ถูกสร้าง" ต่างจาก
+ * error อื่น loadAllData เป็นแบบล้มทั้งชุด ถ้าปล่อยให้ throw ตอนที่ยังไม่ได้รัน card.sql
+ * ผู้ใช้จะเปิดแอปไม่ได้ทั้งแอป ทั้งที่แค่ฟีเจอร์บัตรยังไม่พร้อม
+ * จึงคืนรายการว่างไปก่อน แล้วส่วนอื่นของแอปยังทำงานได้ตามปกติ
+ * error อื่น (สิทธิ์ เน็ตหลุด) ยังโยนต่อเหมือนเดิม
+ */
+export async function listCreditCards() {
+  const { data, error } = await supabase
+    .from('credit_cards')
+    .select('*')
+    .eq('shop_id', getShopId())
+    .eq('deleted', false)
+    .order('sort_order')
+    .order('created_at')
+
+  if (error) {
+    if (isMissingTable(error)) {
+      console.warn('ยังไม่มีตาราง credit_cards — รัน supabase/card.sql ก่อนจึงจะใช้บัตรเครดิตได้')
+      return []
+    }
+    throw new Error(toThaiError(error))
+  }
+  return fromRows('credit_cards', data)
+}
+
+export async function createCreditCard({
+  bankName = '',
+  name = '',
+  last4 = '',
+  creditLimit = 0,
+  outstanding = 0,
+  closingDay = 25,
+  dueDay = 15,
+  cashbackRate = 0,
+  note = '',
+}) {
+  const row = toRow('credit_cards', {
+    shopId: getShopId(),
+    bankName,
+    name,
+    last4: last4 || null,
+    creditLimit: Number(creditLimit) || 0,
+    // ยอดหนี้ยกมาตอนสร้างบัตร — หลังจากนี้ขยับผ่าน RPC เท่านั้น
+    outstanding: Number(outstanding) || 0,
+    closingDay: Number(closingDay) || 25,
+    dueDay: Number(dueDay) || 15,
+    cashbackRate: Number(cashbackRate) || 0,
+    note: note || null,
+  })
+  return fromRow('credit_cards', await unwrap(
+    supabase.from('credit_cards').insert(row).select().single()
+  ))
+}
+
+/** แก้ได้เฉพาะข้อมูลบัตร — ยอดหนี้ต้องไปทาง adjustOutstanding เท่านั้น */
+export async function updateCreditCard(id, {
+  bankName, name, last4, creditLimit, closingDay, dueDay, cashbackRate, note, sortOrder, enabled,
+}) {
+  const row = toRow('credit_cards', {
+    bankName, name, last4, creditLimit, closingDay, dueDay, cashbackRate, note, sortOrder, enabled,
+    updatedAt: new Date().toISOString(),
+  })
+  return fromRow('credit_cards', await unwrap(
+    supabase.from('credit_cards').update(row).eq('id', id).select().single()
+  ))
+}
+
+/**
+ * ปรับยอดหนี้โดยตรง (ใช้ตอนแก้ยอดยกมาในฟอร์มแก้ไขบัตร)
+ *
+ * ส่ง delta ให้ฐานข้อมูลบวกเอง ไม่ได้เขียนทับยอด — ถ้ามีคนอื่นรูดบัตรพร้อมกัน
+ * ยอดจะยังถูกต้อง ไปทาง apply_wallet_effect เพื่อให้ผ่านเส้นทางเดียวกับที่อื่น
+ *
+ * หมายเหตุเครื่องหมาย: apply_wallet_effect กลับเครื่องหมายให้ (outstanding - delta)
+ * อยากให้หนี้ "เพิ่ม" X ต้องส่ง delta = -X
+ */
+export async function adjustOutstanding(cardId, outstandingDelta) {
+  await unwrap(supabase.rpc('apply_wallet_effect', {
+    p_shop: getShopId(),
+    p_target: `card:${cardId}`,
+    p_delta: -outstandingDelta,
+  }))
+}
+
+/**
+ * ลบแบบนุ่ม — ห้าม hard delete
+ * transactions.card_id เป็น on delete set null การลบจริงจะทำให้รายการเก่า
+ * ไม่รู้ว่าเคยรูดบัตรใบไหน และประวัติจะอ่านไม่รู้เรื่อง
+ */
+export async function deleteCreditCard(id) {
+  await unwrap(
+    supabase
+      .from('credit_cards')
+      .update({ deleted: true, enabled: false, updated_at: new Date().toISOString() })
+      .eq('id', id)
+  )
+}
+
+export async function reorderCreditCards(orderedIds) {
+  const shopId = getShopId()
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      unwrap(supabase.from('credit_cards').update({ sort_order: index }).eq('id', id).eq('shop_id', shopId))
+    )
+  )
+}

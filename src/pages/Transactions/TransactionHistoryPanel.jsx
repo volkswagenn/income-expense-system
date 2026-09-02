@@ -11,7 +11,11 @@ import { AttachmentButton, getAttachments, getPrimaryAttachment } from '../../co
 import { cancelTransaction, describeTxCancelEffects } from '../../lib/transactionActions'
 
 function methodLabel(m) {
-  return m === 'cash' ? 'เงินสด' : m === 'transfer' ? 'เงินโอน' : m === 'pending' ? 'ค้างชำระ' : 'อื่นๆ'
+  if (m === 'cash') return 'เงินสด'
+  if (m === 'transfer') return 'เงินโอน'
+  if (m === 'card') return 'บัตรเครดิต'
+  if (m === 'pending') return 'ค้างชำระ'
+  return 'อื่นๆ'
 }
 
 function TxCard({ tx, onEdit }) {

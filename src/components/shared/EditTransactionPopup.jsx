@@ -1,17 +1,21 @@
 import { useState } from 'react'
 import useTransactionStore from '../../store/useTransactionStore'
 import useWalletStore from '../../store/useWalletStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
 import usePendingStore from '../../store/usePendingStore'
 import useLogStore from '../../store/useLogStore'
 import { walletTarget } from '../../lib/api/transactions'
+import { methodLabel } from '../../lib/walletEngine'
 import { buildLogEntry } from '../../lib/logBuilder'
 import ConfirmPopup from './ConfirmPopup'
 import CategorySelect from './CategorySelect'
 import TransferAccountPicker from './TransferAccountPicker'
+import CreditCardPicker from './CreditCardPicker'
 import DatePicker from './DatePicker'
 
+/** วิธีชำระที่ขยับยอดจริง — 'pending' และ 'other' ไม่แตะอะไรเลย */
 function walletAffected(method) {
-  return method === 'cash' || method === 'transfer'
+  return method === 'cash' || method === 'transfer' || method === 'card'
 }
 
 export default function EditTransactionPopup({ transaction, onClose }) {
@@ -59,19 +63,26 @@ export default function EditTransactionPopup({ transaction, onClose }) {
       const newAccountId = form.method === 'transfer' ? ws.resolveTransferAccountId(form.transferAccountId) : null
       if (form.method === 'transfer' && !newAccountId) throw new Error('กรุณาเลือกบัญชีเงินโอน')
 
+      // บัตรเครดิตทำงานแบบเดียวกัน คือคืนหนี้ให้ใบเดิม แล้วไปเพิ่มหนี้ที่ใบใหม่
+      const cs = useCreditCardStore.getState()
+      const oldCardId = transaction.cardId ?? null
+      const newCardId = form.method === 'card' ? cs.resolveCardId(form.cardId) : null
+      if (form.method === 'card' && !newCardId) throw new Error('กรุณาเลือกบัตรเครดิต')
+
       const sign = (type) => (type === 'income' ? 1 : -1)
       // 'pending' และ 'other' ไม่เคยแตะกระเป๋าเงิน → walletTarget คืน null
       const oldTarget = walletAffected(transaction.method)
-        ? walletTarget(transaction.method, { transferAccountId: oldAccountId }) : null
+        ? walletTarget(transaction.method, { transferAccountId: oldAccountId, cardId: oldCardId }) : null
       const newTarget = walletAffected(form.method)
-        ? walletTarget(form.method, { transferAccountId: newAccountId }) : null
+        ? walletTarget(form.method, { transferAccountId: newAccountId, cardId: newCardId }) : null
       const reverse = oldTarget ? { target: oldTarget, delta: -sign(transaction.type) * oldAmt } : null
       const apply = newTarget ? { target: newTarget, delta: sign(form.type) * newAmt } : null
 
       const walletDesc = []
-      if (transaction.method !== form.method || oldAmt !== newAmt || oldAccountId !== newAccountId) {
-        if (reverse) walletDesc.push(`คืน ${oldAmt.toLocaleString()} → ${transaction.method === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
-        if (apply) walletDesc.push(`หัก ${newAmt.toLocaleString()} จาก${form.method === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
+      if (transaction.method !== form.method || oldAmt !== newAmt
+          || oldAccountId !== newAccountId || oldCardId !== newCardId) {
+        if (reverse) walletDesc.push(`คืน ${oldAmt.toLocaleString()} → ${methodLabel(transaction.method)}`)
+        if (apply) walletDesc.push(`หัก ${newAmt.toLocaleString()} จาก${methodLabel(form.method)}`)
       }
 
       await editTransaction(transaction.id, {
@@ -89,6 +100,7 @@ export default function EditTransactionPopup({ transaction, onClose }) {
         detail: form.detail ?? null,
         otherIncomeType: form.otherIncomeType ?? null,
         transferAccountId: newAccountId,
+        cardId: newCardId,
       }, {
         reverse,
         apply,
@@ -96,8 +108,8 @@ export default function EditTransactionPopup({ transaction, onClose }) {
           activityType: form.type === 'income' ? 'EDIT_INCOME' : 'EDIT_EXPENSE',
           description: `แก้ไขรายการ "${form.itemName}" ${oldAmt.toLocaleString()} → ${newAmt.toLocaleString()} บาท (${transaction.method} → ${form.method})${walletDesc.length ? ' · ' + walletDesc.join(', ') : ''}`,
           oldValue: transaction,
-          newValue: { ...form, amount: newAmt, transferAccountId: newAccountId, transactionId: transaction.id },
-          walletEffect: apply ? { target: form.method, delta: apply.delta, transferAccountId: newAccountId } : null,
+          newValue: { ...form, amount: newAmt, transferAccountId: newAccountId, cardId: newCardId, transactionId: transaction.id },
+          walletEffect: apply ? { target: form.method, delta: apply.delta, transferAccountId: newAccountId, cardId: newCardId } : null,
         }),
       })
 
@@ -108,7 +120,7 @@ export default function EditTransactionPopup({ transaction, onClose }) {
         await deletePendingByTxId(transaction.id)
         addLog(buildLogEntry({
           activityType: 'DELETE_PENDING',
-          description: `ยกเลิกบิลค้างชำระ: "${form.itemName}" (เปลี่ยนวิธีชำระเป็น${newMethod === 'cash' ? 'เงินสด' : 'เงินโอน'})`,
+          description: `ยกเลิกบิลค้างชำระ: "${form.itemName}" (เปลี่ยนวิธีชำระเป็น${methodLabel(newMethod)})`,
           oldValue: { transactionId: transaction.id, itemName: transaction.itemName },
         }))
       } else if (oldMethod !== 'pending' && newMethod === 'pending') {
@@ -167,8 +179,9 @@ export default function EditTransactionPopup({ transaction, onClose }) {
         })
       }
 
-      // ยอดเงินถูกฐานข้อมูลปรับแล้ว ดึงค่าจริงกลับมาแสดง
-      await ws.refresh()
+      // ยอดถูกฐานข้อมูลปรับแล้ว ดึงค่าจริงกลับมาแสดง
+      // ดึงทั้งสองชุดเสมอ เพราะการแก้อาจย้ายเงินข้ามระหว่างกระเป๋ากับบัตร
+      await Promise.all([ws.refresh(), cs.refresh()])
       setConfirm(false)
       onClose()
     } catch (err) {
@@ -234,12 +247,15 @@ export default function EditTransactionPopup({ transaction, onClose }) {
                     <>
                       <option value="cash">💵 เงินสด</option>
                       <option value="transfer">🏦 เงินโอน</option>
+                      {/* รายรับที่เข้าบัตร = เงินคืน หรือเงินคืนสินค้า ทำให้หนี้ลดลง */}
+                      <option value="card">💳 บัตรเครดิต</option>
                       <option value="other">อื่นๆ</option>
                     </>
                   ) : (
                     <>
                       <option value="cash">💵 เงินสด</option>
                       <option value="transfer">🏦 เงินโอน</option>
+                      <option value="card">💳 บัตรเครดิต</option>
                       <option value="pending">⏳ ค้างชำระ</option>
                     </>
                   )}
@@ -250,6 +266,15 @@ export default function EditTransactionPopup({ transaction, onClose }) {
                       value={form.transferAccountId}
                       onChange={(v) => set('transferAccountId', v)}
                       label={form.type === 'income' ? 'เข้าบัญชี' : 'ตัดจากบัญชี'}
+                    />
+                  </div>
+                )}
+                {form.method === 'card' && (
+                  <div className="mt-2">
+                    <CreditCardPicker
+                      value={form.cardId}
+                      onChange={(v) => set('cardId', v)}
+                      label={form.type === 'income' ? 'เงินคืนเข้าบัตร' : 'รูดบัตร'}
                     />
                   </div>
                 )}

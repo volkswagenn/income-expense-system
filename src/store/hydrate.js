@@ -1,6 +1,7 @@
 import { loadAllData } from '../lib/api'
 import useAppStore from './useAppStore'
 import useCategoryStore from './useCategoryStore'
+import useCreditCardStore from './useCreditCardStore'
 import useNoteStore from './useNoteStore'
 import usePendingStore from './usePendingStore'
 import useRecurringStore from './useRecurringStore'
@@ -22,6 +23,7 @@ const STORES = [
   [useCategoryStore, (d) => d],
   [useNoteStore, (d) => d.notes],
   [useAppStore, (d) => d.settings],
+  [useCreditCardStore, (d) => d.creditCards],
 ]
 
 export async function hydrateStores() {

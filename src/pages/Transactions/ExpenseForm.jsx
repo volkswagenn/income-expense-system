@@ -8,7 +8,10 @@ import CategorySelect from '../../components/shared/CategorySelect'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import useWalletStore from '../../store/useWalletStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
+import { nextDueDate, formatThaiDate } from '../../lib/cardCycle'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -21,6 +24,7 @@ import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 
 const EMPTY = {
   itemName: '', category: '', amount: '', method: 'cash', transferAccountId: '', pendingAccountId: '',
+  cardId: '',
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
 
@@ -46,6 +50,9 @@ export default function ExpenseForm() {
   const { addLog } = useLogStore()
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
   const refreshWallet = useWalletStore((s) => s.refresh)
+  const resolveCard = useCreditCardStore((s) => s.resolveCardId)
+  const refreshCards = useCreditCardStore((s) => s.refresh)
+  const cards = useCreditCardStore((s) => s.cards)
 
   // สิ่งที่บันทึกลงเซิร์ฟเวอร์สำเร็จแล้วในรอบนี้ (รายการ / รายการค้าง) — ถ้าขั้นถัดไปล้ม
   // (เช่นสร้างการ์ดรอใบกำกับภาษีไม่สำเร็จ) ผู้ใช้กดบันทึกซ้ำได้โดยไม่สร้างรายการ
@@ -97,6 +104,7 @@ export default function ExpenseForm() {
     if (saving) return
     const amt = Number(form.amount)
     const accountId = form.method === 'transfer' ? resolveAccount(form.transferAccountId) : null
+    const cardId = form.method === 'card' ? resolveCard(form.cardId) : null
     let tx = null
 
     setSaving(true)
@@ -140,11 +148,12 @@ export default function ExpenseForm() {
     } else {
       // บันทึกรายการ + ตัดเงิน + เขียน log จบในคำสั่งเดียวที่ฐานข้อมูล
       // ถ้าแยกยิงแล้วเน็ตหลุดกลางทาง จะได้รายการที่ไม่ตัดเงิน หรือเงินหายโดยไม่มีรายการ
-      const target = walletTarget(form.method, { transferAccountId: accountId })
+      const target = walletTarget(form.method, { transferAccountId: accountId, cardId })
       tx = await addTransaction({
         date, type: 'expense', amount: amt,
         method: form.method, category: form.category, itemName: form.itemName,
         ...(accountId ? { transferAccountId: accountId } : {}),
+        ...(cardId ? { cardId } : {}),
         vendor: form.vendor, receiptNo: form.receiptNo, taxStatus: form.taxStatus,
         dueDate: null, note: form.note,
         ...(attachments.length > 0 ? {
@@ -158,13 +167,15 @@ export default function ExpenseForm() {
         log: buildLogEntry({
           activityType: 'ADD_EXPENSE',
           description: `จ่าย "${form.itemName}" ${amt.toLocaleString()} บาท`,
-          walletEffect: target ? { target: form.method, delta: -amt, transferAccountId: accountId } : null,
-          newValue: { itemName: form.itemName, amount: amt, method: form.method, date },
+          walletEffect: target ? { target: form.method, delta: -amt, transferAccountId: accountId, cardId } : null,
+          newValue: { itemName: form.itemName, amount: amt, method: form.method, date, ...(cardId ? { cardId } : {}) },
         }),
       })
       savedRef.current.tx = tx
-      // ยอดเงินถูกแก้ที่เซิร์ฟเวอร์ ต้องดึงค่าจริงมาแสดง ไม่คำนวณเองเพราะอาจมีคนอื่นแก้พร้อมกัน
-      await refreshWallet()
+      // ยอดถูกแก้ที่เซิร์ฟเวอร์ ต้องดึงค่าจริงมาแสดง ไม่คำนวณเองเพราะอาจมีคนอื่นแก้พร้อมกัน
+      // รูดบัตรไม่แตะเงินสด/เงินโอน แต่ไปเพิ่มหนี้ในบัตร จึงต้องดึงคนละชุดกัน
+      if (cardId) await refreshCards()
+      else await refreshWallet()
     }
 
     if (form.taxStatus === 'waiting') {
@@ -204,8 +215,12 @@ export default function ExpenseForm() {
     if (form.method === 'transfer' && !resolveAccount(form.transferAccountId)) {
       return setErrMsg('กรุณาเลือกบัญชีที่จะจ่ายเงินโอน')
     }
+    if (form.method === 'card' && !resolveCard(form.cardId)) {
+      return setErrMsg('กรุณาเลือกบัตรเครดิตที่ใช้รูด')
+    }
     setErrMsg('')
-    if (form.method === 'pending') {
+    // บัตรเครดิตไม่ต้องเช็คยอดติดลบ — เป็นหนี้อยู่แล้วโดยธรรมชาติ และไม่บล็อกเรื่องวงเงิน
+    if (form.method === 'pending' || form.method === 'card') {
       execute()
     } else {
       check({
@@ -219,6 +234,11 @@ export default function ExpenseForm() {
 
   const vendorList = getVendors()
   const quickList = getQuickItems()
+
+  // บัตรที่จะถูกใช้จริง — เผื่อกรณีมีใบเดียวแล้ว picker ยังไม่ทันเซ็ตค่าให้
+  const selectedCard = form.method === 'card'
+    ? cards.find((c) => c.id === resolveCard(form.cardId)) ?? null
+    : null
 
   const recurringAllItems = useRecurringStore((s) => s.items)
   const recurringEntries = useRecurringStore((s) => s.entries)
@@ -309,6 +329,7 @@ export default function ExpenseForm() {
               <select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}>
                 <option value="cash">💵 เงินสด</option>
                 <option value="transfer">🏦 เงินโอน</option>
+                <option value="card">💳 บัตรเครดิต</option>
                 <option value="pending">⏳ ค้างชำระ</option>
               </select>
             </div>
@@ -320,8 +341,24 @@ export default function ExpenseForm() {
                 label="ตัดจากบัญชี"
               />
             )}
+            {form.method === 'card' && (
+              <CreditCardPicker
+                value={form.cardId}
+                onChange={(v) => set('cardId', v)}
+                label="รูดบัตร"
+              />
+            )}
           </div>
         </div>
+
+        {/* ผู้ใช้ไม่ต้องรู้เรื่องวันสรุปยอด — ระบบตอบคำถามเดียวที่เขาสนใจจริงๆ
+            คือต้องหาเงินมาจ่ายเมื่อไร */}
+        {form.method === 'card' && selectedCard && (
+          <div className="p-2.5 bg-rose-50 rounded-lg border border-rose-200 text-xs text-rose-700">
+            💳 ยังไม่ตัดเงินตอนนี้ — รายการนี้จะไปอยู่ในบิลที่ครบกำหนด{' '}
+            <strong>{formatThaiDate(nextDueDate(selectedCard.closingDay, selectedCard.dueDay, new Date(date + 'T00:00:00')))}</strong>
+          </div>
+        )}
 
         {form.method === 'pending' && (
           <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">

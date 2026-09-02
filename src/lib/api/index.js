@@ -1,4 +1,5 @@
 import * as categories from './categories'
+import * as creditCards from './creditCards'
 import * as logs from './logs'
 import * as notes from './notes'
 import * as pending from './pending'
@@ -7,7 +8,7 @@ import * as settings from './settings'
 import * as transactions from './transactions'
 import * as wallet from './wallet'
 
-export { categories, logs, notes, pending, recurring, settings, transactions, wallet }
+export { categories, creditCards, logs, notes, pending, recurring, settings, transactions, wallet }
 export { getShopId, hasShop, setShopId } from './context'
 
 /**
@@ -31,6 +32,7 @@ export async function loadAllData() {
     recurringEntries,
     noteMap,
     shopSettings,
+    cards,
   ] = await Promise.all([
     wallet.loadWallet(),
     transactions.listTransactions(),
@@ -44,6 +46,7 @@ export async function loadAllData() {
     recurring.listRecurringEntries(),
     notes.listNotes(),
     settings.loadSettings(),
+    creditCards.listCreditCards(),
   ])
 
   return {
@@ -59,5 +62,6 @@ export async function loadAllData() {
     recurringEntries,
     notes: noteMap,
     settings: shopSettings,
+    creditCards: cards,
   }
 }

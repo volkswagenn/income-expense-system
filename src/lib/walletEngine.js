@@ -18,9 +18,16 @@ function transferAccountOf(accountId) {
 }
 
 export function methodLabel(method) {
-  return method === 'cash' ? 'เงินสด' : 'เงินโอน'
+  if (method === 'cash') return 'เงินสด'
+  if (method === 'card') return 'บัตรเครดิต'
+  return 'เงินโอน'
 }
 
+/**
+ * บัตรเครดิตตั้งใจไม่ตรวจตรงนี้ — รูดเกินวงเงินก็ยังบันทึกได้
+ * วงเงินจริงมีการปรับชั่วคราว และถ้าธนาคารคิดค่าปรับ ผู้ใช้บันทึกเป็นรายจ่ายได้เอง
+ * ระบบไม่ควรขวางการบันทึกสิ่งที่เกิดขึ้นจริงไปแล้ว
+ */
 export function willGoNegative(method, amount, accountId) {
   const { cash, transferAccounts } = useWalletStore.getState()
   if (method === 'cash') return cash - amount < 0

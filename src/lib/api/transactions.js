@@ -107,10 +107,16 @@ export async function cancelTransaction(id, { effect = null, log = null } = {}) 
   )
 }
 
-/** ปลายทางของเงินในรูปแบบที่ RPC เข้าใจ */
-export function walletTarget(method, { transferAccountId = null, subWalletId = null } = {}) {
+/**
+ * ปลายทางของเงินในรูปแบบที่ RPC เข้าใจ
+ *
+ * 'card:<id>' เป็นปลายทางที่สี่ ฝั่งฐานข้อมูลกลับเครื่องหมายให้เอง (outstanding - delta)
+ * ผู้เรียกจึงส่ง delta เหมือนกระเป๋าอื่นทุกประการ คือรายจ่ายติดลบ รายรับเป็นบวก
+ */
+export function walletTarget(method, { transferAccountId = null, subWalletId = null, cardId = null } = {}) {
   if (method === 'cash') return 'cash'
   if (method === 'transfer') return transferAccountId ? `transfer:${transferAccountId}` : null
   if (method === 'sub') return subWalletId ? `sub:${subWalletId}` : null
+  if (method === 'card') return cardId ? `card:${cardId}` : null
   return null // 'pending' และ 'other' ไม่แตะกระเป๋าเงิน
 }

@@ -1,0 +1,387 @@
+import { useState } from 'react'
+import useCreditCardStore from '../../store/useCreditCardStore'
+import useLogStore from '../../store/useLogStore'
+import { buildLogEntry } from '../../lib/logBuilder'
+import { formatCard } from '../../components/shared/CreditCardPicker'
+import { nextDueDate, nextClosingDate, daysUntil, formatThaiDate } from '../../lib/cardCycle'
+import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import BankSelect from '../../components/shared/BankSelect'
+import BankLogo from '../../components/shared/BankLogo'
+import { BANKS } from '../../lib/banks'
+
+const BANK_NAMES = BANKS.map((b) => b.name)
+const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
+
+const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
+
+function CardFormPopup({ card, onSave, onClose }) {
+  const isEdit = !!card
+  const [bankName, setBankName] = useState(card?.bankName ?? '')
+  const [customBank, setCustomBank] = useState(
+    card?.bankName && !BANK_NAMES.includes(card.bankName) ? card.bankName : ''
+  )
+  const [useCustom, setUseCustom] = useState(!!card?.bankName && !BANK_NAMES.includes(card.bankName))
+  const [name, setName] = useState(card?.name ?? '')
+  const [last4, setLast4] = useState(card?.last4 ?? '')
+  const [creditLimit, setCreditLimit] = useState(card ? String(card.creditLimit) : '')
+  const [outstanding, setOutstanding] = useState(card ? String(card.outstanding) : '')
+  const [closingDay, setClosingDay] = useState(String(card?.closingDay ?? 25))
+  const [dueDay, setDueDay] = useState(String(card?.dueDay ?? 15))
+  const [cashbackRate, setCashbackRate] = useState(card ? String(card.cashbackRate) : '')
+  const [showMore, setShowMore] = useState(false)
+  const [error, setError] = useState('')
+
+  const clear = (fn) => (v) => { fn(v); setError('') }
+
+  const submit = () => {
+    const bank = useCustom ? customBank.trim() : bankName
+    if (!bank) return setError('เลือกหรือพิมพ์ชื่อธนาคาร')
+    if (!name.trim()) return setError('กรอกชื่อบัตร')
+    if (last4 && !/^\d{4}$/.test(last4.trim())) return setError('เลขสี่ตัวท้ายต้องเป็นตัวเลข 4 หลัก')
+    onSave({
+      bankName: bank,
+      name: name.trim(),
+      last4: last4.trim(),
+      creditLimit: Number(creditLimit) || 0,
+      outstanding: Number(outstanding) || 0,
+      closingDay: Number(closingDay) || 25,
+      dueDay: Number(dueDay) || 15,
+      cashbackRate: Number(cashbackRate) || 0,
+    })
+  }
+
+  // แสดงให้เห็นทันทีว่าตั้งวันแล้วบิลจะครบกำหนดเมื่อไร ผู้ใช้จะได้ไม่ต้องเดา
+  const preview = nextDueDate(Number(closingDay) || 25, Number(dueDay) || 15)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
+          <h3 className="font-semibold text-base">💳 {isEdit ? 'แก้ไขบัตร' : 'เพิ่มบัตรเครดิต'}</h3>
+          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="label">ธนาคาร / ผู้ออกบัตร</label>
+            {useCustom ? (
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  value={customBank}
+                  onChange={(e) => clear(setCustomBank)(e.target.value)}
+                  placeholder="พิมพ์ชื่อผู้ออกบัตร..."
+                  autoFocus
+                />
+                <button className="btn btn-secondary text-xs px-2" onClick={() => setUseCustom(false)}>เลือกจากรายการ</button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1 min-w-0">
+                  <BankSelect value={bankName} onChange={clear(setBankName)} />
+                </div>
+                <button className="btn btn-secondary text-xs px-2 shrink-0" onClick={() => setUseCustom(true)}>อื่นๆ</button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="label">ชื่อเรียกบัตร</label>
+              <input
+                className="input"
+                value={name}
+                onChange={(e) => clear(setName)(e.target.value)}
+                placeholder="เช่น บัตรหลัก"
+              />
+            </div>
+            <div>
+              <label className="label">4 ตัวท้าย</label>
+              <input
+                className="input"
+                value={last4}
+                onChange={(e) => clear(setLast4)(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="1234"
+                inputMode="numeric"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label">วันสรุปยอด</label>
+              <select className="input" value={closingDay} onChange={(e) => clear(setClosingDay)(e.target.value)}>
+                {DAYS.map((d) => <option key={d} value={d}>ทุกวันที่ {d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">วันครบกำหนดชำระ</label>
+              <select className="input" value={dueDay} onChange={(e) => clear(setDueDay)(e.target.value)}>
+                {DAYS.map((d) => <option key={d} value={d}>ทุกวันที่ {d}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+            📅 รูดวันนี้จะไปอยู่ในบิลที่ครบกำหนด <strong className="text-gray-700">{formatThaiDate(preview)}</strong>
+          </p>
+
+          <div>
+            <label className="label">{isEdit ? 'ยอดหนี้คงค้าง' : 'ยอดหนี้ยกมา'} (บาท)</label>
+            <input
+              className="input"
+              type="number"
+              value={outstanding}
+              onChange={(e) => clear(setOutstanding)(e.target.value)}
+              placeholder="0.00"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {isEdit
+                ? '⚠️ การแก้ยอดตรงนี้เป็นการปรับยอดหนี้โดยตรง ไม่สร้างรายการรับ-จ่าย'
+                : 'ยอดที่ค้างอยู่ตอนนี้ ถ้าเพิ่งเปิดบัตรใหม่ให้ปล่อยเป็น 0'}
+            </p>
+          </div>
+
+          <button
+            className="text-xs text-gray-500 hover:text-gray-700"
+            onClick={() => setShowMore((v) => !v)}
+          >
+            {showMore ? '▲ ซ่อนตัวเลือกเพิ่มเติม' : '▼ ตัวเลือกเพิ่มเติม (ไม่บังคับ)'}
+          </button>
+
+          {showMore && (
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <label className="label">วงเงิน (บาท)</label>
+                <input
+                  className="input"
+                  type="number"
+                  value={creditLimit}
+                  onChange={(e) => clear(setCreditLimit)(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="label">อัตราเงินคืน (%)</label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={cashbackRate}
+                  onChange={(e) => clear(setCashbackRate)(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+          )}
+
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+        </div>
+
+        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
+          <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
+          <button className="btn btn-primary" onClick={submit}>{isEdit ? 'บันทึก' : 'เพิ่มบัตร'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CardRow({ card, onEdit, onDelete }) {
+  const due = nextDueDate(card.closingDay, card.dueDay)
+  const closing = nextClosingDate(card.closingDay)
+  const daysToDue = daysUntil(due)
+  const used = Number(card.outstanding) || 0
+  const limit = Number(card.creditLimit) || 0
+  const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0
+  const overLimit = limit > 0 && used > limit
+
+  return (
+    <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <BankLogo bankName={card.bankName} size="md" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-sm truncate">{formatCard(card)}</p>
+          <p className="text-xs text-gray-500">
+            สรุปยอด {formatThaiDate(closing)} · ครบกำหนด {formatThaiDate(due)}
+            {daysToDue >= 0 && <span className="text-gray-400"> (อีก {daysToDue} วัน)</span>}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs text-gray-400">ยอดหนี้</p>
+          <p className={`font-bold tabular-nums ${used > 0 ? 'text-rose-600' : 'text-gray-500'}`}>
+            {fmt(used)}
+          </p>
+        </div>
+      </div>
+
+      {limit > 0 && (
+        <div>
+          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${overLimit ? 'bg-rose-500' : 'bg-rose-300'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-400 mt-1 tabular-nums">
+            ใช้ไป {fmt(used)} จากวงเงิน {fmt(limit)}
+            {overLimit
+              ? <span className="text-rose-500"> · เกินวงเงิน {fmt(used - limit)}</span>
+              : ` · เหลือ ${fmt(limit - used)}`}
+          </p>
+        </div>
+      )}
+
+      <div className="flex gap-2 justify-end">
+        <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onEdit(card)}>แก้ไข</button>
+        <button className="btn btn-secondary text-xs py-1 px-2.5 text-red-600" onClick={() => onDelete(card)}>ลบ</button>
+      </div>
+    </div>
+  )
+}
+
+export default function CreditCardList() {
+  const cards = useCreditCardStore((s) => s.cards)
+  const { createCard, updateCard, deleteCard, adjustOutstanding } = useCreditCardStore()
+  const { addLog } = useLogStore()
+
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const openCreate = () => { setEditing(null); setFormOpen(true); setError('') }
+  const openEdit = (card) => { setEditing(card); setFormOpen(true); setError('') }
+
+  const handleSave = async (data) => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (editing) {
+        await updateCard(editing.id, {
+          bankName: data.bankName,
+          name: data.name,
+          last4: data.last4 || null,
+          creditLimit: data.creditLimit,
+          closingDay: data.closingDay,
+          dueDay: data.dueDay,
+          cashbackRate: data.cashbackRate,
+        })
+        // ยอดหนี้ต้องไปทาง RPC เสมอ ส่งเป็นส่วนต่าง ไม่เขียนทับยอด
+        const delta = data.outstanding - Number(editing.outstanding || 0)
+        if (delta !== 0) {
+          await adjustOutstanding(editing.id, delta)
+          await addLog(buildLogEntry({
+            activityType: 'CARD_ADJUST',
+            description: `ปรับยอดหนี้บัตร "${data.name}" ${fmt(editing.outstanding)} → ${fmt(data.outstanding)} บาท`,
+            oldValue: { outstanding: editing.outstanding },
+            newValue: { cardId: editing.id, outstanding: data.outstanding },
+          }))
+        } else {
+          await addLog(buildLogEntry({
+            activityType: 'CARD_UPDATE',
+            description: `แก้ไขบัตรเครดิต "${data.name}"`,
+            oldValue: editing,
+            newValue: { ...editing, ...data },
+          }))
+        }
+      } else {
+        const card = await createCard(data)
+        await addLog(buildLogEntry({
+          activityType: 'CARD_CREATE',
+          description: `เพิ่มบัตรเครดิต "${data.bankName} — ${data.name}"${data.outstanding ? ` ยอดยกมา ${fmt(data.outstanding)} บาท` : ''}`,
+          newValue: card,
+        }))
+      }
+      setFormOpen(false)
+      setEditing(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    const card = confirmDelete
+    if (!card || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await deleteCard(card.id)
+      await addLog(buildLogEntry({
+        activityType: 'CARD_DELETE',
+        description: `ลบบัตรเครดิต "${formatCard(card)}"`,
+        oldValue: card,
+      }))
+      setConfirmDelete(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const totalOutstanding = cards.reduce((sum, c) => sum + (Number(c.outstanding) || 0), 0)
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs text-gray-500">
+          รูดบัตรแล้วยอดจะมาสะสมเป็นหนี้ที่นี่ ไม่ตัดเงินสดหรือเงินโอน
+        </p>
+        <button className="btn btn-primary text-xs shrink-0" onClick={openCreate}>
+          + เพิ่มบัตร
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+
+      {cards.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">
+          <div className="text-3xl mb-2">💳</div>
+          <p className="text-sm">ยังไม่มีบัตรเครดิต</p>
+          <p className="text-xs mt-1">กด "เพิ่มบัตร" เพื่อเริ่มบันทึกรายจ่ายผ่านบัตร</p>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2.5">
+            {cards.map((card) => (
+              <CardRow key={card.id} card={card} onEdit={openEdit} onDelete={setConfirmDelete} />
+            ))}
+          </div>
+          {cards.length > 1 && (
+            <div className="flex items-center justify-between text-sm border-t pt-2.5">
+              <span className="text-gray-500">ยอดหนี้รวมทุกใบ</span>
+              <span className="font-bold tabular-nums text-rose-600">{fmt(totalOutstanding)} บาท</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {formOpen && (
+        <CardFormPopup
+          card={editing}
+          onSave={handleSave}
+          onClose={() => { setFormOpen(false); setEditing(null) }}
+        />
+      )}
+
+      <ConfirmPopup
+        open={!!confirmDelete}
+        title="ลบบัตรเครดิต"
+        message={
+          confirmDelete
+            ? `ลบ "${formatCard(confirmDelete)}" ที่มียอดหนี้ ${fmt(confirmDelete.outstanding)} บาท?\n\nรายการที่เคยรูดบัตรใบนี้จะยังอยู่ในประวัติและรายงานเหมือนเดิม แต่จะเลือกบัตรใบนี้ในฟอร์มไม่ได้อีก`
+            : ''
+        }
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(null)}
+        confirmLabel="ลบบัตร"
+        danger
+      />
+    </div>
+  )
+}

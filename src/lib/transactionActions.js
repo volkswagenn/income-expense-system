@@ -1,14 +1,20 @@
 import useWalletStore from '../store/useWalletStore'
+import useCreditCardStore from '../store/useCreditCardStore'
 import usePendingStore from '../store/usePendingStore'
 import useTransactionStore from '../store/useTransactionStore'
 import useRecurringStore from '../store/useRecurringStore'
 import { buildLogEntry } from './logBuilder'
 
-// ชื่อบัญชีเงินโอนสำหรับต่อท้ายข้อความอธิบายผล
+// ชื่อบัญชีเงินโอน/บัตร สำหรับต่อท้ายข้อความอธิบายผล
 function accountSuffix(method, accountId) {
   if (method !== 'transfer') return ''
   const label = useWalletStore.getState().getTransferAccountLabel(accountId)
   return ` (${label})`
+}
+
+function cardSuffix(cardId) {
+  if (!cardId) return ''
+  return ` (${useCreditCardStore.getState().getCardLabel(cardId)})`
 }
 
 /**
@@ -27,6 +33,10 @@ export function reverseEffectOf(tx, pendingPayments = []) {
     if (tx.method === 'transfer' && tx.transferAccountId) {
       return { target: `transfer:${tx.transferAccountId}`, delta: -amount }
     }
+    // ยกเลิกเงินคืนที่เข้าบัตร = หนี้กลับมาเท่าเดิม (ฐานข้อมูลกลับเครื่องหมายให้)
+    if (tx.method === 'card' && tx.cardId) {
+      return { target: `card:${tx.cardId}`, delta: -amount }
+    }
     return null // 'other' ไม่เคยเข้ากระเป๋าเงิน จึงไม่มีอะไรต้องถอน
   }
 
@@ -34,6 +44,10 @@ export function reverseEffectOf(tx, pendingPayments = []) {
     if (tx.method === 'cash') return { target: 'cash', delta: +amount }
     if (tx.method === 'transfer' && tx.transferAccountId) {
       return { target: `transfer:${tx.transferAccountId}`, delta: +amount }
+    }
+    // ยกเลิกรายการที่รูดบัตร = หนี้ลดลงตามยอดที่รูด
+    if (tx.method === 'card' && tx.cardId) {
+      return { target: `card:${tx.cardId}`, delta: +amount }
     }
     if (tx.method === 'pending') {
       const paid = pendingPayments.find((p) => p.transactionId === tx.id && p.status === 'paid')
@@ -60,10 +74,12 @@ export function describeTxCancelEffects(tx, { pendingPayments = [], taxInvoices 
   if (tx.type === 'income') {
     if (tx.method === 'cash') effects.push(`หัก ${tx.amount.toLocaleString()} บาท จากเงินสด`)
     else if (tx.method === 'transfer') effects.push(`หัก ${tx.amount.toLocaleString()} บาท จากเงินโอน${suffix}`)
+    else if (tx.method === 'card') effects.push(`ยอดหนี้บัตรเพิ่มขึ้น ${tx.amount.toLocaleString()} บาท${cardSuffix(tx.cardId)}`)
     else effects.push('ไม่มีผลต่อยอดเงิน')
   } else if (tx.type === 'expense') {
     if (tx.method === 'cash') effects.push(`คืน ${tx.amount.toLocaleString()} บาท เข้าเงินสด`)
     else if (tx.method === 'transfer') effects.push(`คืน ${tx.amount.toLocaleString()} บาท เข้าเงินโอน${suffix}`)
+    else if (tx.method === 'card') effects.push(`ยอดหนี้บัตรลดลง ${tx.amount.toLocaleString()} บาท${cardSuffix(tx.cardId)}`)
     else if (tx.method === 'pending') {
       const paid = pendingPayments.find((p) => p.transactionId === tx.id && p.status === 'paid')
       if (paid) {
@@ -121,6 +137,7 @@ export async function cancelTransaction(tx) {
   // ที่ผูกอยู่ไปหลายตาราง — ดึงกลับมาให้ตรงกันทั้งชุด แทนที่จะเดาว่าอะไรเปลี่ยนไปบ้าง
   await Promise.all([
     useWalletStore.getState().refresh(),
+    useCreditCardStore.getState().refresh(),
     usePendingStore.getState().refresh(),
     useRecurringStore.getState().refresh(),
   ])

@@ -169,7 +169,7 @@ function MoneyEventCard({ event, onCancel }) {
   if (event._kind === 'tx') {
     const { tx } = event
     const isIncome = tx.type === 'income'
-    const methodLabel = tx.method === 'cash' ? 'เงินสด' : tx.method === 'transfer' ? 'เงินโอน' : tx.method === 'pending' ? 'ค้างชำระ' : 'อื่นๆ'
+    const methodLabel = tx.method === 'cash' ? 'เงินสด' : tx.method === 'transfer' ? 'เงินโอน' : tx.method === 'card' ? 'บัตรเครดิต' : tx.method === 'pending' ? 'ค้างชำระ' : 'อื่นๆ'
     return (
       <div className={`rounded-lg border-l-4 ${isIncome ? 'border-l-emerald-400' : 'border-l-red-400'} border border-gray-100 bg-white p-3 flex items-start gap-3`}>
         <div className="text-xs text-gray-400 w-28 shrink-0">

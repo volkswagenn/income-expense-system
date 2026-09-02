@@ -1,12 +1,19 @@
 import { useNavigate } from 'react-router-dom'
 import useWalletStore from '../../store/useWalletStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
 import usePendingStore from '../../store/usePendingStore'
 import Icon from '../../components/shared/Icon'
 
 const fmt = (n) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-/** การ์ดยอดรวม — พื้นเข้มพร้อมวงกลม lime ตาม mockup */
-function HeroCard({ total, cash, transfer }) {
+/**
+ * การ์ดยอดรวม — พื้นเข้มพร้อมวงกลม lime ตาม mockup
+ *
+ * ยอดรวมยังเป็น เงินสด + เงินโอน เท่านั้น ตั้งใจไม่หักหนี้บัตรออก
+ * เพราะยอดนี้ตอบคำถามว่า "มีเงินเท่าไร" ไม่ใช่ "รวยเท่าไร"
+ * หนี้บัตรจึงแยกเป็นอีกบรรทัด พร้อมยอดสุทธิไว้ให้คนที่อยากเห็นภาพรวม
+ */
+function HeroCard({ total, cash, transfer, cardDebt = 0 }) {
   return (
     <div className="relative overflow-hidden rounded-card bg-ink p-5 sm:col-span-2">
       <div className="absolute -right-8 -top-11 w-[130px] h-[130px] rounded-full bg-lime opacity-[.13]" />
@@ -27,7 +34,19 @@ function HeroCard({ total, cash, transfer }) {
             <span className="text-[12px] text-[#9AA0A8]">เงินโอน</span>
             <span className="text-[12.5px] text-white tabular-nums">{fmt(transfer)}</span>
           </div>
+          {cardDebt > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Icon name="credit_card" size={16} className="text-[#F2A0A0]" />
+              <span className="text-[12px] text-[#9AA0A8]">หนี้บัตร</span>
+              <span className="text-[12.5px] text-[#F2A0A0] tabular-nums">{fmt(cardDebt)}</span>
+            </div>
+          )}
         </div>
+        {cardDebt > 0 && (
+          <p className="text-[11.5px] text-[#7C828A] mt-2.5 tabular-nums">
+            คงเหลือสุทธิหลังหักหนี้บัตร {fmt(total - cardDebt)} บาท
+          </p>
+        )}
       </div>
     </div>
   )
@@ -62,13 +81,14 @@ function StatCard({ icon, label, amount, tone, onClick, sub }) {
 
 export default function FinancialStatus() {
   const { cash, transfer } = useWalletStore()
+  const cardDebt = useCreditCardStore((s) => s.getTotalOutstanding())
   const pendingTotal = usePendingStore((s) => s.getPendingTotal())
   const pendingIncomeTotal = usePendingStore((s) => s.getPendingIncomeTotal())
   const navigate = useNavigate()
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-      <HeroCard total={cash + transfer} cash={cash} transfer={transfer} />
+      <HeroCard total={cash + transfer} cash={cash} transfer={transfer} cardDebt={cardDebt} />
 
       <StatCard
         icon="schedule"
