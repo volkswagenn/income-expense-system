@@ -13,13 +13,9 @@
 | ส่วน | สถานะ |
 |---|---|
 | แบบสถาปัตยกรรม `ARCHITECTURE.md` | ✅ เสร็จ |
-| ฐานข้อมูล `supabase/setup.sql` (= schema + columns + policies + functions + wallet) | ✅ ติดตั้งบน Supabase แล้ว |
+| ฐานข้อมูล `supabase/setup.sql` (= schema + columns + policies + functions + wallet + card) | ✅ ติดตั้งบน Supabase แล้ว |
 | **แพตช์ `supabase/fix.sql`** (post_transaction, คอลัมน์ recurring_entries, edit_transaction, bucket) | ⚠️ **ต้องรันบนฐานข้อมูลที่ติดตั้งไว้แล้ว** — ไม่รัน = รายการที่บันทึกไม่มีชื่อ/หมวด และหน้ารายการประจำใช้ไม่ได้ |
-| **แพตช์ `supabase/card.sql`** (บัตรเครดิต เฟส 1: ตาราง `credit_cards`, `transactions.card_id`, ปลายทาง `card:<id>`) | ⚠️ **ต้องรันหลัง `fix.sql`** — ไม่รัน = หัวข้อบัตรเครดิตว่างเปล่าและเลือกบัตรในฟอร์มไม่ได้ (ส่วนอื่นของแอปยังใช้ได้ตามปกติ) |
-| **แพตช์ `supabase/card_statement.sql`** (เฟส 2: รอบบิล ปิดรอบ จ่ายบิล) | ⚠️ ต้องรันหลัง `card.sql` — ไม่รัน = ไม่มีใบแจ้งยอดและจ่ายบิลไม่ได้ |
-| **แพตช์ `supabase/card_installment.sql`** (เฟส 3: ผ่อนชำระ) | ⚠️ ต้องรันหลัง `card_statement.sql` — ไฟล์นี้ทับ `close_card_statement` ให้ดึงงวดผ่อนเข้าบิลด้วย |
-| **แพตช์ `supabase/card_extra.sql`** (เฟส 4: หักบัญชีจำลอง + รายการประจำผ่านบัตร) | ⚠️ ต้องรันหลังสุด |
-| **แพตช์ `supabase/card_interest.sql`** (ผ่อนแบบมีดอกเบี้ย: คอลัมน์ principal_amount) | ⚠️ ต้องรันหลัง `card_installment.sql` — ไม่รัน = ติ๊กแบ่งชำระแล้วบันทึกไม่ได้ |
+| **แพตช์ `supabase/card.sql`** (บัตรเครดิตทั้งระบบ: รอบบิล จ่ายบิล ผ่อนชำระ เงินคืน หักบัญชีจำลอง) | ⚠️ **ต้องรันหลัง `fix.sql`** — ไม่รัน = หัวข้อบัตรเครดิตว่างเปล่าและเลือกบัตรในฟอร์มไม่ได้ (ส่วนอื่นของแอปยังใช้ได้ตามปกติ) |
 | `vercel.json` + `.env.example` + `.env.local` | ✅ พร้อม |
 | `src/lib/supabase.js`, `src/lib/api/`, `src/auth/` | ✅ เสร็จ |
 | store ทั้ง 8 ตัว | ✅ ไม่มี `persist` แล้ว เป็นแคชของเซิร์ฟเวอร์ |
@@ -29,14 +25,14 @@
 | สิทธิ์ตาม role ใน UI | ⚠️ viewer ยังเห็นปุ่มแก้ไข (ฐานข้อมูลปฏิเสธให้ แต่ UI ยังไม่ซ่อน) |
 | เช็คลิสต์ก่อนใช้จริง (ข้อ 4) | ❌ ยังไม่ได้ทดสอบ |
 
-ลำดับการรัน SQL บนฐานข้อมูลที่ติดตั้งไปแล้ว: `fix.sql` → `card.sql` → `card_statement.sql` → `card_installment.sql` → `card_extra.sql` → `card_interest.sql`
-(ทุกไฟล์รันซ้ำได้ ไม่ลบข้อมูล แต่ **ลำดับสำคัญ** เพราะไฟล์หลังทับฟังก์ชันของไฟล์ก่อน)
+ลำดับการรัน SQL บนฐานข้อมูลที่ติดตั้งไปแล้ว: `fix.sql` → `card.sql` (รันซ้ำได้ ไม่ลบข้อมูล)
+ฐานข้อมูลใหม่เอี่ยม: `setup.sql` ไฟล์เดียวจบ เพราะรวม card ไว้ให้แล้ว
 `card.sql` ทับฟังก์ชันชุดเดียวกับ `fix.sql` จึงต้องรันทีหลังเสมอ และถ้ารัน `columns.sql` ใหม่เมื่อไร
 ต้องรัน `card.sql` ซ้ำอีกครั้ง เพราะ `columns.sql` จะตั้ง constraint ของ `transactions.method` กลับเป็นชุดที่ไม่มี `'card'`
 
 ไฟล์ SQL ในโฟลเดอร์ `supabase/` ตอนนี้: `setup.sql` (ติดตั้งครั้งแรกทั้งชุด), `fix.sql` (แพตช์ฐานข้อมูลเดิม),
-`card.sql` / `card_statement.sql` / `card_installment.sql` / `card_extra.sql` / `card_interest.sql` (บัตรเครดิต),
-`check.sql` / `access.sql` (ตรวจ/ซ่อมสิทธิ์), `keep.sql` / `yearly.sql` (แพตช์ย่อยที่รวมอยู่ใน setup.sql แล้ว)
+`card.sql` (บัตรเครดิตทั้งระบบ),
+`recurring.sql` (แพตช์รายการประจำ), `check.sql` / `access.sql` (ตรวจ/ซ่อมสิทธิ์)
 ชื่อไฟล์ `01_schema.sql` … `05_wallet_functions.sql` ที่อ้างถึงด้านล่างคือชื่อเดิมของ `schema.sql` … `wallet.sql`
 
 ---

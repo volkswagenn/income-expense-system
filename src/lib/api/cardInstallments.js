@@ -8,7 +8,7 @@ import { toDateString } from '../cardCycle'
  *
  * ตอนสร้างไม่แตะยอดหนี้และไม่สร้างรายจ่าย — บันทึกแค่สัญญากับตารางงวด
  * งวดจะกลายเป็นรายจ่ายทีละงวดตอนปิดรอบ (ดู close_card_statement ใน
- * supabase/card_installment.sql) เพราะเงินไหลออกจริงทีละงวด
+ * supabase/card.sql) เพราะเงินไหลออกจริงทีละงวด
  */
 
 function isMissingTable(error) {
@@ -26,7 +26,7 @@ export async function listInstallments() {
   for (const res of [insRes, entRes]) {
     if (res.error) {
       if (isMissingTable(res.error)) {
-        console.warn('ยังไม่มีตารางผ่อนชำระ — รัน supabase/card_installment.sql ก่อนจึงจะใช้การผ่อนได้')
+        console.warn('ยังไม่มีตารางผ่อนชำระ — รัน supabase/card.sql ก่อนจึงจะใช้การผ่อนได้')
         return { installments: [], entries: [] }
       }
       throw new Error(toThaiError(res.error))

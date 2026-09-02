@@ -9,7 +9,7 @@ import { toDateString } from '../cardCycle'
  * ตารางเก็บเฉพาะรอบที่ปิดแล้ว รอบที่กำลังเดินอยู่คำนวณสดจาก transactions
  * เพราะยอดของมันเปลี่ยนทุกครั้งที่รูด การเก็บไว้จะต้องคอยไล่อัปเดตแล้วเพี้ยนได้ง่าย
  *
- * การจ่ายบิลไม่สร้าง transactions โดยเจตนา — ดูเหตุผลใน supabase/card_statement.sql
+ * การจ่ายบิลไม่สร้าง transactions โดยเจตนา — ดูเหตุผลใน supabase/card.sql
  */
 
 function isMissingTable(error) {
@@ -19,7 +19,7 @@ function isMissingTable(error) {
 /**
  * ใบแจ้งยอดทั้งหมดของร้าน
  *
- * กลืน error เฉพาะกรณีตารางยังไม่ถูกสร้าง (ยังไม่ได้รัน card_statement.sql)
+ * กลืน error เฉพาะกรณีตารางยังไม่ถูกสร้าง (ยังไม่ได้รัน card.sql)
  * ด้วยเหตุผลเดียวกับ listCreditCards คือ loadAllData ล้มทั้งชุด
  */
 export async function listCardStatements() {
@@ -31,7 +31,7 @@ export async function listCardStatements() {
 
   if (error) {
     if (isMissingTable(error)) {
-      console.warn('ยังไม่มีตาราง card_statements — รัน supabase/card_statement.sql ก่อนจึงจะใช้รอบบิลได้')
+      console.warn('ยังไม่มีตาราง card_statements — รัน supabase/card.sql ก่อนจึงจะใช้รอบบิลได้')
       return []
     }
     throw new Error(toThaiError(error))

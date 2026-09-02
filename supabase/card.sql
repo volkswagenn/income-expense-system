@@ -1,21 +1,44 @@
 -- ไฟล์: supabase/card.sql
 -- ============================================================================
--- JodFlow — บัตรเครดิต เฟส 1   [card.sql]
+-- JodFlow — บัตรเครดิตทั้งระบบในไฟล์เดียว   [card.sql]
 --
--- Supabase → SQL Editor → Role = postgres → วางทั้งไฟล์ → Run
--- รันซ้ำได้ ไม่ลบข้อมูล  (ต้องรัน fix.sql ก่อน เพราะไฟล์นี้ทับฟังก์ชันชุดเดียวกัน)
+-- วิธีใช้: Supabase → SQL Editor → ตรวจว่า Role เป็น postgres → วางทั้งไฟล์ → Run
+-- ทุกคำสั่งเป็น if not exists / create or replace รันซ้ำได้ไม่เสียหาย
+-- และไม่มีคำสั่งใดลบข้อมูลของร้าน
 --
--- แนวคิด: บัตรเครดิตคือ "กระเป๋าเงินชนิดที่สี่" ต่อจาก cash / transfer / sub
--- ปลายทางของเงินเขียนเป็น 'card:<uuid>' แล้วเสียบเข้า apply_wallet_effect ที่มีอยู่
--- ทำให้ post_transaction / edit_transaction / cancel_transaction รองรับบัตรทันที
--- รวมถึงการย้อนยอดตอนแก้ไขและการคืนยอดตอนยกเลิก โดยไม่ต้องเขียนใหม่
+-- ไฟล์นี้รวมของเดิม 5 ไฟล์ไว้ด้วยกัน (card / card_statement / card_installment /
+-- card_extra / card_interest) โดยเก็บเฉพาะ "เวอร์ชันสุดท้าย" ของแต่ละฟังก์ชัน
+-- ฐานข้อมูลที่เคยรันไฟล์เก่าไปแล้วรันไฟล์นี้ทับได้เลย ผลลัพธ์เหมือนกัน
 --
--- เครื่องหมายกลับด้าน: บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน จึงเก็บ outstanding - delta
---   รูดจ่าย (expense) delta = -1000  →  outstanding เพิ่ม 1000
---   เงินคืน (income)  delta = +50    →  outstanding ลด   50
+-- ต้องรันหลัง setup.sql และ fix.sql เสมอ เพราะทับฟังก์ชันชุดเดียวกับ fix.sql
+-- และถ้ารัน columns.sql ใหม่เมื่อไร ต้องรันไฟล์นี้ซ้ำ เพราะ columns.sql จะตั้ง
+-- constraint ของ transactions.method กลับเป็นชุดที่ไม่มี 'card'
+--
+-- ── แนวคิดหลักสี่ข้อ ────────────────────────────────────────────────────────
+--
+-- 1) บัตรเครดิตคือ "กระเป๋าเงินชนิดที่สี่" ต่อจาก cash / transfer / sub
+--    ปลายทางของเงินเขียนเป็น 'card:<uuid>' แล้วเสียบเข้า apply_wallet_effect
+--    ทำให้ post_transaction / edit_transaction / cancel_transaction รองรับบัตร
+--    ทันที รวมถึงการย้อนยอดตอนแก้ไขและคืนยอดตอนยกเลิก
+--
+-- 2) บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน สาขา card จึงเก็บ outstanding - delta
+--      รูดจ่าย (expense) delta = -1000 → outstanding เพิ่ม 1000
+--      เงินคืน (income)  delta = +50   → outstanding ลด   50
+--
+-- 3) เก็บเฉพาะรอบบิลที่ "ปิดแล้ว" รอบที่กำลังเดินอยู่ไม่มีแถวในตาราง
+--    เพราะยอดเปลี่ยนทุกครั้งที่รูด หน้าจอคำนวณสดจาก transactions เอา
+--
+-- 4) จ่ายบิลคือการย้ายเงิน ไม่ใช่รายจ่าย ค่าใช้จ่ายเกิดตอนรูดไปแล้ว
+--    ถ้าบันทึกเป็นรายจ่ายอีกครั้งตอนจ่ายบิล ยอดจะถูกนับซ้ำสองเท่า
+--    pay_card_statement จึงไม่ insert transactions แต่ขยับสองกระเป๋าพร้อมกัน
 -- ============================================================================
 
--- ── 1. ตารางบัตร ────────────────────────────────────────────────────────────
+
+-- ###########################################################################
+-- ##  1. ตาราง
+-- ###########################################################################
+
+-- ── บัตร ────────────────────────────────────────────────────────────────────
 
 create table if not exists credit_cards (
   id            uuid primary key default gen_random_uuid(),
@@ -41,19 +64,165 @@ create table if not exists credit_cards (
 create index if not exists credit_cards_shop_idx
   on credit_cards (shop_id, sort_order, created_at);
 
--- ── 2. transactions: คอลัมน์บัตร + ขยายวิธีชำระเงิน ─────────────────────────
+-- ตั้งค่าหักบัญชีอัตโนมัติที่ผู้ใช้ผูกไว้กับธนาคาร
+--
+-- "หักบัญชีอัตโนมัติ" มีสองความหมายและต้องแยกให้ชัด
+--   1) เงินถูกหักจริงจากบัญชี — เกิดที่ธนาคาร ผู้ใช้สมัครเอง JodFlow ทำแทนไม่ได้
+--   2) แอปรู้ว่าถูกหักไปแล้ว — ทำได้ ให้ผู้ใช้บอกว่าผูกไว้แบบไหน แล้วแอปเตรียม
+--      รายการจ่ายบิลไว้ให้ตรงกับที่ธนาคารจะหัก เหลือแค่กดยืนยัน
+-- คอลัมน์พวกนี้เก็บแค่ข้อ 2 ไม่มีอะไรหักเงินเอง เพราะแอปไม่มีทางรู้ว่าธนาคาร
+-- หักสำเร็จจริงหรือไม่ (เงินอาจไม่พอ บัตรอาจถูกระงับ)
+alter table credit_cards add column if not exists autopay_mode text not null default 'off';
+alter table credit_cards drop constraint if exists credit_cards_autopay_mode_check;
+alter table credit_cards add  constraint credit_cards_autopay_mode_check
+  check (autopay_mode in ('off', 'full', 'minimum', 'fixed'));
+
+alter table credit_cards add column if not exists autopay_account_id uuid
+  references transfer_accounts(id) on delete set null;
+alter table credit_cards add column if not exists autopay_amount numeric(14,2) not null default 0;
+
+-- ── ใบแจ้งยอด (เก็บเฉพาะรอบที่ปิดแล้ว) ──────────────────────────────────────
+
+create table if not exists card_statements (
+  id             uuid primary key default gen_random_uuid(),
+  shop_id        uuid not null references shops(id) on delete cascade,
+  card_id        uuid not null references credit_cards(id) on delete cascade,
+  -- 'YYYY-MM' ของเดือนที่ปิดรอบ — กันปิดซ้ำด้วย unique ข้างล่าง
+  cycle          text not null,
+  period_start   date not null,
+  period_end     date not null,   -- วันสรุปยอด
+  due_date       date not null,   -- วันครบกำหนดชำระ
+  status         text not null default 'closed'
+                 check (status in ('closed', 'partial', 'paid')),
+
+  previous_balance numeric(14,2) not null default 0,  -- ยอดยกมาจากรอบก่อนที่จ่ายไม่หมด
+  spend_amount     numeric(14,2) not null default 0,  -- ยอดรูดในรอบ
+  credit_amount    numeric(14,2) not null default 0,  -- เงินคืน / คืนสินค้า ในรอบ
+  amount           numeric(14,2) not null default 0,  -- ยอดที่ต้องชำระ
+  minimum_amount   numeric(14,2) not null default 0,
+  paid_amount      numeric(14,2) not null default 0,
+
+  -- ยอดที่จ่ายไม่หมดถูกยกไปอยู่ในใบไหน — กันนับยอดค้างซ้ำตอนปิดรอบถัดไป
+  carried_to     uuid references card_statements(id) on delete set null,
+
+  paid_at             date,
+  paid_method         text check (paid_method in ('cash', 'transfer')),
+  transfer_account_id uuid references transfer_accounts(id) on delete set null,
+
+  closed_at      timestamptz not null default now(),
+  created_at     timestamptz not null default now(),
+  unique (card_id, cycle)
+);
+
+create index if not exists card_statements_shop_due_idx
+  on card_statements (shop_id, status, due_date);
+create index if not exists card_statements_card_idx
+  on card_statements (card_id, period_end desc);
+
+-- ── ผ่อนชำระ ────────────────────────────────────────────────────────────────
+--
+-- ตอนกดซื้อ **ไม่สร้างรายจ่ายก้อนเดียว** ธนาคารเรียกเก็บทีละงวด เงินไหลออกจริง
+-- ทีละงวด ถ้าลงก้อนเดียวรายจ่ายเดือนที่ซื้อจะพองผิดปกติ และเดือนถัดไปจะดูเหมือน
+-- ไม่มีภาระทั้งที่ยังผ่อนอยู่ ตอนสร้างจึงบันทึกแค่สัญญากับตารางงวด
+--
+-- ดอกเบี้ยคิดแบบคงที่จากเงินต้น (flat rate) ซึ่งเป็นแบบที่โปรผ่อนสินค้าในไทยใช้
+--   ยอดผ่อนรวม = เงินต้น × (1 + อัตราต่อเดือน% ÷ 100 × จำนวนงวด)
+--   ตัวอย่าง เงินต้น 100 ผ่อน 10 งวด 3%/เดือน → ดอกเบี้ย 30 รวม 130 งวดละ 13
+--   principal_amount = ราคาสินค้า
+--   total_amount     = ยอดที่ต้องผ่อนจริงรวมดอกเบี้ยแล้ว = ผลรวมของทุกงวด
+
+create table if not exists card_installments (
+  id             uuid primary key default gen_random_uuid(),
+  shop_id        uuid not null references shops(id) on delete cascade,
+  card_id        uuid not null references credit_cards(id) on delete cascade,
+  name           text not null default '',
+  vendor         text,
+  category_id    uuid references categories(id) on delete set null,
+  note           text,
+
+  total_amount   numeric(14,2) not null,
+  months         int not null check (months between 1 and 60),
+  monthly_amount numeric(14,2) not null,
+  interest_rate  numeric(5,2) not null default 0,   -- อัตราต่อเดือน
+
+  purchase_date  date not null,
+  first_cycle    text not null,        -- 'YYYY-MM' ของรอบแรกที่เรียกเก็บ
+  status         text not null default 'active'
+                 check (status in ('active', 'completed', 'cancelled')),
+
+  created_by     uuid references auth.users(id),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+alter table card_installments add column if not exists principal_amount numeric(14,2);
+-- แถวเดิมที่สร้างก่อนมีช่องดอกเบี้ยเป็นผ่อน 0% ทั้งหมด เงินต้นจึงเท่ากับยอดรวม
+update card_installments set principal_amount = total_amount where principal_amount is null;
+alter table card_installments alter column principal_amount set default 0;
+
+create index if not exists card_installments_card_idx
+  on card_installments (card_id, status, created_at);
+
+-- หนึ่งแถวต่อหนึ่งงวด — โครงเดียวกับ recurring_items คู่กับ recurring_entries
+--
+-- งวดที่ "จ่ายแล้ว" ไม่เก็บสถานะซ้ำ อ่านจากใบแจ้งยอดที่ statement_id ชี้ไป
+-- ถ้าเก็บสองที่ วันหนึ่งจะมีที่หนึ่งอัปเดตไม่ทันแล้วตัวเลขสองหน้าจะขัดกัน
+create table if not exists card_installment_entries (
+  id             uuid primary key default gen_random_uuid(),
+  shop_id        uuid not null references shops(id) on delete cascade,
+  installment_id uuid not null references card_installments(id) on delete cascade,
+  seq            int not null,          -- งวดที่เท่าไร
+  cycle          text not null,         -- รอบบิลที่งวดนี้จะเข้า
+  due_date       date not null,         -- เก็บไว้เพื่อให้แสดงตารางได้โดยไม่ต้อง join
+  amount         numeric(14,2) not null,
+  status         text not null default 'pending'
+                 check (status in ('pending', 'billed', 'cancelled')),
+
+  statement_id   uuid references card_statements(id) on delete set null,
+  transaction_id uuid references transactions(id) on delete set null,
+  billed_at      date,
+
+  created_at     timestamptz not null default now(),
+  unique (installment_id, seq)
+);
+
+create index if not exists card_installment_entries_cycle_idx
+  on card_installment_entries (installment_id, cycle, status);
+
+
+-- ###########################################################################
+-- ##  2. คอลัมน์และ constraint บนตารางเดิม
+-- ###########################################################################
 
 alter table transactions add column if not exists card_id uuid
   references credit_cards(id) on delete set null;
-
 create index if not exists transactions_card_idx on transactions (card_id, date desc);
+
+-- รู้ว่ารายจ่ายแถวนี้มาจากงวดผ่อนไหน — ใช้กรองในรายงานว่าอันไหนเป็นภาระผ่อน
+alter table transactions add column if not exists installment_entry_id uuid
+  references card_installment_entries(id) on delete set null;
 
 -- ของเดิมอนุญาต cash / transfer / pending / other (ดู columns.sql)
 alter table transactions drop constraint if exists transactions_method_check;
 alter table transactions add  constraint transactions_method_check
   check (method in ('cash', 'transfer', 'pending', 'other', 'card'));
 
--- ── 3. apply_wallet_effect: เพิ่มสาขา card ──────────────────────────────────
+-- รายการประจำจ่ายผ่านบัตรได้ เช่นค่าเน็ต ค่าสตรีมมิง ที่ตัดบัตรทุกเดือน
+alter table recurring_entries drop constraint if exists recurring_entries_paid_method_check;
+alter table recurring_entries add  constraint recurring_entries_paid_method_check
+  check (paid_method in ('cash', 'transfer', 'pending', 'card'));
+
+alter table recurring_entries add column if not exists card_id uuid
+  references credit_cards(id) on delete set null;
+
+-- อัตราผ่อนชำระขั้นต่ำ เก็บเป็นค่าตั้งค่า ไม่ใช่ค่าคงที่ในโค้ด
+-- เกณฑ์ ธปท. คือ 8% ถึงรอบบัญชีเดือน ธ.ค. 2569 แล้วเป็น 10% ตั้งแต่ ม.ค. 2570
+alter table shop_settings add column if not exists card_min_rate numeric(5,2) not null default 8;
+
+
+-- ###########################################################################
+-- ##  3. ปลายทางของเงิน — เพิ่มสาขา card
+-- ###########################################################################
 
 create or replace function public.apply_wallet_effect(
   p_shop uuid, p_target text, p_delta numeric
@@ -90,7 +259,10 @@ begin
 end;
 $$;
 
--- ── 4. post_transaction: พก card_id ไปด้วย ──────────────────────────────────
+
+-- ###########################################################################
+-- ##  4. บันทึก / แก้ไขรายการ — พก card_id ไปด้วย
+-- ###########################################################################
 -- คอลัมน์ที่ไม่อยู่ในรายชื่อของคำสั่ง insert จะถูกทิ้งเงียบๆ จึงต้องเพิ่มที่นี่ด้วย
 
 create or replace function public.post_transaction(
@@ -152,8 +324,6 @@ begin
 end;
 $$;
 
--- ── 5. edit_transaction: แก้ card_id ได้ ────────────────────────────────────
-
 create or replace function public.edit_transaction(
   p_tx_id          uuid,
   p_changes        jsonb,
@@ -200,8 +370,383 @@ begin
 end;
 $$;
 
--- ── 6. ล้างข้อมูลร้าน ต้องลบบัตรด้วย ────────────────────────────────────────
--- ลบ transactions ก่อน card_id จึงไม่มีอะไรอ้างถึงบัตรตอนลบ
+
+-- ###########################################################################
+-- ##  5. ปิดรอบบิล
+-- ###########################################################################
+-- ขอบเขตของรอบคำนวณที่ฝั่ง client (src/lib/cardCycle.js ซึ่งมีเทสต์แล้ว) แล้วส่งเข้ามา
+-- จะได้ไม่ต้องเขียนเลขวันที่ซ้ำสองภาษาแล้วเพี้ยนคนละแบบ
+--
+-- ดึงงวดผ่อนที่ถึงกำหนดเข้าบิล **ก่อน** รวมยอดรูด งวดที่สร้างเป็น transaction แล้ว
+-- จะถูกนับใน spend_amount เอง จึงไม่ต้องบวกยอดผ่อนแยกอีกชั้น ไม่มีทางนับซ้ำ
+
+create or replace function public.close_card_statement(
+  p_shop  uuid,
+  p_card  uuid,
+  p_cycle text,
+  p_start date,
+  p_end   date,
+  p_due   date
+) returns card_statements language plpgsql security definer set search_path = public as $$
+declare
+  v_st     card_statements;
+  v_prev   numeric(14,2);
+  v_spend  numeric(14,2);
+  v_credit numeric(14,2);
+  v_amount numeric(14,2);
+  v_rate   numeric(5,2);
+  v_min    numeric(14,2);
+  v_entry  record;
+  v_tx     transactions;
+begin
+  perform assert_can_edit(p_shop);
+
+  if not exists (select 1 from credit_cards where id = p_card and shop_id = p_shop) then
+    raise exception 'ไม่พบบัตรเครดิตของร้านนี้';
+  end if;
+
+  -- ปิดไปแล้ว → คืนใบเดิม ไม่ทำอะไรซ้ำ (หน้าจอเรียกทุกครั้งที่เปิดแอป)
+  select * into v_st from card_statements where card_id = p_card and cycle = p_cycle;
+  if found then return v_st; end if;
+
+  -- ยอดค้างจากใบก่อนหน้าที่ยังไม่ถูกยกไปไหน
+  select coalesce(sum(amount - paid_amount), 0) into v_prev
+    from card_statements
+   where card_id = p_card and carried_to is null
+     and status <> 'paid' and period_end < p_start;
+
+  -- งวดผ่อนที่ถึงรอบนี้ → สร้างรายจ่ายหนึ่งแถวต่องวด แล้วเพิ่มหนี้เท่ายอดงวดเดียว
+  for v_entry in
+    select e.*, i.name, i.vendor, i.category_id, i.months
+      from card_installment_entries e
+      join card_installments i on i.id = e.installment_id
+     where i.card_id = p_card and i.status = 'active'
+       and e.cycle = p_cycle and e.status = 'pending'
+     order by e.seq
+  loop
+    insert into transactions (
+      shop_id, date, type, amount, method, category_id, item_name, vendor,
+      card_id, installment_entry_id, note, created_by
+    ) values (
+      p_shop, p_end, 'expense', v_entry.amount, 'card', v_entry.category_id,
+      v_entry.name || ' (งวด ' || v_entry.seq || '/' || v_entry.months || ')',
+      v_entry.vendor, p_card, v_entry.id,
+      'งวดผ่อนที่เรียกเก็บอัตโนมัติ', auth.uid()
+    ) returning * into v_tx;
+
+    -- รูดจ่าย = delta ติดลบ สาขา card กลับเครื่องหมายเป็นหนี้เพิ่ม
+    perform apply_wallet_effect(p_shop, 'card:' || p_card, -v_entry.amount);
+
+    update card_installment_entries
+       set status = 'billed', transaction_id = v_tx.id, billed_at = p_end
+     where id = v_entry.id;
+  end loop;
+
+  -- ปิดสัญญาที่เรียกเก็บครบทุกงวดแล้ว
+  update card_installments i
+     set status = 'completed', updated_at = now()
+   where i.card_id = p_card and i.status = 'active'
+     and not exists (
+       select 1 from card_installment_entries e
+        where e.installment_id = i.id and e.status = 'pending'
+     );
+
+  select coalesce(sum(amount), 0) into v_spend
+    from transactions
+   where card_id = p_card and shop_id = p_shop and type = 'expense'
+     and date between p_start and p_end;
+
+  -- รายรับที่ปลายทางเป็นบัตร = เครดิตเงินคืน หรือเงินคืนสินค้า → ลดยอดที่ต้องชำระ
+  select coalesce(sum(amount), 0) into v_credit
+    from transactions
+   where card_id = p_card and shop_id = p_shop and type = 'income'
+     and date between p_start and p_end;
+
+  v_amount := v_prev + v_spend - v_credit;
+  if v_amount < 0 then v_amount := 0; end if;   -- เงินคืนมากกว่ายอดรูด = ไม่ต้องจ่าย
+
+  select coalesce(card_min_rate, 8) into v_rate from shop_settings where shop_id = p_shop;
+  v_min := least(v_amount, round(v_amount * coalesce(v_rate, 8) / 100, 2));
+
+  insert into card_statements (
+    shop_id, card_id, cycle, period_start, period_end, due_date,
+    status, previous_balance, spend_amount, credit_amount, amount, minimum_amount
+  ) values (
+    p_shop, p_card, p_cycle, p_start, p_end, p_due,
+    case when v_amount <= 0 then 'paid' else 'closed' end,
+    v_prev, v_spend, v_credit, v_amount, v_min
+  ) returning * into v_st;
+
+  -- ผูกงวดที่เพิ่งเข้าบิลกับใบนี้ เพื่อให้อ่านวันที่จ่ายจริงจากใบได้
+  update card_installment_entries e
+     set statement_id = v_st.id
+    from card_installments i
+   where e.installment_id = i.id and i.card_id = p_card
+     and e.cycle = p_cycle and e.status = 'billed' and e.statement_id is null;
+
+  -- ใบเก่าที่ยอดถูกยกมาแล้ว ทำเครื่องหมายไว้ไม่ให้ถูกนับอีกรอบหน้า
+  update card_statements
+     set carried_to = v_st.id
+   where card_id = p_card and carried_to is null
+     and status <> 'paid' and period_end < p_start and id <> v_st.id;
+
+  return v_st;
+end;
+$$;
+
+
+-- ###########################################################################
+-- ##  6. จ่ายบิล — ย้ายเงินสองขาในทรานแซกชันเดียว ไม่สร้าง transactions
+-- ###########################################################################
+
+create or replace function public.pay_card_statement(
+  p_statement uuid,
+  p_method    text,
+  p_account   uuid,
+  p_amount    numeric,
+  p_date      date,
+  p_log       jsonb default null
+) returns card_statements language plpgsql security definer set search_path = public as $$
+declare
+  v_st     card_statements;
+  v_src    text;
+  v_remain numeric(14,2);
+begin
+  select * into v_st from card_statements where id = p_statement;
+  if not found then raise exception 'ไม่พบใบแจ้งยอดนี้'; end if;
+  perform assert_can_edit(v_st.shop_id);
+
+  if v_st.status = 'paid' then raise exception 'ใบแจ้งยอดนี้จ่ายครบแล้ว'; end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่าศูนย์'; end if;
+
+  v_remain := v_st.amount - v_st.paid_amount;
+  if p_amount > v_remain then
+    raise exception 'จ่ายเกินยอดที่ค้างอยู่ (เหลือ % บาท)', to_char(v_remain, 'FM999999990.00');
+  end if;
+
+  if p_method = 'transfer' and p_account is null then
+    raise exception 'ต้องเลือกบัญชีเงินโอนที่จะจ่าย';
+  end if;
+  if p_method not in ('cash', 'transfer') then
+    raise exception 'วิธีจ่ายบิลไม่ถูกต้อง: %', p_method;
+  end if;
+
+  -- ขาที่ 1 เงินออกจากกระเป๋าที่เลือก
+  v_src := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_st.shop_id, v_src, -p_amount);
+
+  -- ขาที่ 2 หนี้บัตรลดลง (สาขา card กลับเครื่องหมายให้เอง) — ผลรวมสองขาเป็นศูนย์
+  perform apply_wallet_effect(v_st.shop_id, 'card:' || v_st.card_id, p_amount);
+
+  update card_statements
+     set paid_amount = paid_amount + p_amount,
+         status = case when paid_amount + p_amount >= amount then 'paid' else 'partial' end,
+         paid_at = p_date,
+         paid_method = p_method,
+         transfer_account_id = p_account
+   where id = p_statement
+   returning * into v_st;
+
+  perform write_log(v_st.shop_id, p_log);
+  return v_st;
+end;
+$$;
+
+-- ย้อนการจ่ายบิล — คืนเงินกลับกระเป๋าต้นทาง และหนี้บัตรกลับมาเท่าเดิม
+create or replace function public.undo_card_payment(
+  p_statement uuid,
+  p_amount    numeric,
+  p_log       jsonb default null
+) returns card_statements language plpgsql security definer set search_path = public as $$
+declare v_st card_statements; v_src text;
+begin
+  select * into v_st from card_statements where id = p_statement;
+  if not found then raise exception 'ไม่พบใบแจ้งยอดนี้'; end if;
+  perform assert_can_edit(v_st.shop_id);
+
+  if v_st.paid_amount <= 0 then raise exception 'ใบแจ้งยอดนี้ยังไม่ได้จ่าย'; end if;
+  if p_amount is null or p_amount <= 0 or p_amount > v_st.paid_amount then
+    raise exception 'จำนวนเงินที่ย้อนไม่ถูกต้อง';
+  end if;
+  if v_st.paid_method is null then raise exception 'ไม่รู้ว่าจ่ายจากกระเป๋าไหน ย้อนให้ไม่ได้'; end if;
+
+  v_src := case when v_st.paid_method = 'cash' then 'cash'
+                else 'transfer:' || v_st.transfer_account_id end;
+  perform apply_wallet_effect(v_st.shop_id, v_src, p_amount);
+  perform apply_wallet_effect(v_st.shop_id, 'card:' || v_st.card_id, -p_amount);
+
+  update card_statements
+     set paid_amount = paid_amount - p_amount,
+         status = case when paid_amount - p_amount <= 0 then 'closed' else 'partial' end,
+         paid_at = case when paid_amount - p_amount <= 0 then null else paid_at end,
+         paid_method = case when paid_amount - p_amount <= 0 then null else paid_method end,
+         transfer_account_id = case when paid_amount - p_amount <= 0 then null else transfer_account_id end
+   where id = p_statement
+   returning * into v_st;
+
+  perform write_log(v_st.shop_id, p_log);
+  return v_st;
+end;
+$$;
+
+
+-- ###########################################################################
+-- ##  7. ผ่อนชำระ
+-- ###########################################################################
+-- p_entries เป็น jsonb array ของ { seq, cycle, due_date, amount } ที่ client คำนวณมา
+-- (ใช้ src/lib/cardCycle.js ตัวเดียวกับที่อื่น จะได้ไม่เขียนสูตรซ้ำสองภาษา
+--  แล้วปัดเศษคนละแบบ) เศษที่หารไม่ลงตัวไปรวมงวดสุดท้าย ผลรวมทุกงวดจึงเท่ากับ
+--  total_amount พอดีเสมอ
+
+create or replace function public.create_card_installment(
+  p_shop    uuid,
+  p_card    uuid,
+  p_data    jsonb,
+  p_entries jsonb,
+  p_log     jsonb default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare v_ins card_installments; v_e jsonb;
+begin
+  perform assert_can_edit(p_shop);
+  if not exists (select 1 from credit_cards where id = p_card and shop_id = p_shop) then
+    raise exception 'ไม่พบบัตรเครดิตของร้านนี้';
+  end if;
+  if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
+    raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
+  end if;
+
+  insert into card_installments (
+    shop_id, card_id, name, vendor, category_id, note,
+    principal_amount, total_amount, months, monthly_amount, interest_rate,
+    purchase_date, first_cycle, created_by
+  ) values (
+    p_shop, p_card,
+    coalesce(p_data->>'name', ''),
+    p_data->>'vendor',
+    nullif(p_data->>'category_id', '')::uuid,
+    p_data->>'note',
+    coalesce((p_data->>'principal_amount')::numeric, (p_data->>'total_amount')::numeric),
+    (p_data->>'total_amount')::numeric,
+    (p_data->>'months')::int,
+    (p_data->>'monthly_amount')::numeric,
+    coalesce((p_data->>'interest_rate')::numeric, 0),
+    (p_data->>'purchase_date')::date,
+    p_data->>'first_cycle',
+    auth.uid()
+  ) returning * into v_ins;
+
+  for v_e in select * from jsonb_array_elements(p_entries) loop
+    insert into card_installment_entries (shop_id, installment_id, seq, cycle, due_date, amount)
+    values (
+      p_shop, v_ins.id,
+      (v_e->>'seq')::int,
+      v_e->>'cycle',
+      (v_e->>'due_date')::date,
+      (v_e->>'amount')::numeric
+    );
+  end loop;
+
+  -- ยังไม่แตะ outstanding และยังไม่สร้าง transactions โดยเจตนา
+  perform write_log(p_shop, p_log);
+  return v_ins;
+end;
+$$;
+
+-- ปิดยอดคงเหลือก่อนกำหนด — รวมงวดที่เหลือเป็นรายการเดียวเข้ารอบที่เปิดอยู่
+create or replace function public.settle_card_installment(
+  p_installment uuid,
+  p_date        date,
+  p_fee         numeric default 0,
+  p_log         jsonb default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare v_ins card_installments; v_left numeric(14,2); v_tx transactions; v_n int;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then raise exception 'ไม่พบรายการผ่อนนี้'; end if;
+  perform assert_can_edit(v_ins.shop_id);
+  if v_ins.status <> 'active' then raise exception 'รายการผ่อนนี้ปิดไปแล้ว'; end if;
+
+  select coalesce(sum(amount), 0), count(*) into v_left, v_n
+    from card_installment_entries
+   where installment_id = p_installment and status = 'pending';
+  if v_n = 0 then raise exception 'ไม่มีงวดที่เหลือให้ปิด'; end if;
+
+  insert into transactions (
+    shop_id, date, type, amount, method, category_id, item_name, vendor,
+    card_id, note, created_by
+  ) values (
+    v_ins.shop_id, p_date, 'expense', v_left + coalesce(p_fee, 0), 'card',
+    v_ins.category_id,
+    v_ins.name || ' (ปิดยอดคงเหลือ ' || v_n || ' งวด)',
+    v_ins.vendor, v_ins.card_id, 'ปิดยอดผ่อนก่อนกำหนด', auth.uid()
+  ) returning * into v_tx;
+
+  perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_ins.card_id, -(v_left + coalesce(p_fee, 0)));
+
+  update card_installment_entries
+     set status = 'billed', transaction_id = v_tx.id, billed_at = p_date
+   where installment_id = p_installment and status = 'pending';
+
+  update card_installments set status = 'completed', updated_at = now()
+   where id = p_installment returning * into v_ins;
+
+  perform write_log(v_ins.shop_id, p_log);
+  return v_ins;
+end;
+$$;
+
+-- ยกเลิกงวดที่เหลือ (เช่น คืนสินค้ากลางคัน)
+-- งวดที่เรียกเก็บไปแล้วยังอยู่ เพราะเกิดขึ้นจริง ส่วนเงินที่ได้คืนให้บันทึกเป็น
+-- รายรับที่ปลายทางเป็นบัตรแยกต่างหาก
+create or replace function public.cancel_card_installment(
+  p_installment uuid,
+  p_log         jsonb default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare v_ins card_installments;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then raise exception 'ไม่พบรายการผ่อนนี้'; end if;
+  perform assert_can_edit(v_ins.shop_id);
+
+  update card_installment_entries set status = 'cancelled'
+   where installment_id = p_installment and status = 'pending';
+
+  update card_installments set status = 'cancelled', updated_at = now()
+   where id = p_installment returning * into v_ins;
+
+  perform write_log(v_ins.shop_id, p_log);
+  return v_ins;
+end;
+$$;
+
+
+-- ###########################################################################
+-- ##  8. เลิกผูกหักบัญชีตอนบัญชีเงินโอนถูกลบ
+-- ###########################################################################
+-- on delete set null จัดการ autopay_account_id ให้แล้ว แต่ต้องปิดโหมดด้วย
+-- ไม่งั้นจะค้างเป็น "หักจากบัญชีที่ไม่มีอยู่" ซึ่งหน้าจอจะบอกว่าพร้อมหักทั้งที่หักไม่ได้
+
+create or replace function public.reset_orphan_autopay() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update credit_cards
+     set autopay_mode = 'off', updated_at = now()
+   where autopay_account_id is null and autopay_mode <> 'off';
+  return null;
+end;
+$$;
+
+drop trigger if exists transfer_accounts_autopay_cleanup on transfer_accounts;
+create trigger transfer_accounts_autopay_cleanup
+  after delete on transfer_accounts
+  for each statement execute function reset_orphan_autopay();
+
+
+-- ###########################################################################
+-- ##  9. ล้างข้อมูลร้าน — ต้องลบตารางบัตรด้วย
+-- ###########################################################################
+-- ลบ transactions ก่อน แล้ว card_id / installment_entry_id จึงไม่มีอะไรอ้างถึง
+-- carried_to อ้างถึงกันเองในตาราง จึงต้องตัดการอ้างอิงก่อนลบ
 
 create or replace function public.clear_shop_data(p_shop uuid)
 returns void language plpgsql security definer set search_path = public as $$
@@ -210,21 +755,25 @@ begin
     raise exception 'เฉพาะเจ้าของร้านเท่านั้นที่ล้างข้อมูลได้' using errcode = '42501';
   end if;
 
-  delete from tax_invoices      where shop_id = p_shop;
-  delete from pending_payments  where shop_id = p_shop;
-  delete from pending_incomes   where shop_id = p_shop;
-  delete from transactions      where shop_id = p_shop;
-  delete from recurring_entries where shop_id = p_shop;
-  delete from recurring_items   where shop_id = p_shop;
-  delete from loans             where shop_id = p_shop;
-  delete from sub_wallets       where shop_id = p_shop;
-  delete from transfer_accounts where shop_id = p_shop;
-  delete from credit_cards      where shop_id = p_shop;
-  delete from calendar_notes    where shop_id = p_shop;
-  delete from activity_logs     where shop_id = p_shop;
-  delete from quick_items       where shop_id = p_shop;
-  delete from vendors           where shop_id = p_shop;
-  delete from categories        where shop_id = p_shop;
+  delete from tax_invoices             where shop_id = p_shop;
+  delete from pending_payments         where shop_id = p_shop;
+  delete from pending_incomes          where shop_id = p_shop;
+  delete from transactions             where shop_id = p_shop;
+  delete from card_installment_entries where shop_id = p_shop;
+  delete from card_installments        where shop_id = p_shop;
+  delete from recurring_entries        where shop_id = p_shop;
+  delete from recurring_items          where shop_id = p_shop;
+  delete from loans                    where shop_id = p_shop;
+  delete from sub_wallets              where shop_id = p_shop;
+  delete from transfer_accounts        where shop_id = p_shop;
+  update card_statements set carried_to = null where shop_id = p_shop;
+  delete from card_statements          where shop_id = p_shop;
+  delete from credit_cards             where shop_id = p_shop;
+  delete from calendar_notes           where shop_id = p_shop;
+  delete from activity_logs            where shop_id = p_shop;
+  delete from quick_items              where shop_id = p_shop;
+  delete from vendors                  where shop_id = p_shop;
+  delete from categories               where shop_id = p_shop;
 
   update wallet_state set cash = 0, updated_at = now() where shop_id = p_shop;
   insert into categories (shop_id, name, type)
@@ -232,32 +781,80 @@ begin
 end;
 $$;
 
--- ── 7. RLS: อ่าน = สมาชิก, เขียน = owner/editor (ชุดเดียวกับตารางอื่น) ──────
--- ลืมข้อนี้แล้ว query จะคืนค่าว่างเปล่าโดยไม่มี error
 
-alter table credit_cards enable row level security;
+-- ###########################################################################
+-- ##  10. RLS + Realtime
+-- ###########################################################################
+-- ลืม RLS = query คืนค่าว่างเปล่าโดยไม่มี error
+-- ลืม realtime = เครื่องอื่นไม่เห็นยอดบัตรขยับ
 
-drop policy if exists credit_cards_select on credit_cards;
-create policy credit_cards_select on credit_cards
-  for select using (is_member(shop_id));
-
-drop policy if exists credit_cards_insert on credit_cards;
-create policy credit_cards_insert on credit_cards
-  for insert with check (can_edit(shop_id));
-
-drop policy if exists credit_cards_update on credit_cards;
-create policy credit_cards_update on credit_cards
-  for update using (can_edit(shop_id)) with check (can_edit(shop_id));
-
-drop policy if exists credit_cards_delete on credit_cards;
-create policy credit_cards_delete on credit_cards
-  for delete using (can_edit(shop_id));
-
--- ── 8. Realtime: ลืมข้อนี้แล้วเครื่องอื่นจะไม่เห็นยอดบัตรขยับ ───────────────
-
-alter table credit_cards replica identity full;
 do $$
+declare t text;
 begin
-  alter publication supabase_realtime add table credit_cards;
-exception when duplicate_object then null;
+  foreach t in array array[
+    'credit_cards', 'card_statements', 'card_installments', 'card_installment_entries'
+  ] loop
+    execute format('alter table %I enable row level security', t);
+
+    execute format('drop policy if exists %I on %I', t || '_select', t);
+    execute format('create policy %I on %I for select using (is_member(shop_id))', t || '_select', t);
+
+    execute format('drop policy if exists %I on %I', t || '_insert', t);
+    execute format('create policy %I on %I for insert with check (can_edit(shop_id))', t || '_insert', t);
+
+    execute format('drop policy if exists %I on %I', t || '_update', t);
+    execute format(
+      'create policy %I on %I for update using (can_edit(shop_id)) with check (can_edit(shop_id))',
+      t || '_update', t);
+
+    execute format('drop policy if exists %I on %I', t || '_delete', t);
+    execute format('create policy %I on %I for delete using (can_edit(shop_id))', t || '_delete', t);
+
+    execute format('alter table %I replica identity full', t);
+    begin
+      execute format('alter publication supabase_realtime add table %I', t);
+    exception when duplicate_object then null;
+    end;
+  end loop;
 end $$;
+
+-- สั่งให้ API โหลด schema ใหม่ทันที (กันอาการฟังก์ชัน 404 จาก cache ค้าง)
+notify pgrst, 'reload schema';
+
+
+-- ###########################################################################
+-- ##  ตรวจผลการติดตั้ง — ต้องได้ครบทุกบรรทัด
+-- ###########################################################################
+
+select 'ตารางบัตร' as "รายการ", count(*)::text || ' / 4' as "ผล"
+  from information_schema.tables
+ where table_schema = 'public'
+   and table_name in ('credit_cards','card_statements','card_installments','card_installment_entries')
+union all
+select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 8'
+  from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name='transactions'      and column_name in ('card_id','installment_entry_id'))
+     or (table_name='credit_cards'      and column_name in ('autopay_mode','autopay_account_id','autopay_amount'))
+     or (table_name='card_installments' and column_name = 'principal_amount')
+     or (table_name='recurring_entries' and column_name = 'card_id')
+     or (table_name='shop_settings'     and column_name = 'card_min_rate'))
+union all
+select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 6'
+  from information_schema.routines
+ where routine_schema = 'public'
+   and routine_name in ('close_card_statement','pay_card_statement','undo_card_payment',
+     'create_card_installment','settle_card_installment','cancel_card_installment')
+union all
+select 'รับ method = card แล้ว',
+       case when exists (
+         select 1 from pg_constraint
+          where conname = 'transactions_method_check'
+            and pg_get_constraintdef(oid) like '%''card''%'
+       ) then '✅' else '❌ ยังไม่รับ' end
+union all
+select 'RLS เปิดครบ',
+       case when (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                   where n.nspname = 'public' and c.relrowsecurity
+                     and c.relname in ('credit_cards','card_statements','card_installments','card_installment_entries')
+                 ) = 4 then '✅' else '❌ ยังไม่ครบ' end;
