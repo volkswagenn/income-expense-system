@@ -19,8 +19,13 @@ function isMissingTable(error) {
 export async function listInstallments() {
   const shopId = getShopId()
   const [insRes, entRes] = await Promise.all([
-    supabase.from('card_installments').select('*').eq('shop_id', shopId).order('created_at', { ascending: false }),
-    supabase.from('card_installment_entries').select('*').eq('shop_id', shopId).order('seq'),
+    // สัญญาที่ยกเลิกแล้วไม่ต้องโหลดมาเลย — ไม่มีหน้าไหนแสดงมันอีก และสัญญาหนึ่งฉบับ
+    // ลากงวดมาด้วยได้ถึง 120 แถว ดึงมากองไว้เปล่าๆ ทั้งที่ไม่ได้ใช้
+    // (ยังอยู่ในฐานข้อมูลครบ ไม่ได้ลบทิ้ง เผื่อต้องย้อนดูภายหลัง)
+    supabase.from('card_installments').select('*').eq('shop_id', shopId)
+      .neq('status', 'cancelled').order('created_at', { ascending: false }),
+    supabase.from('card_installment_entries').select('*').eq('shop_id', shopId)
+      .neq('status', 'cancelled').order('seq'),
   ])
 
   for (const res of [insRes, entRes]) {
@@ -33,10 +38,16 @@ export async function listInstallments() {
     }
   }
 
-  return {
-    installments: fromRows('card_installments', insRes.data),
-    entries: fromRows('card_installment_entries', entRes.data),
-  }
+  const installments = fromRows('card_installments', insRes.data)
+
+  // งวดที่ถูกเรียกเก็บไปแล้วของสัญญาที่ยกเลิก ยังเป็นสถานะ billed อยู่ (เป็นหนี้จริง
+  // ที่เกิดไปแล้ว ยกเลิกย้อนหลังไม่ได้) จึงหลุดตัวกรองข้างบนมา ตัดทิ้งตรงนี้อีกชั้น
+  // ไม่งั้นจะมีงวดลอยอยู่ในหน่วยความจำโดยไม่มีสัญญาแม่ให้จับคู่
+  const alive = new Set(installments.map((i) => i.id))
+  const entries = fromRows('card_installment_entries', entRes.data)
+    .filter((e) => alive.has(e.installmentId))
+
+  return { installments, entries }
 }
 
 /**

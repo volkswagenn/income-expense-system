@@ -303,7 +303,9 @@ export default function InstallmentList() {
   }
 
   const active = installments.filter((i) => i.status === 'active')
-  const done = installments.filter((i) => i.status !== 'active')
+  // สัญญาที่ยกเลิกแล้วไม่ถูกโหลดมาตั้งแต่ชั้น API — ตัวกรองนี้กันไว้อีกชั้นเผื่อ
+  // ข้อมูลเก่าที่ค้างอยู่ใน store ก่อนรีเฟรช จะได้ไม่โผล่มาให้เห็นชั่ววูบ
+  const done = installments.filter((i) => i.status === 'completed')
 
   const handleSettle = async ({ date, fee }) => {
     const { installment, progress } = settleTarget
