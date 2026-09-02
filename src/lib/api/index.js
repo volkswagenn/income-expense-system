@@ -39,6 +39,7 @@ export async function loadAllData() {
     statements,
     inst,
     debtData,
+    advances,
   ] = await Promise.all([
     wallet.loadWallet(),
     transactions.listTransactions(),
@@ -56,6 +57,7 @@ export async function loadAllData() {
     cardStatements.listCardStatements(),
     cardInstallments.listInstallments(),
     debts.listDebts(),
+    creditCards.listCardAdvances(),
   ])
 
   return {
@@ -71,7 +73,7 @@ export async function loadAllData() {
     recurringEntries,
     notes: noteMap,
     settings: shopSettings,
-    creditCards: { cards, statements, installments: inst.installments, entries: inst.entries },
+    creditCards: { cards, statements, installments: inst.installments, entries: inst.entries, advances },
     debts: debtData,
   }
 }

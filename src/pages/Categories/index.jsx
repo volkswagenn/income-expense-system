@@ -69,7 +69,7 @@ function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, th
 }
 
 // ── หน้าเพจ ────────────────────────────────────────────────────────────────────
-export default function CategoriesPage() {
+export default function CategoriesPage({ embedded = false }) {
   const categories = useCategoryStore((s) => s.categories)
   const { addCategory, updateCategory, softDeleteCategory, reorderCategories } = useCategoryStore()
   const transactions = useTransactionStore((s) => s.transactions)
@@ -212,12 +212,21 @@ export default function CategoriesPage() {
 
   return (
     <div className="space-y-5" onContextMenu={(e) => e.preventDefault()}>
-      <div>
-        <h1 className="text-xl font-bold text-gray-900">จัดการหมวดหมู่</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          หมวดหมู่รายรับและรายจ่ายแยกกันคนละชุด — คลิกขวาเพื่อสร้าง แก้ไข หรือลบ
-        </p>
-      </div>
+      {embedded ? (
+        <div>
+          <h2 className="font-semibold text-gray-900">🏷️ หมวดหมู่</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            หมวดหมู่รายรับและรายจ่ายแยกกันคนละชุด — คลิกขวาเพื่อสร้าง แก้ไข หรือลบ
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">จัดการหมวดหมู่</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            หมวดหมู่รายรับและรายจ่ายแยกกันคนละชุด — คลิกขวาเพื่อสร้าง แก้ไข หรือลบ
+          </p>
+        </div>
+      )}
 
       {/* แท็บเลือกประเภท */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">

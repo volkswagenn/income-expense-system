@@ -57,6 +57,11 @@ export async function createCreditCard({
   closingDay = 25,
   dueDay = 15,
   cashbackRate = 0,
+  annualFee = 0,
+  annualFeeMonth = null,
+  autopayMode = 'off',
+  autopayAccountId = null,
+  autopayAmount = 0,
   note = '',
 }) {
   const row = toRow('credit_cards', {
@@ -70,6 +75,11 @@ export async function createCreditCard({
     closingDay: Number(closingDay) || 25,
     dueDay: Number(dueDay) || 15,
     cashbackRate: Number(cashbackRate) || 0,
+    annualFee: Number(annualFee) || 0,
+    annualFeeMonth: annualFeeMonth ? Number(annualFeeMonth) : null,
+    autopayMode: autopayMode || 'off',
+    autopayAccountId: autopayMode === 'off' ? null : autopayAccountId || null,
+    autopayAmount: Number(autopayAmount) || 0,
     note: note || null,
   })
   return fromRow('credit_cards', await unwrap(
@@ -80,9 +90,11 @@ export async function createCreditCard({
 /** แก้ได้เฉพาะข้อมูลบัตร — ยอดหนี้ต้องไปทาง adjustOutstanding เท่านั้น */
 export async function updateCreditCard(id, {
   bankName, name, last4, creditLimit, closingDay, dueDay, cashbackRate, note, sortOrder, enabled,
+  annualFee, annualFeeMonth, autopayMode, autopayAccountId, autopayAmount,
 }) {
   const row = toRow('credit_cards', {
     bankName, name, last4, creditLimit, closingDay, dueDay, cashbackRate, note, sortOrder, enabled,
+    annualFee, annualFeeMonth, autopayMode, autopayAccountId, autopayAmount,
     updatedAt: new Date().toISOString(),
   })
   return fromRow('credit_cards', await unwrap(
@@ -128,4 +140,46 @@ export async function reorderCreditCards(orderedIds) {
       unwrap(supabase.from('credit_cards').update({ sort_order: index }).eq('id', id).eq('shop_id', shopId))
     )
   )
+}
+
+// ── กดเงินสดจากบัตร (card.sql ส่วน 9b) ──────────────────────────────────
+
+/** รายการกดเงินสดทั้งหมดของร้าน — ตารางยังไม่มี (ยังไม่รัน card.sql รอบใหม่) ให้คืนว่าง */
+export async function listCardAdvances() {
+  const { data, error } = await supabase
+    .from('card_advances')
+    .select('*')
+    .eq('shop_id', getShopId())
+    .order('date', { ascending: false })
+
+  if (error) {
+    if (isMissingTable(error)) {
+      console.warn('ยังไม่มีตาราง card_advances — รัน supabase/card.sql รอบใหม่ก่อนจึงจะกดเงินสดจากบัตรได้')
+      return []
+    }
+    throw new Error(toThaiError(error))
+  }
+  return fromRows('card_advances', data)
+}
+
+/**
+ * กดเงินสด — RPC ทำทั้งขาหนี้บัตรเพิ่ม เงินเข้ากระเป๋า และรายจ่ายค่าธรรมเนียมใน transaction เดียว
+ * target = 'cash' | 'transfer:<accountId>'
+ */
+export async function cashAdvance(cardId, { amount, fee = 0, target, date, note = '', log = null }) {
+  const row = await unwrap(supabase.rpc('card_cash_advance', {
+    p_shop: getShopId(),
+    p_card: cardId,
+    p_amount: amount,
+    p_fee: fee,
+    p_target: target,
+    p_date: date,
+    p_note: note || null,
+    p_log: log,
+  }))
+  return fromRow('card_advances', row)
+}
+
+export async function undoCashAdvance(advanceId, log = null) {
+  await unwrap(supabase.rpc('undo_card_advance', { p_advance: advanceId, p_log: log }))
 }

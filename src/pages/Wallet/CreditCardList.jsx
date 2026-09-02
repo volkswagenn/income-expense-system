@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import AmountInput from '../../components/shared/AmountInput'
+import { Link } from 'react-router-dom'
 import { differenceInDays, parseISO } from 'date-fns'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
@@ -14,21 +14,14 @@ import { nextClosingDate, formatThaiDate, formatIsoThai, daysUntil } from '../..
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
 import CardCashbackPopup from '../../components/shared/CardCashbackPopup'
-import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
-import BankSelect from '../../components/shared/BankSelect'
+import CardAdvancePopup from '../../components/shared/CardAdvancePopup'
+import CardFeePopup from '../../components/shared/CardFeePopup'
 import BankLogo from '../../components/shared/BankLogo'
-import { BANKS } from '../../lib/banks'
+import { MONTHS_TH } from '../Manage/CardFormPopup'
 
-const BANK_NAMES = BANKS.map((b) => b.name)
-const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
 const CASHBACK_CATEGORY = 'เครดิตเงินคืนบัตร'
-
-const AUTOPAY_MODES = [
-  { value: 'off', label: 'ไม่ได้ผูกไว้' },
-  { value: 'full', label: 'เต็มจำนวน' },
-  { value: 'minimum', label: 'ขั้นต่ำ' },
-  { value: 'fixed', label: 'จำนวนคงที่' },
-]
+const FEE_CATEGORY = 'ค่าธรรมเนียมบัตร'
+const FEE_PREFIX = 'ค่าธรรมเนียมรายปี'
 
 /** ยอดที่ธนาคารจะหักตามที่ผูกไว้ */
 export function autopayAmountOf(card, statement) {
@@ -55,252 +48,32 @@ function alertOf(dueDate, notifyDays) {
   }
 }
 
-function CardFormPopup({ card, onSave, onClose }) {
-  const isEdit = !!card
-  const [bankName, setBankName] = useState(card?.bankName ?? '')
-  const [customBank, setCustomBank] = useState(
-    card?.bankName && !BANK_NAMES.includes(card.bankName) ? card.bankName : ''
-  )
-  const [useCustom, setUseCustom] = useState(!!card?.bankName && !BANK_NAMES.includes(card.bankName))
-  const [name, setName] = useState(card?.name ?? '')
-  const [last4, setLast4] = useState(card?.last4 ?? '')
-  const [creditLimit, setCreditLimit] = useState(card ? String(card.creditLimit) : '')
-  const [outstanding, setOutstanding] = useState(card ? String(card.outstanding) : '')
-  const [closingDay, setClosingDay] = useState(String(card?.closingDay ?? 25))
-  const [dueDay, setDueDay] = useState(String(card?.dueDay ?? 15))
-  const [cashbackRate, setCashbackRate] = useState(card ? String(card.cashbackRate) : '')
-  const [autopayMode, setAutopayMode] = useState(card?.autopayMode ?? 'off')
-  const [autopayAccountId, setAutopayAccountId] = useState(card?.autopayAccountId ?? '')
-  const [autopayAmount, setAutopayAmount] = useState(card ? String(card.autopayAmount ?? '') : '')
-  const [showMore, setShowMore] = useState(false)
-  const [error, setError] = useState('')
-
-  const clear = (fn) => (v) => { fn(v); setError('') }
-
-  const submit = () => {
-    const bank = useCustom ? customBank.trim() : bankName
-    if (!bank) return setError('เลือกหรือพิมพ์ชื่อธนาคาร')
-    if (!name.trim()) return setError('กรอกชื่อบัตร')
-    if (last4 && !/^\d{4}$/.test(last4.trim())) return setError('เลขสี่ตัวท้ายต้องเป็นตัวเลข 4 หลัก')
-    if (autopayMode !== 'off' && !autopayAccountId) return setError('เลือกบัญชีที่ผูกหักบัญชีไว้')
-    if (autopayMode === 'fixed' && !(Number(autopayAmount) > 0)) return setError('ใส่จำนวนที่หักคงที่')
-    onSave({
-      bankName: bank,
-      name: name.trim(),
-      last4: last4.trim(),
-      creditLimit: Number(creditLimit) || 0,
-      outstanding: Number(outstanding) || 0,
-      closingDay: Number(closingDay) || 25,
-      dueDay: Number(dueDay) || 15,
-      cashbackRate: Number(cashbackRate) || 0,
-      autopayMode,
-      autopayAccountId: autopayMode === 'off' ? null : autopayAccountId,
-      autopayAmount: autopayMode === 'fixed' ? Number(autopayAmount) || 0 : 0,
-    })
-  }
-
-  // แสดงให้เห็นทันทีว่าตั้งวันแล้วบิลจะครบกำหนดเมื่อไร ผู้ใช้จะได้ไม่ต้องเดา
-  const cd = Number(closingDay) || 25
-  const dd = Number(dueDay) || 15
-  const preview = (() => {
-    const closing = nextClosingDate(cd)
-    const sameMonth = new Date(closing.getFullYear(), closing.getMonth(), Math.min(dd, 28))
-    return sameMonth > closing
-      ? new Date(closing.getFullYear(), closing.getMonth(), dd)
-      : new Date(closing.getFullYear(), closing.getMonth() + 1, dd)
-  })()
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
-          <h3 className="font-semibold text-base">💳 {isEdit ? 'แก้ไขบัตร' : 'เพิ่มบัตรเครดิต'}</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="label">ธนาคาร / ผู้ออกบัตร</label>
-            {useCustom ? (
-              <div className="flex gap-2">
-                <input
-                  className="input flex-1"
-                  value={customBank}
-                  onChange={(e) => clear(setCustomBank)(e.target.value)}
-                  placeholder="พิมพ์ชื่อผู้ออกบัตร..."
-                  autoFocus
-                />
-                <button className="btn btn-secondary text-xs px-2" onClick={() => setUseCustom(false)}>เลือกจากรายการ</button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <div className="flex-1 min-w-0">
-                  <BankSelect value={bankName} onChange={clear(setBankName)} />
-                </div>
-                <button className="btn btn-secondary text-xs px-2 shrink-0" onClick={() => setUseCustom(true)}>อื่นๆ</button>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
-              <label className="label">ชื่อเรียกบัตร</label>
-              <input
-                className="input"
-                value={name}
-                onChange={(e) => clear(setName)(e.target.value)}
-                placeholder="เช่น บัตรหลัก"
-              />
-            </div>
-            <div>
-              <label className="label">4 ตัวท้าย</label>
-              <input
-                className="input"
-                value={last4}
-                onChange={(e) => clear(setLast4)(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                placeholder="1234"
-                inputMode="numeric"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="label">วันสรุปยอด</label>
-              <select className="input" value={closingDay} onChange={(e) => clear(setClosingDay)(e.target.value)}>
-                {DAYS.map((d) => <option key={d} value={d}>ทุกวันที่ {d}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">วันครบกำหนดชำระ</label>
-              <select className="input" value={dueDay} onChange={(e) => clear(setDueDay)(e.target.value)}>
-                {DAYS.map((d) => <option key={d} value={d}>ทุกวันที่ {d}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-            📅 รูดวันนี้จะไปอยู่ในบิลที่ครบกำหนด <strong className="text-gray-700">{formatThaiDate(preview)}</strong>
-          </p>
-
-          <div>
-            <label className="label">{isEdit ? 'ยอดหนี้คงค้าง' : 'ยอดหนี้ยกมา'} (บาท)</label>
-            <AmountInput
-              className="input"
-              value={outstanding}
-              onChange={(e) => clear(setOutstanding)(e.target.value)}
-              placeholder="0.00"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              {isEdit
-                ? '⚠️ การแก้ยอดตรงนี้เป็นการปรับยอดหนี้โดยตรง ไม่สร้างรายการรับ-จ่าย'
-                : 'ยอดที่ค้างอยู่ตอนนี้ ถ้าเพิ่งเปิดบัตรใหม่ให้ปล่อยเป็น 0'}
-            </p>
-          </div>
-
-          <button
-            className="text-xs text-gray-500 hover:text-gray-700"
-            onClick={() => setShowMore((v) => !v)}
-          >
-            {showMore ? '▲ ซ่อนตัวเลือกเพิ่มเติม' : '▼ ตัวเลือกเพิ่มเติม (ไม่บังคับ)'}
-          </button>
-
-          {showMore && (
-            <div className="space-y-4 pt-1">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="label">วงเงิน (บาท)</label>
-                  <AmountInput
-                    className="input"
-                    value={creditLimit}
-                    onChange={(e) => clear(setCreditLimit)(e.target.value)}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="label">อัตราเงินคืน (%)</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    value={cashbackRate}
-                    onChange={(e) => clear(setCashbackRate)(e.target.value)}
-                    placeholder="0"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">ใส่แล้วระบบจะประมาณเงินคืนของรอบให้ดู</p>
-                </div>
-              </div>
-
-              <div className="border-t pt-3">
-                <label className="label">ผูกหักบัญชีอัตโนมัติไว้กับธนาคาร</label>
-                <select
-                  className="input"
-                  value={autopayMode}
-                  onChange={(e) => clear(setAutopayMode)(e.target.value)}
-                >
-                  {AUTOPAY_MODES.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                  บอกแอปว่าคุณสมัครหักบัญชีไว้แบบไหน แอปจะเตรียมรายการจ่ายบิลให้ตรงกับ
-                  ที่ธนาคารจะหัก แล้วรอให้คุณกดยืนยัน <strong>แอปไม่หักเงินเอง</strong>{' '}
-                  เพราะไม่มีทางรู้ว่าธนาคารหักสำเร็จจริงหรือไม่
-                </p>
-
-                {autopayMode !== 'off' && (
-                  <div className="mt-3 space-y-2">
-                    <TransferAccountPicker
-                      value={autopayAccountId}
-                      onChange={clear(setAutopayAccountId)}
-                      label="บัญชีที่ผูกไว้"
-                    />
-                    {autopayMode === 'fixed' && (
-                      <div>
-                        <label className="label">จำนวนที่หักคงที่ (บาท)</label>
-                        <AmountInput
-                          className="input"
-                          value={autopayAmount}
-                          onChange={(e) => clear(setAutopayAmount)(e.target.value)}
-                          placeholder="0.00"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
-        </div>
-
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
-          <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit}>{isEdit ? 'บันทึก' : 'เพิ่มบัตร'}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutopay }) {
+/**
+ * การ์ดบัตรหนึ่งใบบนหน้ากระเป๋าเงิน — งานประจำวันเท่านั้น
+ * (จ่ายบิล กดเงินสด เงินคืน ค่าธรรมเนียม ย้อนรายการ)
+ * การเพิ่ม/แก้ไข/ลบบัตรอยู่ที่ จัดการข้อมูล → บัตรเครดิต
+ */
+function CardRow({ card, onPay, onUndoPay, onCashback, onAutopay, onAdvance, onUndoAdvance, onFee }) {
   const [showHistory, setShowHistory] = useState(false)
   const notifyDays = useAppStore((s) => s.notifyDaysBefore)
   const statements = useCreditCardStore((s) => s.getStatements(card.id))
   const current = useCreditCardStore((s) => s.getCurrentCycle(card.id))
+  const advances = useCreditCardStore((s) => s.getAdvances(card.id))
 
   const unpaid = statements
     .filter((s) => s.status !== 'paid')
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))
   const bill = unpaid[0] ?? null
   const paidHistory = statements.filter((s) => s.status === 'paid')
+  const unbilledAdvances = advances.filter((a) => !a.statementId)
 
   // วงเงินที่ใช้ไปนับยอดผ่อนที่ยังไม่ถูกเรียกเก็บด้วย เพราะธนาคารกันวงเงิน
   // ไว้เต็มก้อนตั้งแต่วันที่ซื้อ ไม่ได้กันทีละงวด
   const usage = useCreditCardStore((s) => s.getCardLimitUsage(card.id))
   const debt = Number(card.outstanding) || 0
-  const used = usage?.used ?? debt
+  const credit = debt < 0 ? -debt : 0
+  // เครดิตในบัตร (outstanding ติดลบ) ไม่ได้เพิ่มวงเงิน แค่ยังไม่ได้ใช้ — แถบจึงเริ่มที่ศูนย์
+  const used = Math.max(0, usage?.used ?? debt)
   const limit = usage?.limit ?? 0
   const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0
   const overLimit = usage?.over ?? false
@@ -319,6 +92,16 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
     ? (current.spend * Number(card.cashbackRate)) / 100
     : 0
 
+  // ค่าธรรมเนียมรายปี — เตือนเฉพาะเดือนที่ตั้งไว้ และยังไม่ได้บันทึกของปีนี้
+  const thisYear = String(new Date().getFullYear())
+  const feeRecorded = useTransactionStore((s) => s.transactions.some((t) =>
+    t.cardId === card.id && t.type === 'expense'
+    && String(t.date ?? '').startsWith(thisYear)
+    && String(t.itemName ?? '').startsWith(FEE_PREFIX)
+  ))
+  const hasFee = Number(card.annualFee) > 0
+  const feeDue = hasFee && Number(card.annualFeeMonth) === new Date().getMonth() + 1 && !feeRecorded
+
   return (
     <div className="rounded-xl border border-gray-200 p-4 space-y-3">
       <div className="flex items-start gap-3">
@@ -331,12 +114,31 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-xs text-gray-400">ยอดหนี้รวม</p>
-          <p className={`font-bold tabular-nums ${debt > 0 ? 'text-rose-600' : 'text-gray-500'}`}>
-            {fmt(debt)}
+          <p className="text-xs text-gray-400">{credit > 0 ? 'เครดิตคงเหลือ' : 'ยอดหนี้รวม'}</p>
+          <p className={`font-bold tabular-nums ${debt > 0 ? 'text-rose-600' : credit > 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
+            {fmt(Math.abs(debt))}
           </p>
         </div>
       </div>
+
+      {credit > 0 && (
+        <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+          💚 มีเครดิตในบัตร {fmt(credit)} บาท จากการจ่ายเกินหรือเงินคืน ระบบจะหักออกจากบิลรอบถัดไปให้เอง
+        </p>
+      )}
+
+      {feeDue && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs text-amber-800">
+            🧾 เดือน {MONTHS_TH[card.annualFeeMonth - 1]} ธนาคารเรียกเก็บค่าธรรมเนียมรายปี{' '}
+            <strong className="tabular-nums">{fmt(card.annualFee)}</strong> บาท
+            {' '}ถ้าได้รับการยกเว้นก็ไม่ต้องกด
+          </p>
+          <button className="btn btn-primary text-xs mt-2" onClick={() => onFee(card)}>
+            บันทึกค่าธรรมเนียม
+          </button>
+        </div>
+      )}
 
       {/* ผูกหักบัญชีไว้และถึงกำหนดแล้ว — เตรียมรายการไว้ให้ เหลือแค่กดยืนยัน
           ไม่หักเงินเอง เพราะแอปไม่มีทางรู้ว่าธนาคารหักสำเร็จจริงหรือไม่ */}
@@ -370,6 +172,7 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
                 ขั้นต่ำ {fmt(bill.minimumAmount)}
                 {Number(bill.paidAmount) > 0 && ` · จ่ายไปแล้ว ${fmt(bill.paidAmount)}`}
                 {Number(bill.previousBalance) > 0 && ` · ยกมา ${fmt(bill.previousBalance)}`}
+                {Number(bill.previousBalance) < 0 && ` · หักเครดิต ${fmt(-bill.previousBalance)}`}
               </p>
             </div>
             <button className="btn btn-primary text-xs shrink-0" onClick={() => onPay(card, bill)}>
@@ -397,6 +200,7 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
                 {fmt(current.net)}
                 <span className="text-xs font-normal text-gray-400 ml-1.5">
                   {current.count} รายการ
+                  {current.advance > 0 && ` · กดเงินสด ${fmt(current.advance)}`}
                 </span>
               </p>
             </div>
@@ -406,6 +210,29 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
               </p>
             )}
           </div>
+
+          {unbilledAdvances.length > 0 && (
+            <div className="border-t border-gray-200 mt-2 pt-2 space-y-1">
+              {unbilledAdvances.map((a) => (
+                <div key={a.id} className="flex items-center justify-between text-xs gap-2">
+                  <span className="text-gray-500 truncate">
+                    🏧 กดเงินสด {formatIsoThai(a.date)}
+                    {Number(a.fee) > 0 && ` · ค่าธรรมเนียม ${fmt(a.fee)}`}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="tabular-nums text-gray-700">{fmt(a.amount)}</span>
+                    <button
+                      className="text-gray-400 hover:text-red-600"
+                      onClick={() => onUndoAdvance(card, a)}
+                      title="ย้อนการกดเงินสดนี้"
+                    >
+                      ย้อน
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -431,7 +258,7 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
         </div>
       )}
 
-      <div className="flex gap-2 justify-end items-center">
+      <div className="flex gap-2 justify-end items-center flex-wrap">
         {paidHistory.length > 0 && (
           <button
             className="text-xs text-gray-400 hover:text-gray-600 mr-auto"
@@ -440,11 +267,20 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
             {showHistory ? '▲ ซ่อนบิลที่จ่ายแล้ว' : `▼ บิลที่จ่ายแล้ว ${paidHistory.length} รอบ`}
           </button>
         )}
+        <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onAdvance(card)}>
+          กดเงินสด
+        </button>
+        {hasFee && !feeDue && (
+          <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onFee(card)}>
+            ค่าธรรมเนียมรายปี
+          </button>
+        )}
         <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onCashback(card, estCashback)}>
           บันทึกเงินคืน
         </button>
-        <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onEdit(card)}>แก้ไข</button>
-        <button className="btn btn-secondary text-xs py-1 px-2.5 text-red-600" onClick={() => onDelete(card)}>ลบ</button>
+        <Link to="/manage/cards" className="text-xs text-gray-400 hover:text-gray-600 px-1" title="แก้ไขข้อมูลบัตรที่ จัดการข้อมูล">
+          แก้ไขบัตร
+        </Link>
       </div>
 
       {showHistory && (
@@ -454,6 +290,9 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
               <span className="text-gray-500">
                 รอบ {s.cycle} · ครบกำหนด {formatIsoThai(s.dueDate)}
                 {s.paidAt && <span className="text-emerald-600"> · จ่าย {formatIsoThai(s.paidAt)}</span>}
+                {Number(s.paidAmount) > Number(s.amount) && (
+                  <span className="text-emerald-600"> · จ่ายเกิน {fmt(Number(s.paidAmount) - Number(s.amount))}</span>
+                )}
               </span>
               <span className="flex items-center gap-2 shrink-0">
                 <span className="tabular-nums text-gray-700">{fmt(s.amount)}</span>
@@ -477,23 +316,23 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutop
 
 export default function CreditCardList() {
   const cards = useCreditCardStore((s) => s.cards)
-  const { createCard, updateCard, deleteCard, adjustOutstanding, ensureStatements, payStatement, undoPayment } =
-    useCreditCardStore()
+  const { ensureStatements, payStatement, undoPayment, cashAdvance, undoAdvance } = useCreditCardStore()
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
   const refreshCards = useCreditCardStore((s) => s.refresh)
   const refreshWallet = useWalletStore((s) => s.refresh)
+  const refreshTransactions = useTransactionStore((s) => s.refresh)
   const addTransaction = useTransactionStore((s) => s.addTransaction)
   const categories = useCategoryStore((s) => s.categories)
   const addCategory = useCategoryStore((s) => s.addCategory)
   const { addLog } = useLogStore()
 
-  const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [confirmDelete, setConfirmDelete] = useState(null)
-  const [payTarget, setPayTarget] = useState(null)      // { card, statement }
-  const [undoTarget, setUndoTarget] = useState(null)    // { card, statement }
+  const [payTarget, setPayTarget] = useState(null)          // { card, statement }
+  const [undoTarget, setUndoTarget] = useState(null)        // { card, statement }
   const [cashbackTarget, setCashbackTarget] = useState(null) // { card, estimate }
   const [autopayTarget, setAutopayTarget] = useState(null)   // { card, statement, amount }
+  const [advanceTarget, setAdvanceTarget] = useState(null)   // card
+  const [undoAdvanceTarget, setUndoAdvanceTarget] = useState(null) // { card, advance }
+  const [feeTarget, setFeeTarget] = useState(null)           // card
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -503,109 +342,42 @@ export default function CreditCardList() {
     ensureStatements()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openCreate = () => { setEditing(null); setFormOpen(true); setError('') }
-  const openEdit = (card) => { setEditing(card); setFormOpen(true); setError('') }
-
-  const handleSave = async (data) => {
+  const run = async (fn) => {
     if (busy) return
     setBusy(true)
     setError('')
-    try {
-      if (editing) {
-        await updateCard(editing.id, {
-          bankName: data.bankName,
-          name: data.name,
-          last4: data.last4 || null,
-          creditLimit: data.creditLimit,
-          closingDay: data.closingDay,
-          dueDay: data.dueDay,
-          cashbackRate: data.cashbackRate,
-        })
-        // ยอดหนี้ต้องไปทาง RPC เสมอ ส่งเป็นส่วนต่าง ไม่เขียนทับยอด
-        const delta = data.outstanding - Number(editing.outstanding || 0)
-        if (delta !== 0) {
-          await adjustOutstanding(editing.id, delta)
-          await addLog(buildLogEntry({
-            activityType: 'CARD_ADJUST',
-            description: `ปรับยอดหนี้บัตร "${data.name}" ${fmt(editing.outstanding)} → ${fmt(data.outstanding)} บาท`,
-            oldValue: { outstanding: editing.outstanding },
-            newValue: { cardId: editing.id, outstanding: data.outstanding },
-          }))
-        } else {
-          await addLog(buildLogEntry({
-            activityType: 'CARD_UPDATE',
-            description: `แก้ไขบัตรเครดิต "${data.name}"`,
-            oldValue: editing,
-            newValue: { ...editing, ...data },
-          }))
-        }
-      } else {
-        const card = await createCard(data)
-        await addLog(buildLogEntry({
-          activityType: 'CARD_CREATE',
-          description: `เพิ่มบัตรเครดิต "${data.bankName} — ${data.name}"${data.outstanding ? ` ยอดยกมา ${fmt(data.outstanding)} บาท` : ''}`,
-          newValue: card,
-        }))
-      }
-      setFormOpen(false)
-      setEditing(null)
-      await ensureStatements()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
+    try { await fn() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
-  const handleDelete = async () => {
-    const card = confirmDelete
-    if (!card || busy) return
-    setBusy(true)
-    setError('')
-    try {
-      await deleteCard(card.id)
-      await addLog(buildLogEntry({
-        activityType: 'CARD_DELETE',
-        description: `ลบบัตรเครดิต "${formatCard(card)}"`,
-        oldValue: card,
-      }))
-      setConfirmDelete(null)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
+  // หมวดหมู่พิเศษของบัตร แยกไว้ไม่ให้ปนกับรายได้/รายจ่ายจริงตอนดูรายงาน สร้างครั้งแรกครั้งเดียว
+  const ensureCategory = async (name, type) => {
+    const found = categories.find((c) => c.type === type && c.name === name && !c.deleted)
+    if (found) return found.id
+    return (await addCategory(name, type))?.id ?? null
   }
 
-  const handlePay = async ({ method, accountId, amount, date }) => {
+  const handlePay = ({ method, accountId, amount, date }) => run(async () => {
     const { card, statement } = payTarget
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      await payStatement(statement.id, {
-        method,
-        accountId,
-        amount,
-        date,
-        log: buildLogEntry({
-          activityType: 'CARD_PAYMENT',
-          description:
-            `จ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ` +
-            `${fmt(amount)} บาท จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
-          walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
-          newValue: { statementId: statement.id, cardId: card.id, amount, date, method },
-        }),
-      })
-      // เงินออกจากกระเป๋าที่เซิร์ฟเวอร์แล้ว ดึงยอดจริงกลับมา
-      await refreshWallet()
-      setPayTarget(null)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+    const remaining = Number(statement.amount) - Number(statement.paidAmount)
+    await payStatement(statement.id, {
+      method,
+      accountId,
+      amount,
+      date,
+      log: buildLogEntry({
+        activityType: 'CARD_PAYMENT',
+        description:
+          `จ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ` +
+          `${fmt(amount)} บาท จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}` +
+          (amount > remaining ? ` (จ่ายเกิน ${fmt(amount - remaining)} เป็นเครดิตในบัตร)` : ''),
+        walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
+        newValue: { statementId: statement.id, cardId: card.id, amount, date, method },
+      }),
+    })
+    // เงินออกจากกระเป๋าที่เซิร์ฟเวอร์แล้ว ดึงยอดจริงกลับมา
+    await refreshWallet()
+    setPayTarget(null)
+  })
 
   /**
    * บันทึกเงินคืนเข้าบัตร
@@ -613,101 +385,135 @@ export default function CreditCardList() {
    * ไม่มีกลไกพิเศษ — เป็นรายรับที่ปลายทางเป็นบัตร ฐานข้อมูลกลับเครื่องหมายให้เอง
    * หนี้ลดลงพอดี และยอดไปโผล่ในรายงานรายรับให้เลย
    */
-  const handleCashback = async ({ kind, amount, date, note }) => {
+  const handleCashback = ({ kind, amount, date, note }) => run(async () => {
     const { card } = cashbackTarget
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      // หมวดหมู่แยกไว้ จะได้ไม่ปนกับรายได้จริงตอนดูรายงาน สร้างให้ครั้งแรกครั้งเดียว
-      let categoryId = categories.find(
-        (c) => c.type === 'income' && c.name === CASHBACK_CATEGORY && !c.deleted
-      )?.id
-      if (!categoryId) {
-        categoryId = (await addCategory(CASHBACK_CATEGORY, 'income'))?.id ?? null
-      }
+    const categoryId = await ensureCategory(CASHBACK_CATEGORY, 'income')
+    const label = kind === 'refund' ? 'คืนสินค้าเข้าบัตร' : 'เครดิตเงินคืน'
+    const target = walletTarget('card', { cardId: card.id })
+    await addTransaction({
+      date,
+      type: 'income',
+      amount,
+      method: 'card',
+      cardId: card.id,
+      category: categoryId,
+      itemName: `${label} — ${formatCard(card)}`,
+      otherIncomeType: label,
+      note: note || null,
+    }, {
+      effect: { target, delta: +amount },
+      log: buildLogEntry({
+        activityType: 'CARD_CASHBACK',
+        description: `${label} ${fmt(amount)} บาท เข้าบัตร "${formatCard(card)}"`,
+        walletEffect: { target: 'card', delta: +amount, cardId: card.id },
+        newValue: { cardId: card.id, amount, date, kind },
+      }),
+    })
+    await refreshCards()
+    setCashbackTarget(null)
+  })
 
-      const label = kind === 'refund' ? 'คืนสินค้าเข้าบัตร' : 'เครดิตเงินคืน'
-      const target = walletTarget('card', { cardId: card.id })
-      await addTransaction({
-        date,
-        type: 'income',
-        amount,
-        method: 'card',
-        cardId: card.id,
-        category: categoryId,
-        itemName: `${label} — ${formatCard(card)}`,
-        otherIncomeType: label,
-        note: note || null,
-      }, {
-        effect: { target, delta: +amount },
-        log: buildLogEntry({
-          activityType: 'CARD_CASHBACK',
-          description: `${label} ${fmt(amount)} บาท เข้าบัตร "${formatCard(card)}"`,
-          walletEffect: { target: 'card', delta: +amount, cardId: card.id },
-          newValue: { cardId: card.id, amount, date, kind },
-        }),
-      })
-      await refreshCards()
-      setCashbackTarget(null)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+  /**
+   * ค่าธรรมเนียมรายปี — รายจ่ายธรรมดาที่รูดบนบัตร เข้าบิลรอบนั้นเหมือนยอดรูดทั่วไป
+   * ชื่อรายการขึ้นต้นด้วย FEE_PREFIX เพื่อให้การ์ดรู้ว่าปีนี้บันทึกแล้ว ไม่เตือนซ้ำ
+   */
+  const handleFee = ({ amount, date, note }) => run(async () => {
+    const card = feeTarget
+    const categoryId = await ensureCategory(FEE_CATEGORY, 'expense')
+    const target = walletTarget('card', { cardId: card.id })
+    await addTransaction({
+      date,
+      type: 'expense',
+      amount,
+      method: 'card',
+      cardId: card.id,
+      category: categoryId,
+      itemName: `${FEE_PREFIX} — ${formatCard(card)}`,
+      note: note || null,
+    }, {
+      effect: { target, delta: -amount },
+      log: buildLogEntry({
+        activityType: 'CARD_FEE',
+        description: `ค่าธรรมเนียมรายปี ${fmt(amount)} บาท บัตร "${formatCard(card)}"`,
+        walletEffect: { target: 'card', delta: -amount, cardId: card.id },
+        newValue: { cardId: card.id, amount, date },
+      }),
+    })
+    await refreshCards()
+    setFeeTarget(null)
+  })
+
+  /**
+   * กดเงินสดจากบัตร — ย้ายเงินจากบัตรเข้ากระเป๋า ไม่ใช่รายจ่าย
+   * ค่าธรรมเนียมเท่านั้นที่เป็นรายจ่าย (RPC สร้างให้) ทั้งคู่เข้าบิลรอบที่กด
+   */
+  const handleAdvance = ({ amount, fee, target, date, note }) => run(async () => {
+    const card = advanceTarget
+    const toCash = target === 'cash'
+    await cashAdvance(card.id, {
+      amount, fee, target, date, note,
+      log: buildLogEntry({
+        activityType: 'CARD_ADVANCE',
+        description:
+          `กดเงินสด ${fmt(amount)} บาท จากบัตร "${formatCard(card)}"` +
+          (fee > 0 ? ` ค่าธรรมเนียม ${fmt(fee)} บาท` : '') +
+          ` เข้า${toCash ? 'เงินสด' : 'บัญชีเงินโอน'}`,
+        walletEffect: {
+          target: toCash ? 'cash' : 'transfer',
+          delta: +amount,
+          transferAccountId: toCash ? null : target.split(':')[1],
+        },
+        newValue: { cardId: card.id, amount, fee, target, date },
+      }),
+    })
+    await Promise.all([refreshWallet(), refreshTransactions()])
+    setAdvanceTarget(null)
+  })
+
+  const handleUndoAdvance = () => run(async () => {
+    const { card, advance } = undoAdvanceTarget
+    await undoAdvance(advance.id, buildLogEntry({
+      activityType: 'CARD_ADVANCE_UNDO',
+      description: `ย้อนการกดเงินสด ${fmt(advance.amount)} บาท จากบัตร "${formatCard(card)}"`,
+      oldValue: advance,
+    }))
+    await Promise.all([refreshWallet(), refreshTransactions()])
+    setUndoAdvanceTarget(null)
+  })
 
   /** ยืนยันว่าธนาคารหักบัญชีไปแล้วจริง — บันทึกเป็นการจ่ายบิลตามปกติ */
-  const handleAutopayConfirm = async () => {
+  const handleAutopayConfirm = () => run(async () => {
     const { card, statement, amount } = autopayTarget
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      await payStatement(statement.id, {
-        method: 'transfer',
-        accountId: card.autopayAccountId,
-        amount,
-        date: statement.dueDate,
-        log: buildLogEntry({
-          activityType: 'CARD_AUTOPAY',
-          description:
-            `ยืนยันหักบัญชีอัตโนมัติ บัตร "${formatCard(card)}" รอบ ${statement.cycle} ` +
-            `${fmt(amount)} บาท`,
-          walletEffect: { target: 'transfer', delta: -amount, transferAccountId: card.autopayAccountId },
-          newValue: { statementId: statement.id, cardId: card.id, amount, mode: card.autopayMode },
-        }),
-      })
-      await refreshWallet()
-      setAutopayTarget(null)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+    await payStatement(statement.id, {
+      method: 'transfer',
+      accountId: card.autopayAccountId,
+      amount,
+      date: statement.dueDate,
+      log: buildLogEntry({
+        activityType: 'CARD_AUTOPAY',
+        description:
+          `ยืนยันหักบัญชีอัตโนมัติ บัตร "${formatCard(card)}" รอบ ${statement.cycle} ` +
+          `${fmt(amount)} บาท`,
+        walletEffect: { target: 'transfer', delta: -amount, transferAccountId: card.autopayAccountId },
+        newValue: { statementId: statement.id, cardId: card.id, amount, mode: card.autopayMode },
+      }),
+    })
+    await refreshWallet()
+    setAutopayTarget(null)
+  })
 
-  const handleUndoPay = async () => {
+  const handleUndoPay = () => run(async () => {
     const { card, statement } = undoTarget
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      const amount = Number(statement.paidAmount)
-      await undoPayment(statement.id, amount, buildLogEntry({
-        activityType: 'CARD_PAYMENT_UNDO',
-        description: `ย้อนการจ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ${fmt(amount)} บาท`,
-        oldValue: statement,
-        newValue: { statementId: statement.id, cardId: card.id, amount },
-      }))
-      await refreshWallet()
-      setUndoTarget(null)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+    const amount = Number(statement.paidAmount)
+    await undoPayment(statement.id, amount, buildLogEntry({
+      activityType: 'CARD_PAYMENT_UNDO',
+      description: `ย้อนการจ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ${fmt(amount)} บาท`,
+      oldValue: statement,
+      newValue: { statementId: statement.id, cardId: card.id, amount },
+    }))
+    await refreshWallet()
+    setUndoTarget(null)
+  })
 
   const totalOutstanding = cards.reduce((sum, c) => sum + (Number(c.outstanding) || 0), 0)
 
@@ -718,9 +524,7 @@ export default function CreditCardList() {
           รูดบัตรแล้วยอดจะมาสะสมเป็นหนี้ที่นี่ ไม่ตัดเงินสดหรือเงินโอน
           ระบบปิดรอบและคิดยอดที่ต้องชำระให้เองเมื่อถึงวันสรุปยอด
         </p>
-        <button className="btn btn-primary text-xs shrink-0" onClick={openCreate}>
-          + เพิ่มบัตร
-        </button>
+        <Link to="/manage/cards" className="btn btn-secondary text-xs shrink-0">จัดการบัตร</Link>
       </div>
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
@@ -729,7 +533,10 @@ export default function CreditCardList() {
         <div className="text-center py-8 text-gray-400">
           <div className="text-3xl mb-2">💳</div>
           <p className="text-sm">ยังไม่มีบัตรเครดิต</p>
-          <p className="text-xs mt-1">กด "เพิ่มบัตร" เพื่อเริ่มบันทึกรายจ่ายผ่านบัตร</p>
+          <p className="text-xs mt-1">
+            เพิ่มบัตรได้ที่{' '}
+            <Link to="/manage/cards" className="text-blue-600 hover:underline">จัดการข้อมูล → บัตรเครดิต</Link>
+          </p>
         </div>
       ) : (
         <>
@@ -738,12 +545,13 @@ export default function CreditCardList() {
               <CardRow
                 key={card.id}
                 card={card}
-                onEdit={openEdit}
-                onDelete={setConfirmDelete}
                 onPay={(c, s) => setPayTarget({ card: c, statement: s })}
                 onUndoPay={(c, s) => setUndoTarget({ card: c, statement: s })}
                 onCashback={(c, estimate) => setCashbackTarget({ card: c, estimate })}
                 onAutopay={(c, s, amount) => setAutopayTarget({ card: c, statement: s, amount })}
+                onAdvance={(c) => setAdvanceTarget(c)}
+                onUndoAdvance={(c, a) => setUndoAdvanceTarget({ card: c, advance: a })}
+                onFee={(c) => setFeeTarget(c)}
               />
             ))}
           </div>
@@ -754,14 +562,6 @@ export default function CreditCardList() {
             </div>
           )}
         </>
-      )}
-
-      {formOpen && (
-        <CardFormPopup
-          card={editing}
-          onSave={handleSave}
-          onClose={() => { setFormOpen(false); setEditing(null) }}
-        />
       )}
 
       {payTarget && (
@@ -783,6 +583,41 @@ export default function CreditCardList() {
           busy={busy}
         />
       )}
+
+      {advanceTarget && (
+        <CardAdvancePopup
+          cardLabel={getCardLabel(advanceTarget.id)}
+          onConfirm={handleAdvance}
+          onCancel={() => setAdvanceTarget(null)}
+          busy={busy}
+        />
+      )}
+
+      {feeTarget && (
+        <CardFeePopup
+          cardLabel={getCardLabel(feeTarget.id)}
+          defaultAmount={Number(feeTarget.annualFee) || 0}
+          onConfirm={handleFee}
+          onCancel={() => setFeeTarget(null)}
+          busy={busy}
+        />
+      )}
+
+      <ConfirmPopup
+        open={!!undoAdvanceTarget}
+        title="ย้อนการกดเงินสด"
+        message={
+          undoAdvanceTarget
+            ? `ดึงเงิน ${fmt(undoAdvanceTarget.advance.amount)} บาท กลับออกจาก${undoAdvanceTarget.advance.target === 'cash' ? 'เงินสด' : 'บัญชีเงินโอน'} หนี้บัตรลดลงเท่าเดิม`
+              + (Number(undoAdvanceTarget.advance.fee) > 0 ? ` และลบรายจ่ายค่าธรรมเนียม ${fmt(undoAdvanceTarget.advance.fee)} บาท` : '')
+              + '\n\nยืนยันหรือไม่?'
+            : ''
+        }
+        onConfirm={handleUndoAdvance}
+        onCancel={() => setUndoAdvanceTarget(null)}
+        confirmLabel="ย้อนการกดเงิน"
+        danger
+      />
 
       <ConfirmPopup
         open={!!autopayTarget}
@@ -808,20 +643,6 @@ export default function CreditCardList() {
         onConfirm={handleUndoPay}
         onCancel={() => setUndoTarget(null)}
         confirmLabel="ย้อนการจ่าย"
-        danger
-      />
-
-      <ConfirmPopup
-        open={!!confirmDelete}
-        title="ลบบัตรเครดิต"
-        message={
-          confirmDelete
-            ? `ลบ "${formatCard(confirmDelete)}" ที่มียอดหนี้ ${fmt(confirmDelete.outstanding)} บาท?\n\nรายการที่เคยรูดบัตรใบนี้จะยังอยู่ในประวัติและรายงานเหมือนเดิม แต่จะเลือกบัตรใบนี้ในฟอร์มไม่ได้อีก`
-            : ''
-        }
-        onConfirm={handleDelete}
-        onCancel={() => setConfirmDelete(null)}
-        confirmLabel="ลบบัตร"
         danger
       />
     </div>

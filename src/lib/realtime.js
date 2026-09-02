@@ -34,6 +34,7 @@ const TABLE_STORES = {
   card_statements: [useCreditCardStore],
   card_installments: [useCreditCardStore],
   card_installment_entries: [useCreditCardStore],
+  card_advances: [useCreditCardStore],
   debts: [useDebtStore],
   debt_entries: [useDebtStore],
   pending_payments: [usePendingStore],

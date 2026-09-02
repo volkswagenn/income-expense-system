@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import DatePicker from './DatePicker'
 import TransferAccountPicker from './TransferAccountPicker'
+import CategorySelect from './CategorySelect'
 import {
   debtSchedule, scheduleTotal, installmentTotal, maxPrepaidForDebt, latestFirstDueFor,
   formatThaiDate, toDateString, clampedDate,
@@ -24,6 +25,8 @@ export const EMPTY_DEBT = {
   prepaidCount: '',
   method: 'transfer',
   accountId: '',
+  categoryId: '',
+  term: 'auto',           // 'auto' = ไม่เกิน 12 งวดเป็นระยะสั้น ที่เหลือระยะยาว | 'short' | 'long'
 }
 
 /**
@@ -74,6 +77,7 @@ export function computeDebt(v, today = new Date()) {
 
   return {
     months, dueDay, firstDue, monthly, principal, interest, total, rows,
+    term: v.term === 'short' || v.term === 'long' ? v.term : (months <= 12 ? 'short' : 'long'),
     maxPrepaid, wantPrepaid, prepaidOver, suggestFirstDue, prepaidCount,
     paidAlready: scheduleTotal(rows.slice(0, prepaidCount)),
     remainingTotal: scheduleTotal(remaining),
@@ -98,7 +102,7 @@ export function validateDebt(v, calc) {
  * ช่องกรอกหนี้สิน — ใช้ซ้อนในฟอร์มรายจ่าย และในป๊อปอัปจากหน้ากระเป๋าเงิน
  * value/onChange ควบคุมจากข้างนอก
  */
-export default function DebtFields({ value: v, onChange, hideName = false }) {
+export default function DebtFields({ value: v, onChange, hideName = false, hideCategory = false }) {
   const set = (k, x) => onChange({ ...v, [k]: x })
   const calc = useMemo(() => computeDebt(v), [v])
   const isRecv = v.direction === 'receivable'
@@ -133,6 +137,34 @@ export default function DebtFields({ value: v, onChange, hideName = false }) {
           <label className="label">{isRecv ? 'ใครยืม' : 'เจ้าหนี้ / ผู้ให้กู้'}</label>
           <input className="input" value={v.counterparty} onChange={(e) => set('counterparty', e.target.value)} placeholder={isRecv ? 'ชื่อคนยืม' : 'เช่น ธนาคารกรุงศรี'} />
         </div>
+      </div>
+
+      {!hideCategory && (
+        <div>
+          <label className="label">หมวดหมู่ของหนี้</label>
+          <CategorySelect type={isRecv ? 'income' : 'expense'} value={v.categoryId ?? ''} onChange={(id) => set('categoryId', id)} />
+          <p className="text-xs text-gray-400 mt-1">ค่างวดที่{isRecv ? 'รับคืน' : 'จ่าย'}จะลงหมวดนี้ในรายงาน</p>
+        </div>
+      )}
+
+      <div>
+        <label className="label">ระยะของหนี้</label>
+        <div className="flex gap-1.5">
+          {[
+            { k: 'auto', t: 'อัตโนมัติ' },
+            { k: 'short', t: 'ระยะสั้น' },
+            { k: 'long', t: 'ระยะยาว' },
+          ].map((o) => (
+            <button key={o.k} type="button"
+              className={`btn text-xs py-1 px-3 ${(v.term ?? 'auto') === o.k ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => set('term', o.k)}>{o.t}</button>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-1">
+          {(v.term ?? 'auto') === 'auto'
+            ? `ไม่เกิน 12 งวดนับเป็นระยะสั้น${calc ? ` — รายการนี้เป็น${calc.term === 'short' ? 'ระยะสั้น' : 'ระยะยาว'}` : ''}`
+            : v.term === 'short' ? 'ผ่อนจบภายใน 1 ปี' : 'ผ่อนนานกว่า 1 ปี'}
+        </p>
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-3">

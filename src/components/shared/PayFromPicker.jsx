@@ -194,7 +194,7 @@ export default function PayFromPicker({
               {draft.method === 'debt' && debt && (
                 <div className="rounded-xl bg-amber-50/60 border border-amber-200 p-3">
                   <p className="text-xs text-amber-800 mb-2">บันทึกเป็นหนี้สินที่มีตารางงวด ยังไม่ตัดเงินและยังไม่สร้างรายจ่าย ชื่อรายการใช้จากฟอร์ม</p>
-                  <DebtFields value={debt} onChange={(d) => { onDebtChange(d); setError('') }} hideName />
+                  <DebtFields value={debt} onChange={(d) => { onDebtChange(d); setError('') }} hideName hideCategory />
                 </div>
               )}
 

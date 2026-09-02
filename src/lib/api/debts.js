@@ -45,6 +45,7 @@ export async function createDebt(data, schedule, log = null) {
       name: data.name,
       counterparty: data.counterparty || null,
       category_id: data.categoryId || null,
+      term: data.term === 'short' ? 'short' : 'long',
       note: data.note || null,
       principal_amount: data.principalAmount ?? data.totalAmount,
       total_amount: data.totalAmount,
@@ -96,10 +97,11 @@ export async function cancelDebt(debtId, log = null) {
 }
 
 /** แก้ได้เฉพาะข้อมูลอธิบายและค่าเริ่มต้นการจ่าย — ยอดกับงวดแตะไม่ได้ */
-export async function updateDebt(id, { name, counterparty, categoryId, note, defaultMethod, defaultAccountId }) {
+export async function updateDebt(id, { name, counterparty, categoryId, term, note, defaultMethod, defaultAccountId }) {
   const row = await unwrap(
     supabase.from('debts').update({
       name, counterparty: counterparty || null, category_id: categoryId || null, note: note || null,
+      ...(term ? { term: term === 'short' ? 'short' : 'long' } : {}),
       default_method: defaultMethod || null, default_account_id: defaultAccountId || null,
       updated_at: new Date().toISOString(),
     }).eq('id', id).select().single()

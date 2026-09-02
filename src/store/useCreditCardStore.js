@@ -15,7 +15,7 @@ import useTransactionStore from './useTransactionStore'
  * บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน จึงไม่ถูกรวมเข้า total() ของกระเป๋าเงิน
  * ยอดรวมหน้าแรกยังตอบคำถามว่า "มีเงินเท่าไร" ไม่ใช่ "รวยเท่าไร"
  */
-export const INITIAL = { cards: [], statements: [], installments: [], entries: [], closing: false }
+export const INITIAL = { cards: [], statements: [], installments: [], entries: [], advances: [], closing: false }
 
 const useCreditCardStore = create((set, get) => ({
   ...INITIAL,
@@ -26,16 +26,18 @@ const useCreditCardStore = create((set, get) => ({
     statements: data?.statements ?? [],
     installments: data?.installments ?? [],
     entries: data?.entries ?? [],
+    advances: data?.advances ?? [],
   }),
 
   refresh: async () => {
-    const [cards, statements, inst] = await Promise.all([
+    const [cards, statements, inst, advances] = await Promise.all([
       cardApi.listCreditCards(),
       stmtApi.listCardStatements(),
       instApi.listInstallments(),
+      cardApi.listCardAdvances(),
     ])
-    set({ cards, statements, installments: inst.installments, entries: inst.entries })
-    return { cards, statements, ...inst }
+    set({ cards, statements, installments: inst.installments, entries: inst.entries, advances })
+    return { cards, statements, advances, ...inst }
   },
 
   // ── จัดการบัตร ────────────────────────────────────────────────────────────
@@ -56,6 +58,23 @@ const useCreditCardStore = create((set, get) => ({
     await cardApi.deleteCreditCard(id)
     set((s) => ({ cards: s.cards.filter((c) => c.id !== id) }))
   },
+
+  // ── กดเงินสด ───────────────────────────────────────────────────────────
+
+  /** ยอดหนี้และเงินในกระเป๋าขยับที่เซิร์ฟเวอร์ — ดึงทั้งชุดกลับมาแทนการเดา */
+  cashAdvance: async (cardId, params) => {
+    const advance = await cardApi.cashAdvance(cardId, params)
+    await get().refresh()
+    return advance
+  },
+
+  undoAdvance: async (advanceId, log) => {
+    await cardApi.undoCashAdvance(advanceId, log)
+    await get().refresh()
+  },
+
+  /** รายการกดเงินสดของบัตร ใหม่สุดก่อน */
+  getAdvances: (cardId) => get().advances.filter((a) => a.cardId === cardId),
 
   /** ปรับยอดหนี้ยกมา — delta เป็นบวกคือหนี้เพิ่ม */
   adjustOutstanding: async (id, delta) => {
@@ -387,7 +406,14 @@ const useCreditCardStore = create((set, get) => ({
 
     const spend = txs.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0)
     const credit = txs.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0)
-    return { ...period, spend, credit, net: spend - credit, count: txs.length }
+    // เงินสดที่กดจากบัตรไม่ใช่รายการรับ-จ่าย แต่ธนาคารเรียกเก็บในบิลรอบนี้เหมือนยอดรูด
+    const adv = get().advances.filter((a) => a.cardId === cardId && a.date >= from && a.date <= to)
+    const advance = adv.reduce((s, a) => s + Number(a.amount || 0), 0)
+    return {
+      ...period, spend, credit, advance,
+      net: spend + advance - credit,
+      count: txs.length + adv.length,
+    }
   },
 }))
 

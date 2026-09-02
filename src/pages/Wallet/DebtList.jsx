@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
+import { Link } from 'react-router-dom'
 import useDebtStore from '../../store/useDebtStore'
 import useWalletStore from '../../store/useWalletStore'
 import useLogStore from '../../store/useLogStore'
@@ -9,7 +10,6 @@ import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import DatePicker from '../../components/shared/DatePicker'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import PayDebtPopup from '../../components/shared/PayDebtPopup'
-import DebtFields, { EMPTY_DEBT, computeDebt, validateDebt } from '../../components/shared/DebtFields'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -18,35 +18,6 @@ const STATUS = {
   pending:   { label: 'ยังไม่ถึง', cls: 'bg-gray-50 text-gray-500 border-gray-200' },
   prepaid:   { label: 'ผ่อนมาก่อนใช้ระบบ', cls: 'bg-slate-50 text-slate-500 border-slate-200' },
   cancelled: { label: 'ยกเลิก', cls: 'bg-gray-50 text-gray-400 border-gray-200 line-through' },
-}
-
-function DebtFormPopup({ onSave, onClose, busy }) {
-  const [v, setV] = useState({ ...EMPTY_DEBT })
-  const [error, setError] = useState('')
-  const calc = computeDebt(v)
-  const submit = () => {
-    const err = validateDebt(v, calc)
-    if (err) return setError(err)
-    onSave(v, calc)
-  }
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
-          <h3 className="font-semibold text-base">📒 เพิ่มหนี้สิน</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-        <div className="p-5">
-          <DebtFields value={v} onChange={(x) => { setV(x); setError('') }} />
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">⚠️ {error}</p>}
-        </div>
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? '⏳' : 'บันทึกหนี้สิน'}</button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function SettlePopup({ debt, progress, onConfirm, onCancel, busy }) {
@@ -199,11 +170,10 @@ function DebtCard({ debt, onPay, onUndo, onSettle, onCancelDebt }) {
 export default function DebtList() {
   const debts = useDebtStore((s) => s.debts)
   const totals = useDebtStore((s) => s.getTotals())
-  const { createDebt, payEntry, undoEntry, settleDebt, cancelDebt } = useDebtStore()
+  const { payEntry, undoEntry, settleDebt, cancelDebt } = useDebtStore()
   const refreshWallet = useWalletStore((s) => s.refresh)
   const { addLog } = useLogStore()
 
-  const [formOpen, setFormOpen] = useState(false)
   const [payTarget, setPayTarget] = useState(null)
   const [undoTarget, setUndoTarget] = useState(null)
   const [settleTarget, setSettleTarget] = useState(null)
@@ -217,22 +187,6 @@ export default function DebtList() {
     setBusy(true); setError('')
     try { await fn() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
-
-  const handleCreate = (v, calc) => run(async () => {
-    const isRecv = v.direction === 'receivable'
-    await createDebt({
-      direction: v.direction, name: v.name.trim(), counterparty: v.counterparty.trim(),
-      principalAmount: calc.principal, totalAmount: calc.total, months: calc.months,
-      monthlyAmount: calc.monthly, interestRate: v.mode === 'calc' ? Number(v.rate) || 0 : 0,
-      prepaidCount: calc.prepaidCount, firstDue: format(calc.firstDue, 'yyyy-MM-dd'), dueDay: calc.dueDay,
-      defaultMethod: v.method, defaultAccountId: v.method === 'transfer' ? v.accountId : null,
-    }, calc.rows, buildLogEntry({
-      activityType: 'DEBT_CREATE',
-      description: `${isRecv ? 'ให้ยืม' : 'เพิ่มหนี้'} "${v.name}" ${fmt(calc.total)} บาท ${calc.months} งวด งวดละ ${fmt(calc.monthly)}` + (calc.prepaidCount ? ` · ผ่อนมาแล้ว ${calc.prepaidCount} งวด` : ''),
-      newValue: { name: v.name, direction: v.direction, total: calc.total, months: calc.months, prepaid: calc.prepaidCount },
-    }))
-    setFormOpen(false)
-  })
 
   const handlePay = ({ method, accountId, amount, date }) => run(async () => {
     const { debt, entry } = payTarget
@@ -303,7 +257,7 @@ export default function DebtList() {
             </div>
           )}
         </div>
-        <button className="btn btn-primary text-xs shrink-0" onClick={() => setFormOpen(true)}>+ เพิ่มหนี้สิน</button>
+        <Link to="/manage/debts" className="btn btn-secondary text-xs shrink-0">จัดการหนี้สิน</Link>
       </div>
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
@@ -312,7 +266,10 @@ export default function DebtList() {
         <div className="text-center py-8 text-gray-400">
           <div className="text-3xl mb-2">📒</div>
           <p className="text-sm">ยังไม่มีหนี้สิน</p>
-          <p className="text-xs mt-1">ผ่อนบ้าน ผ่อนรถ เงินกู้ หรือเงินที่ให้คนอื่นยืม</p>
+          <p className="text-xs mt-1">
+            เพิ่มได้ที่{' '}
+            <Link to="/manage/debts" className="text-blue-600 hover:underline">จัดการข้อมูล → หนี้สิน</Link>
+          </p>
         </div>
       ) : (
         <>
@@ -340,7 +297,6 @@ export default function DebtList() {
         </>
       )}
 
-      {formOpen && <DebtFormPopup onSave={handleCreate} onClose={() => setFormOpen(false)} busy={busy} />}
       {payTarget && <PayDebtPopup debt={payTarget.debt} entry={payTarget.entry} progress={payTarget.progress} onConfirm={handlePay} onCancel={() => setPayTarget(null)} busy={busy} />}
       {settleTarget && <SettlePopup debt={settleTarget.debt} progress={settleTarget.progress} onConfirm={handleSettle} onCancel={() => setSettleTarget(null)} busy={busy} />}
 

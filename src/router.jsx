@@ -15,7 +15,7 @@ import PendingTasksPage from './pages/PendingTasks'
  *   นำเข้าข้อมูล / สำรองข้อมูล → xlsx
  * ก่อนแยก ทุกหน้าต้องรอไฟล์พวกนี้โหลดจบก่อนถึงจะเห็นหน้าแรก
  */
-const CategoriesPage = lazy(() => import('./pages/Categories'))
+const ManagePage = lazy(() => import('./pages/Manage'))
 const ReportsPage = lazy(() => import('./pages/Reports'))
 const HistoryPage = lazy(() => import('./pages/History'))
 const ImportPage = lazy(() => import('./pages/Import'))
@@ -48,7 +48,10 @@ export const router = createHashRouter([
       { path: 'pending-tasks', element: <PendingTasksPage /> },
       { path: 'wallet/pending', element: <Navigate to="/pending-tasks" replace /> },
       { path: 'transactions', element: <TransactionsPage /> },
-      { path: 'categories', element: lazyRoute(CategoriesPage) },
+      // จัดการข้อมูล — หมวดหมู่ / บัญชีธนาคาร / บัตรเครดิต / หนี้สิน อยู่ใต้เมนูเดียว
+      { path: 'manage', element: <Navigate to="/manage/categories" replace /> },
+      { path: 'manage/:tab', element: lazyRoute(ManagePage) },
+      { path: 'categories', element: <Navigate to="/manage/categories" replace /> },
       { path: 'reports', element: lazyRoute(ReportsPage) },
       { path: 'history', element: lazyRoute(HistoryPage) },
       { path: 'import', element: lazyRoute(ImportPage) },

@@ -200,7 +200,7 @@ export default function ExpenseForm() {
         categoryId: form.category || null, note: form.note,
         principalAmount: calc.principal, totalAmount: calc.total, months: calc.months,
         monthlyAmount: calc.monthly, interestRate: v.mode === 'calc' ? Number(v.rate) || 0 : 0,
-        prepaidCount: calc.prepaidCount, firstDue: toDateString(calc.firstDue), dueDay: calc.dueDay,
+        prepaidCount: calc.prepaidCount, firstDue: toDateString(calc.firstDue), dueDay: calc.dueDay, term: calc.term,
         defaultMethod: v.method, defaultAccountId: v.method === 'transfer' ? v.accountId : null,
       }, calc.rows, buildLogEntry({
         activityType: 'DEBT_CREATE',

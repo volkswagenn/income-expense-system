@@ -7,7 +7,7 @@ const MENU = [
   { to: '/dashboard',     icon: 'space_dashboard',        label: 'ภาพรวม' },
   { to: '/wallet',        icon: 'account_balance_wallet', label: 'กระเป๋าเงินหลัก' },
   { to: '/transactions',  icon: 'edit_note',              label: 'บันทึกรายรับ-รายจ่าย', badges: ['recurring'], badgeTone: 'amber' },
-  { to: '/categories',    icon: 'category',               label: 'จัดการหมวดหมู่', sub: true },
+  { to: '/manage',        icon: 'database',               label: 'จัดการข้อมูล' },
   { to: '/pending-tasks', icon: 'pending_actions',        label: 'รายการรอดำเนินการ', badges: ['pending', 'income'], badgeTone: 'red' },
   { to: '/reports',       icon: 'bar_chart',              label: 'รายงาน' },
   { to: '/history',       icon: 'history',                label: 'ประวัติทั้งหมด' },

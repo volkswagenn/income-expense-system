@@ -25,6 +25,8 @@ const NUMERIC_FIELDS = new Set([
   'previousBalance', 'spendAmount', 'creditAmount', 'minimumAmount', 'paidAmount', 'autopayAmount',
   // ผ่อนชำระ
   'totalAmount', 'principalAmount', 'months', 'monthlyAmount', 'interestRate', 'seq', 'prepaidCount',
+  // จัดการข้อมูล — ค่าธรรมเนียมรายปี / กดเงินสด
+  'annualFee', 'annualFeeMonth', 'fee', 'advanceAmount',
 ])
 
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())

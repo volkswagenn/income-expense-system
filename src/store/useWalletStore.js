@@ -56,8 +56,8 @@ const useWalletStore = create((set, get) => ({
 
   // ── บัญชีเงินโอน ──────────────────────────────────────────────────────────
 
-  createTransferAccount: async ({ bankName, name, initialBalance = 0 }) => {
-    const account = await walletApi.createTransferAccount({ bankName, name, initialBalance })
+  createTransferAccount: async (data) => {
+    const account = await walletApi.createTransferAccount(data)
     set((s) => syncedAccounts([...s.transferAccounts, account]))
     return account
   },

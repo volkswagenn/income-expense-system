@@ -88,9 +88,9 @@ export async function returnLoan({ loanId, method, accountId = null, log = null 
 
 // ── บัญชีเงินโอน ────────────────────────────────────────────────────────────
 
-export async function createTransferAccount({ bankName = '', name = '', initialBalance = 0 }) {
+export async function createTransferAccount({ bankName = '', name = '', kind = 'savings', accountNo = '', initialBalance = 0 }) {
   const row = toRow('transfer_accounts', {
-    shopId: getShopId(), bankName, name, balance: Number(initialBalance) || 0,
+    shopId: getShopId(), bankName, name, kind, accountNo: accountNo || null, balance: Number(initialBalance) || 0,
   })
   return fromRow('transfer_accounts', await unwrap(
     supabase.from('transfer_accounts').insert(row).select().single()
@@ -98,8 +98,8 @@ export async function createTransferAccount({ bankName = '', name = '', initialB
 }
 
 /** แก้ได้เฉพาะชื่อ/ธนาคาร/ลำดับ — ยอดต้องไปทาง adjustTransferAccount เท่านั้น */
-export async function updateTransferAccount(id, { bankName, name, sortOrder }) {
-  const row = toRow('transfer_accounts', { bankName, name, sortOrder })
+export async function updateTransferAccount(id, { bankName, name, kind, accountNo, sortOrder }) {
+  const row = toRow('transfer_accounts', { bankName, name, kind, accountNo, sortOrder })
   return fromRow('transfer_accounts', await unwrap(
     supabase.from('transfer_accounts').update(row).eq('id', id).select().single()
   ))

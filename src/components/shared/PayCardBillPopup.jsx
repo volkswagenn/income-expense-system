@@ -46,7 +46,6 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
   const submit = () => {
     if (busy) return
     if (!(value > 0)) return setError('ใส่จำนวนเงินที่จะจ่าย')
-    if (value > remaining) return setError(`จ่ายได้ไม่เกินยอดที่ค้างอยู่ ${fmt(remaining)} บาท`)
     const resolved = method === 'transfer' ? resolveAccount(accountId) : null
     if (method === 'transfer' && !resolved) return setError('เลือกบัญชีที่จะจ่าย')
     onConfirm({ method, accountId: resolved, amount: value, date })
@@ -124,6 +123,13 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
                 ไม่ใช่คิดจากยอดที่เหลือ
               </p>
               <p>ยอดที่เหลือ {fmt(remaining - value)} บาท จะถูกยกไปรวมในบิลรอบถัดไป</p>
+            </div>
+          )}
+
+          {value > remaining && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+              💚 จ่ายเกิน {fmt(value - remaining)} บาท — ส่วนที่เกินจะเป็นเครดิตในบัตร
+              และถูกหักออกจากบิลรอบถัดไปให้เอง
             </div>
           )}
 

@@ -40,6 +40,8 @@ create table if not exists debts (
   interest_rate      numeric(5,2) not null default 0,   -- ต่อเดือน แบบคงที่
   tiers              jsonb,                              -- ช่วงราคาถ้าค่างวดไม่เท่ากัน
   prepaid_count      int not null default 0,             -- ผ่อนมาก่อนเริ่มใช้ระบบ
+  term               text not null default 'long'
+                     check (term in ('short', 'long')),  -- ระยะสั้น = ผ่อนจบภายใน 1 ปี
 
   first_due          date not null,                      -- งวดแรกครบกำหนด
   due_day            int not null check (due_day between 1 and 31),
@@ -55,6 +57,11 @@ create table if not exists debts (
 );
 
 create index if not exists debts_shop_idx on debts (shop_id, status, direction);
+
+-- ระยะของหนี้ (จัดการข้อมูล → หนี้สิน) สำหรับฐานข้อมูลที่สร้างตาราง debts ไปก่อนหน้า
+alter table debts add column if not exists term text not null default 'long';
+alter table debts drop constraint if exists debts_term_check;
+alter table debts add  constraint debts_term_check check (term in ('short', 'long'));
 
 create table if not exists debt_entries (
   id                  uuid primary key default gen_random_uuid(),
@@ -103,7 +110,7 @@ begin
   insert into debts (
     shop_id, direction, name, counterparty, category_id, note,
     principal_amount, total_amount, months, monthly_amount, interest_rate,
-    tiers, prepaid_count, first_due, due_day,
+    tiers, prepaid_count, first_due, due_day, term,
     default_method, default_account_id, created_by
   ) values (
     p_shop,
@@ -121,6 +128,7 @@ begin
     coalesce((p_data->>'prepaid_count')::int, 0),
     (p_data->>'first_due')::date,
     (p_data->>'due_day')::int,
+    case when p_data->>'term' = 'short' then 'short' else 'long' end,
     nullif(p_data->>'default_method', ''),
     nullif(p_data->>'default_account_id', '')::uuid,
     auth.uid()
@@ -349,6 +357,7 @@ begin
   delete from transactions             where shop_id = p_shop;
   delete from debt_entries             where shop_id = p_shop;
   delete from debts                    where shop_id = p_shop;
+  delete from card_advances            where shop_id = p_shop;
   delete from card_installment_entries where shop_id = p_shop;
   delete from card_installments        where shop_id = p_shop;
   delete from recurring_entries        where shop_id = p_shop;
