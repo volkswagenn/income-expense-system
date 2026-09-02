@@ -10,6 +10,9 @@ import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
+import PayFromPicker from '../../components/shared/PayFromPicker'
+import DebtFields, { EMPTY_DEBT, computeDebt, validateDebt } from '../../components/shared/DebtFields'
+import useDebtStore from '../../store/useDebtStore'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import {
@@ -33,6 +36,7 @@ const EMPTY = {
   installmentMode: 'even',
   installmentTiers: [{ from: 1, to: 6, amount: '' }, { from: 7, to: 6, amount: '' }],
   installmentPrepaid: false, installmentPrepaidCount: '',
+  debt: { ...EMPTY_DEBT },
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
 
@@ -86,6 +90,7 @@ export default function ExpenseForm() {
   const refreshCards = useCreditCardStore((s) => s.refresh)
   const createInstallment = useCreditCardStore((s) => s.createInstallment)
   const cards = useCreditCardStore((s) => s.cards)
+  const createDebt = useDebtStore((s) => s.createDebt)
 
   // สิ่งที่บันทึกลงเซิร์ฟเวอร์สำเร็จแล้วในรอบนี้ (รายการ / รายการค้าง) — ถ้าขั้นถัดไปล้ม
   // (เช่นสร้างการ์ดรอใบกำกับภาษีไม่สำเร็จ) ผู้ใช้กดบันทึกซ้ำได้โดยไม่สร้างรายการ
@@ -95,6 +100,10 @@ export default function ExpenseForm() {
   const set = (k, v) => {
     savedRef.current = { tx: null, pending: null, installment: null }
     setForm((f) => ({ ...f, [k]: v }))
+  }
+  const setMany = (patch) => {
+    savedRef.current = { tx: null, pending: null, installment: null }
+    setForm((f) => ({ ...f, ...patch }))
   }
 
   const logVendorAdd = async (name) => {
@@ -177,6 +186,30 @@ export default function ExpenseForm() {
         walletEffect: null,
       }))
       savedRef.current.pending = pending
+    } else if (form.method === 'debt' && savedRef.current.installment) {
+      // หนี้สินถูกสร้างไปแล้วในรอบก่อน — ห้ามสร้างซ้ำ
+    } else if (form.method === 'debt') {
+      // กู้ยืม: บันทึกเป็นหนี้สินที่มีตารางงวด ยังไม่สร้างรายจ่ายและยังไม่ขยับเงิน
+      // เงินจะขยับตอนกดจ่ายทีละงวด ซึ่งตอนนั้นค่อยเป็นรายจ่ายจริง
+      const v = { ...form.debt, name: form.itemName }
+      const calc = computeDebt(v)
+      if (!calc) throw new Error('ข้อมูลหนี้สินยังไม่ครบ')
+      const isRecv = v.direction === 'receivable'
+      const debt = await createDebt({
+        direction: v.direction, name: form.itemName, counterparty: v.counterparty.trim(),
+        categoryId: form.category || null, note: form.note,
+        principalAmount: calc.principal, totalAmount: calc.total, months: calc.months,
+        monthlyAmount: calc.monthly, interestRate: v.mode === 'calc' ? Number(v.rate) || 0 : 0,
+        prepaidCount: calc.prepaidCount, firstDue: toDateString(calc.firstDue), dueDay: calc.dueDay,
+        defaultMethod: v.method, defaultAccountId: v.method === 'transfer' ? v.accountId : null,
+      }, calc.rows, buildLogEntry({
+        activityType: 'DEBT_CREATE',
+        description:
+          `${isRecv ? 'ให้ยืม' : 'เพิ่มหนี้'} "${form.itemName}" ${calc.total.toLocaleString()} บาท ${calc.months} งวด งวดละ ${calc.monthly.toLocaleString()}` +
+          (calc.prepaidCount ? ` · ผ่อนมาแล้ว ${calc.prepaidCount} งวด` : ''),
+        newValue: { debtId: debt.id, name: form.itemName, direction: v.direction, total: calc.total, months: calc.months },
+      }))
+      savedRef.current.installment = debt
     } else if (isInstallment && savedRef.current.installment) {
       // สัญญาผ่อนถูกสร้างไปแล้วในรอบก่อน — ห้ามสร้างซ้ำ
     } else if (isInstallment) {
@@ -303,6 +336,15 @@ export default function ExpenseForm() {
 
   const handleSave = () => {
     if (!form.itemName) return setErrMsg('กรุณาใส่รายการจ่าย')
+    // กู้ยืมไม่ใช้ช่องจำนวนเงินของฟอร์ม ยอดอยู่ในส่วนหนี้สิน และไม่ต้องเช็คยอดติดลบ
+    if (form.method === 'debt') {
+      const v = { ...form.debt, name: form.itemName }
+      const err = validateDebt(v, computeDebt(v))
+      if (err) return setErrMsg(err)
+      setErrMsg('')
+      execute()
+      return
+    }
     if (!form.amount || Number(form.amount) <= 0) return setErrMsg('กรุณาใส่จำนวนเงิน')
     if (form.method === 'transfer' && !resolveAccount(form.transferAccountId)) {
       return setErrMsg('กรุณาเลือกบัญชีที่จะจ่ายเงินโอน')
@@ -485,33 +527,22 @@ export default function ExpenseForm() {
             <label className="label">จำนวนเงิน (บาท)</label>
             <AmountInput className="input" value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" />
           </div>
-          <div className="space-y-2">
-            <div>
-              <label className="label">วิธีชำระเงิน</label>
-              <select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}>
-                <option value="cash">💵 เงินสด</option>
-                <option value="transfer">🏦 เงินโอน</option>
-                <option value="card">💳 บัตรเครดิต</option>
-                <option value="pending">⏳ ค้างชำระ</option>
-              </select>
-            </div>
-            {/* ระบุบัญชีที่จะตัดเงิน */}
-            {form.method === 'transfer' && (
-              <TransferAccountPicker
-                value={form.transferAccountId}
-                onChange={(v) => set('transferAccountId', v)}
-                label="ตัดจากบัญชี"
-              />
-            )}
-            {form.method === 'card' && (
-              <CreditCardPicker
-                value={form.cardId}
-                onChange={(v) => set('cardId', v)}
-                label="รูดบัตร"
-              />
-            )}
+          <div>
+            <PayFromPicker
+              value={{ method: form.method, transferAccountId: form.transferAccountId, cardId: form.cardId }}
+              onChange={setMany}
+              options={['cash', 'transfer', 'card', 'debt', 'pending']}
+            />
           </div>
         </div>
+
+        {/* กู้ยืม: สร้างเป็นหนี้สินที่มีตารางงวด ยังไม่ตัดเงินและยังไม่สร้างรายจ่าย */}
+        {form.method === 'debt' && (
+          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
+            <p className="text-xs text-amber-800 font-medium">📒 กู้ยืม / ผ่อนกับสถาบัน — บันทึกเป็นหนี้สิน ชื่อรายการใช้จากช่องด้านบน</p>
+            <DebtFields value={form.debt} onChange={(d) => set('debt', d)} hideName />
+          </div>
+        )}
 
         {/* ผู้ใช้ไม่ต้องรู้เรื่องวันสรุปยอด — ระบบตอบคำถามเดียวที่เขาสนใจจริงๆ
             คือต้องหาเงินมาจ่ายเมื่อไร */}

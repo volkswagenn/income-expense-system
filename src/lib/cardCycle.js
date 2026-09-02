@@ -247,6 +247,51 @@ export function latestPurchaseDateFor(card, n, from = new Date()) {
   return null
 }
 
+/**
+ * ตารางงวดหนี้สิน — ง่ายกว่าบัตร เพราะไม่มีรอบบิลมาเกี่ยว
+ * งวดแรกครบกำหนดวันที่ firstDue แล้วไล่เดือนละงวดที่วัน dueDay หนีบไม่ให้ล้นเดือน
+ * amounts เป็นเลขเดียว (ทุกงวดเท่ากัน) หรือ array ช่วงราคาแบบเดียวกับ tieredSchedule
+ */
+export function debtSchedule(firstDue, months, dueDay, amounts) {
+  const tiers = Array.isArray(amounts) ? amounts : null
+  const flat = tiers ? 0 : Number(amounts) || 0
+  const amountOf = (seq) => {
+    if (!tiers) return flat
+    const t = tiers.find((x) => seq >= Number(x.from) && seq <= Number(x.to))
+    return t ? Number(t.amount) || 0 : 0
+  }
+  const rows = []
+  for (let i = 0; i < months; i++) {
+    const due = clampedDate(firstDue.getFullYear(), firstDue.getMonth() + i, dueDay)
+    rows.push({ seq: i + 1, dueDate: due, amount: amountOf(i + 1) })
+  }
+  return rows
+}
+
+/** งวดหนี้ที่ครบกำหนดไปแล้ว ถ้างวดแรกครบกำหนดวันนั้น */
+export function maxPrepaidForDebt(firstDue, dueDay, from = new Date()) {
+  const today = atMidnight(from)
+  let n = 0
+  for (let i = 0; i < 600; i++) {
+    if (clampedDate(firstDue.getFullYear(), firstDue.getMonth() + i, dueDay) > today) break
+    n++
+  }
+  return n
+}
+
+/** วันงวดแรกล่าสุดที่ยังผ่อนมาแล้ว n งวดได้ — เสนอให้ผู้ใช้กดแก้เลย */
+export function latestFirstDueFor(dueDay, n, from = new Date()) {
+  if (!(n > 0)) return null
+  const today = atMidnight(from)
+  // งวดที่ n ต้องครบกำหนดไม่เกินวันนี้ → งวดแรกอยู่ก่อนหน้านั้น n-1 เดือน
+  for (let m = 0; m < 600; m++) {
+    const first = clampedDate(today.getFullYear(), today.getMonth() - m, dueDay)
+    const last = clampedDate(first.getFullYear(), first.getMonth() + (n - 1), dueDay)
+    if (last <= today) return first
+  }
+  return null
+}
+
 /** จำนวนวันจากวันนี้ถึงวันที่ระบุ — ติดลบแปลว่าเลยมาแล้ว */
 export function daysUntil(date, from = new Date()) {
   const MS_PER_DAY = 86_400_000

@@ -3,8 +3,10 @@ import PendingPaymentSummary from '../Wallet/PendingPaymentSummary'
 import PendingIncomeSummary from '../Wallet/PendingIncomeSummary'
 import SectionCard from '../../components/shared/SectionCard'
 import usePendingStore from '../../store/usePendingStore'
+import ObligationsTab from './ObligationsTab'
 
 const TABS = [
+  { key: 'all', label: '💸 สิ่งที่ต้องจ่าย' },
   { key: 'payment', label: 'ค้างจ่าย' },
   { key: 'income', label: 'รอรับเงิน' },
 ]
@@ -53,6 +55,11 @@ export default function PendingTasksPage() {
         ))}
       </div>
 
+      {tab === 'all' && (
+        <SectionCard title="รวมทุกอย่างที่ต้องจ่าย เรียงตามวันครบกำหนด">
+          <ObligationsTab />
+        </SectionCard>
+      )}
       {tab === 'payment' && (
         <SectionCard title="รายการค้างจ่าย">
           <PendingPaymentSummary fullPage />

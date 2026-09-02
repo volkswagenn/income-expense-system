@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import MainWalletCard from './MainWalletCard'
 import CreditCardList from './CreditCardList'
+import DebtList from './DebtList'
 import LoanSummary from './LoanSummary'
 import SubWalletList from './SubWalletList'
 import TransferAccountList from './TransferAccountList'
 import SectionCard from '../../components/shared/SectionCard'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
+import useDebtStore from '../../store/useDebtStore'
 import useRecurringStore from '../../store/useRecurringStore'
 
 function CollapseBtn({ collapsed, onToggle }) {
@@ -67,6 +69,7 @@ export default function WalletPage() {
   const [collapsed, setCollapsed] = useState({
     accounts: false,
     cards: false,
+    debts: false,
     recurring: false,
     loans: false,
     sub: false,
@@ -79,6 +82,7 @@ export default function WalletPage() {
   const subCount = useWalletStore((s) => s.subWallets.length)
   const accountCount = useWalletStore((s) => s.transferAccounts.length)
   const cardCount = useCreditCardStore((s) => s.cards.length)
+  const debtCount = useDebtStore((s) => s.debts.filter((d) => d.status === 'active').length)
 
   return (
     <div className="space-y-5">
@@ -97,6 +101,13 @@ export default function WalletPage() {
         action={<CollapseBtn collapsed={collapsed.cards} onToggle={() => toggle('cards')} />}
       >
         {!collapsed.cards && <CreditCardList />}
+      </SectionCard>
+
+      <SectionCard
+        title={<>📒 หนี้สิน{collapsed.debts && <CountBadge count={debtCount} />}</>}
+        action={<CollapseBtn collapsed={collapsed.debts} onToggle={() => toggle('debts')} />}
+      >
+        {!collapsed.debts && <DebtList />}
       </SectionCard>
 
       <SectionCard

@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import useAppStore from '../store/useAppStore'
 import useCategoryStore from '../store/useCategoryStore'
 import useCreditCardStore from '../store/useCreditCardStore'
+import useDebtStore from '../store/useDebtStore'
 import useNoteStore from '../store/useNoteStore'
 import usePendingStore from '../store/usePendingStore'
 import useRecurringStore from '../store/useRecurringStore'
@@ -33,6 +34,8 @@ const TABLE_STORES = {
   card_statements: [useCreditCardStore],
   card_installments: [useCreditCardStore],
   card_installment_entries: [useCreditCardStore],
+  debts: [useDebtStore],
+  debt_entries: [useDebtStore],
   pending_payments: [usePendingStore],
   pending_incomes: [usePendingStore],
   tax_invoices: [usePendingStore],

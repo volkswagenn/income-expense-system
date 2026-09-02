@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
+import useDebtStore from '../../store/useDebtStore'
 import usePendingStore from '../../store/usePendingStore'
 import Icon from '../../components/shared/Icon'
 
@@ -37,14 +38,14 @@ function HeroCard({ total, cash, transfer, cardDebt = 0 }) {
           {cardDebt > 0 && (
             <div className="flex items-center gap-1.5">
               <Icon name="credit_card" size={16} className="text-[#F2A0A0]" />
-              <span className="text-[12px] text-[#9AA0A8]">หนี้บัตร</span>
+              <span className="text-[12px] text-[#9AA0A8]">หนี้รวม</span>
               <span className="text-[12.5px] text-[#F2A0A0] tabular-nums">{fmt(cardDebt)}</span>
             </div>
           )}
         </div>
         {cardDebt > 0 && (
           <p className="text-[11.5px] text-[#7C828A] mt-2.5 tabular-nums">
-            คงเหลือสุทธิหลังหักหนี้บัตร {fmt(total - cardDebt)} บาท
+            คงเหลือสุทธิหลังหักหนี้บัตรและกู้ยืม {fmt(total - cardDebt)} บาท
           </p>
         )}
       </div>
@@ -82,13 +83,14 @@ function StatCard({ icon, label, amount, tone, onClick, sub }) {
 export default function FinancialStatus() {
   const { cash, transfer } = useWalletStore()
   const cardDebt = useCreditCardStore((s) => s.getTotalOutstanding())
+  const loanDebt = useDebtStore((s) => s.getTotals().payable)
   const pendingTotal = usePendingStore((s) => s.getPendingTotal())
   const pendingIncomeTotal = usePendingStore((s) => s.getPendingIncomeTotal())
   const navigate = useNavigate()
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-      <HeroCard total={cash + transfer} cash={cash} transfer={transfer} cardDebt={cardDebt} />
+      <HeroCard total={cash + transfer} cash={cash} transfer={transfer} cardDebt={cardDebt + loanDebt} />
 
       <StatCard
         icon="schedule"
