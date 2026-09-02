@@ -10,6 +10,7 @@ import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import DatePicker from '../../components/shared/DatePicker'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import PayDebtPopup from '../../components/shared/PayDebtPopup'
+import SourceTag from '../../components/shared/SourceTag'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -79,8 +80,9 @@ function DebtCard({ debt, onPay, onUndo, onSettle, onCancelDebt }) {
             {debt.name}
             {!active && <span className="ml-2 text-xs font-normal text-gray-400">{debt.status === 'completed' ? 'ปิดแล้ว' : 'ยกเลิก'}</span>}
           </p>
-          <p className="text-xs text-gray-500 truncate">
-            {debt.counterparty || '—'} · <span className={`inline-block rounded-full border px-2 text-[10.5px] ${isRecv ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{isRecv ? 'คนอื่นติดเรา' : 'เราติดคนอื่น'}</span>
+          <p className="text-xs text-gray-500 truncate flex items-center gap-1.5 flex-wrap">
+            <SourceTag source={isRecv ? 'receivable' : 'debt'} detail={debt.counterparty || undefined} />
+            <span className="truncate">{isRecv ? 'คนอื่นติดเรา' : 'เราติดคนอื่น'}</span>
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -167,7 +169,7 @@ function DebtCard({ debt, onPay, onUndo, onSettle, onCancelDebt }) {
   )
 }
 
-export default function DebtList() {
+export default function DebtList({ embedded = false }) {
   const debts = useDebtStore((s) => s.debts)
   const totals = useDebtStore((s) => s.getTotals())
   const { payEntry, undoEntry, settleDebt, cancelDebt } = useDebtStore()
@@ -245,6 +247,15 @@ export default function DebtList() {
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
+        {embedded ? (
+          <div className="min-w-0">
+            <h2 className="section-title">📒 หนี้สินและลูกหนี้</h2>
+            <p className="text-xs text-gray-500 mt-1">
+              สัญญาผ่อน เงินกู้ และเงินที่ให้คนอื่นยืม — จ่ายทีละงวดได้ที่นี่
+              เงินออกจากกระเป๋าที่เลือกทันที ไม่ผ่านบิลบัตร
+            </p>
+          </div>
+        ) : (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex-1 min-w-0">
           <div className="flex justify-between gap-3 text-sm">
             <span className="text-amber-900">เราติดคนอื่น</span>
@@ -257,6 +268,7 @@ export default function DebtList() {
             </div>
           )}
         </div>
+        )}
         <Link to="/manage/debts" className="btn btn-secondary text-xs shrink-0">จัดการหนี้สิน</Link>
       </div>
 

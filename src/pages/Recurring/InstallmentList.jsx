@@ -12,6 +12,7 @@ import PickBillPopup from './PickBillPopup'
 import PayInstallmentPopup from './PayInstallmentPopup'
 import useWalletStore from '../../store/useWalletStore'
 import { formatIsoThai } from '../../lib/cardCycle'
+import SourceTag from '../../components/shared/SourceTag'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -83,6 +84,7 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
   const [open, setOpen] = useState(false)
   const progress = useCreditCardStore((s) => s.getInstallmentProgress(installment.id))
   const cardLabel = useCreditCardStore((s) => s.getCardLabel(installment.cardId))
+  const cardShort = useCreditCardStore((s) => s.getCardShortLabel(installment.cardId))
   const card = useCreditCardStore((s) => s.getCard(installment.cardId))
   if (!progress) return null
 
@@ -111,7 +113,10 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
               </span>
             )}
           </p>
-          <p className="text-xs text-gray-500 truncate">{cardLabel}</p>
+          <p className="text-xs text-gray-500 truncate flex items-center gap-1.5">
+            <SourceTag source="installment" detail={cardShort} />
+            <span className="truncate">{cardLabel}</span>
+          </p>
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs text-gray-400">คงเหลือ</p>
@@ -351,7 +356,7 @@ export default function InstallmentList() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-        <h2 className="section-title">ผ่อนชำระผ่านบัตรเครดิต</h2>
+        <h2 className="section-title">💳 ผ่อนชำระผ่านบัตรเครดิต</h2>
         <p className="text-xs text-gray-500 mt-1">
           รายการที่แบ่งจ่ายเป็นงวด แต่ละงวดถูกเรียกเก็บรวมในบิลบัตรอัตโนมัติ
           จึงจ่ายที่บิลไม่ใช่ที่ตัวรายการผ่อน เริ่มผ่อนได้จากฟอร์มบันทึกรายจ่าย

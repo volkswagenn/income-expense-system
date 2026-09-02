@@ -2,10 +2,12 @@ import { useState } from 'react'
 import IncomeForm from './IncomeForm'
 import ExpenseForm from './ExpenseForm'
 import RecurringPage from '../Recurring'
-import InstallmentList from '../Recurring/InstallmentList'
+import DebtHub from './DebtHub'
 import TransactionHistoryPanel from './TransactionHistoryPanel'
 import useRecurringStore from '../../store/useRecurringStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
+import useDebtStore from '../../store/useDebtStore'
+import usePendingStore from '../../store/usePendingStore'
 import SectionCard from '../../components/shared/SectionCard'
 
 /**
@@ -19,14 +21,20 @@ const TABS = [
   { key: 'income', label: '📥 บันทึกรายรับ' },
   { key: 'expense', label: '📤 บันทึกรายจ่าย' },
   { key: 'recurring', label: '🔁 รายการประจำ' },
-  { key: 'installment', label: '💳 ผ่อนชำระ' },
+  { key: 'installment', label: '💳 ผ่อนชำระ/หนี้สิน' },
   { key: 'history', label: '🔍 ค้นหารายการ' },
 ]
 
 export default function TransactionsPage() {
   const [tab, setTab] = useState('income')
   const recurringPendingCount = useRecurringStore((s) => s.getPendingCountCurrentMonth())
+  // นับรวมทุกแหล่งที่ยังเป็นหนี้อยู่ ไม่ใช่แค่ผ่อนบัตร เพราะแท็บนี้รวมมาหมดแล้ว
   const installmentCount = useCreditCardStore((s) => s.getActiveInstallments().length)
+  const debtCount = useDebtStore((s) => s.debts.filter((d) => d.status === 'active').length)
+  const pendingCount = usePendingStore((s) =>
+    s.pendingPayments.reduce((n, p) => n + (p.status === 'pending' ? 1 : 0), 0)
+  )
+  const obligationCount = installmentCount + debtCount + pendingCount
 
   return (
     <div className="space-y-5">
@@ -43,8 +51,8 @@ export default function TransactionsPage() {
             {t.key === 'recurring' && recurringPendingCount > 0 && (
               <span className="ml-1.5 badge badge-red">{recurringPendingCount}</span>
             )}
-            {t.key === 'installment' && installmentCount > 0 && (
-              <span className="ml-1.5 badge badge-red">{installmentCount}</span>
+            {t.key === 'installment' && obligationCount > 0 && (
+              <span className="ml-1.5 badge badge-red">{obligationCount}</span>
             )}
           </button>
         ))}
@@ -54,7 +62,7 @@ export default function TransactionsPage() {
         {tab === 'income' && <IncomeForm />}
         {tab === 'expense' && <ExpenseForm />}
         {tab === 'recurring' && <RecurringPage />}
-        {tab === 'installment' && <InstallmentList />}
+        {tab === 'installment' && <DebtHub />}
         {tab === 'history' && <TransactionHistoryPanel />}
       </SectionCard>
     </div>
