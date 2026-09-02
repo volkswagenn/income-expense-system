@@ -6,12 +6,17 @@ import { AuthProvider } from './auth/AuthProvider'
 import AuthGate from './auth/AuthGate'
 import DataGate from './auth/DataGate'
 import ErrorToast from './components/shared/ErrorToast'
+import { installGlobalFormUx } from './lib/formUx'
 import './index.css'
 
 // id ประจำการเปิดแท็บครั้งนี้ — ใช้ระบุที่มาของ log
 if (!sessionStorage.getItem('sessionId')) {
   sessionStorage.setItem('sessionId', crypto.randomUUID())
 }
+
+// พฤติกรรมฟอร์มที่ใช้ร่วมกันทั้งแอป: Enter = บันทึก, คลิกช่องตัวเลข = เลือกทั้งหมด,
+// กันกดปุ่มยืนยันซ้ำ — ติดตั้งครั้งเดียวก่อน render
+installGlobalFormUx()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
