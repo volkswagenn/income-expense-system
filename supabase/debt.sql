@@ -505,6 +505,96 @@ notify pgrst, 'reload schema';
 
 
 -- ###########################################################################
+-- ##  7. ซ่อมงวดที่หายไป
+-- ###########################################################################
+--
+-- ใช้เมื่อตารางงวดไม่ครบ เช่นเริ่มที่งวด 24 ทั้งที่สัญญามี 60 งวด
+--
+-- ที่มา: edit_debt รุ่นแรกล้างงวดที่ยังไม่จ่ายทิ้งแล้วข้ามการสร้างคืนผิดเงื่อนไข
+-- (ข้ามทุกงวดที่เลขน้อยกว่างวดสูงสุดที่จ่ายแล้ว) งวดที่ผ่อนมาก่อนใช้ระบบจึงหายไป
+-- รุ่นปัจจุบันแก้แล้ว บล็อกนี้มีไว้เติมของที่หายไปก่อนหน้ากลับคืน
+--
+-- ปลอดภัย: เติมเฉพาะเลขงวดที่ยังไม่มีในตาราง ไม่แตะงวดที่มีอยู่แล้วแม้แต่แถวเดียว
+-- รันซ้ำได้ ครั้งที่สองจะไม่มีอะไรให้เติมแล้ว
+
+do $repair$
+declare
+  v_d      record;
+  v_seq    int;
+  v_due    date;
+  v_amount numeric(14,2);
+  v_status text;
+  v_added  int := 0;
+  v_total  int := 0;
+begin
+  for v_d in
+    select d.*, (select count(*) from debt_entries e where e.debt_id = d.id) as have
+      from debts d
+     where d.status <> 'cancelled'
+  loop
+    if v_d.have >= v_d.months then
+      continue;   -- ครบอยู่แล้ว
+    end if;
+
+    -- สัญญาแบบค่างวดไม่เท่ากันคำนวณคืนไม่ได้จากข้อมูลที่เหลืออยู่ ข้ามไปเพื่อความปลอดภัย
+    if v_d.tiers is not null then
+      raise notice 'ข้าม "%": เป็นสัญญาค่างวดขั้นบันได ต้องแก้ด้วยมือ', v_d.name;
+      continue;
+    end if;
+
+    for v_seq in 1..v_d.months loop
+      if exists (select 1 from debt_entries where debt_id = v_d.id and seq = v_seq) then
+        continue;
+      end if;
+
+      -- วันครบกำหนดของงวดที่ n = เดือนของงวดแรก + (n-1) เดือน ตรึงวันที่ตาม due_day
+      -- ใช้ least() กันเดือนที่สั้นกว่า เช่น due_day = 31 แต่เดือนกุมภาพันธ์
+      v_due := make_date(
+        extract(year  from (v_d.first_due + make_interval(months => v_seq - 1)))::int,
+        extract(month from (v_d.first_due + make_interval(months => v_seq - 1)))::int,
+        least(
+          v_d.due_day,
+          extract(day from (
+            date_trunc('month', v_d.first_due + make_interval(months => v_seq - 1))
+            + interval '1 month - 1 day'
+          ))::int
+        )
+      );
+
+      v_amount := v_d.monthly_amount;
+      v_status := case when v_seq <= v_d.prepaid_count then 'prepaid' else 'pending' end;
+
+      insert into debt_entries (shop_id, debt_id, seq, due_date, amount, status)
+      values (v_d.shop_id, v_d.id, v_seq, v_due, v_amount, v_status);
+
+      v_added := v_added + 1;
+    end loop;
+
+    v_total := v_total + 1;
+    raise notice 'ซ่อม "%": เติมงวดที่หายไปครบ % งวดแล้ว', v_d.name, v_d.months;
+  end loop;
+
+  if v_added = 0 then
+    raise notice 'ไม่มีงวดที่หาย — ทุกสัญญาครบอยู่แล้ว';
+  else
+    raise notice 'เติมทั้งหมด % งวด จาก % สัญญา', v_added, v_total;
+  end if;
+end
+$repair$;
+
+-- ตรวจผล: คอลัมน์ "ขาด" ต้องเป็น 0 ทุกแถว
+select d.name as "สัญญา",
+       d.months as "งวดตามสัญญา",
+       count(e.id)::int as "งวดที่มีจริง",
+       (d.months - count(e.id))::int as "ขาด"
+  from debts d
+  left join debt_entries e on e.debt_id = d.id
+ where d.status <> 'cancelled'
+ group by d.id, d.name, d.months
+ order by d.name;
+
+
+-- ###########################################################################
 -- ##  ตรวจผลการติดตั้ง
 -- ###########################################################################
 
