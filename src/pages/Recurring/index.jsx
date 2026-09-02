@@ -360,6 +360,7 @@ export default function RecurringPage() {
                 onUndoPay={handleUndoPay}
                 onSkip={handleSkip}
                 onEdit={setEditItem}
+                onDelete={(it) => setDeleteItemId(it.id)}
               />
             )
           })}
