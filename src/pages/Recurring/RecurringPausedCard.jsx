@@ -1,5 +1,5 @@
 import useCategoryStore from '../../store/useCategoryStore'
-import { billedAmount, hasVat, isYearly, pauseLabel, scheduleLabel } from '../../lib/recurringSchedule'
+import { billedAmount, isYearly, pauseLabel, scheduleLabel, vatLabel } from '../../lib/recurringSchedule'
 
 /**
  * รายการที่ถูกพักการเรียกเก็บในเดือนที่กำลังดู
@@ -72,7 +72,7 @@ export default function RecurringPausedCard({ item, info, compact = false, onRes
           ) : (
             <p className="text-sm text-gray-400 italic">— ยอดเปลี่ยนแปลง</p>
           )}
-          {hasVat(item) && <p className="text-[11px] text-gray-400">รวม VAT {Number(item.vatRate)}%</p>}
+          {vatLabel(item) && <p className="text-[11px] text-gray-400">{vatLabel(item)}</p>}
 
           <div className="flex gap-1.5 mt-2 justify-end flex-wrap">
             <button onClick={() => onResume(item)} className="btn btn-secondary text-xs py-1 px-3" title="ยกเลิกการพัก">

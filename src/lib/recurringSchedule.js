@@ -31,31 +31,68 @@ export function scheduleLabel(item, { short = false } = {}) {
 
 // ── VAT ─────────────────────────────────────────────────────────────────────
 
+//
+// มี 3 แบบ เพราะใบเรียกเก็บจริงมาได้ทั้งสองหน้า
+//   none     ยอดที่กรอกคือยอดสุทธิ ไม่เกี่ยวกับภาษี (ค่าตั้งต้น)
+//   included ยอดที่กรอกรวม VAT มาแล้ว — ใช้ตอนกรอกตามยอดที่ถูกเรียกเก็บมาเป๊ะๆ
+//            ระบบถอดฐานภาษีให้ดูได้ แต่ยอดที่ต้องจ่ายเท่ากับที่กรอก
+//   add      ยอดที่กรอกยังไม่รวม VAT ระบบบวกให้ตอนออกบิล
+//
+// fixedAmount เก็บ "ตัวเลขที่ผู้ใช้กรอก" เสมอไม่ว่าโหมดไหน การสลับโหมดจึงไม่ทำให้
+// ยอดเพี้ยนหรือบวกซ้อนกัน ยอดที่ต้องจ่ายให้อ่านจาก billedAmount() ทุกที่
+
 /** อัตรา VAT มาตรฐานของไทย เก็บเป็นตัวเลขในฐานข้อมูลเผื่อวันหน้าเปลี่ยน */
 export const VAT_RATE = 7
 
+export const VAT_MODES = [
+  { value: 'none', label: 'ไม่มี VAT', desc: 'ยอดสุทธิ' },
+  { value: 'included', label: 'รวม VAT', desc: 'ยอดที่กรอกรวมแล้ว' },
+  { value: 'add', label: `+VAT ${VAT_RATE}%`, desc: 'บวกเพิ่มให้' },
+]
+
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
-export const hasVat = (item) => Number(item?.vatRate ?? 0) > 0
-
 /**
- * ยอดที่เรียกเก็บจริง
- *
- * fixedAmount เก็บ "ยอดก่อน VAT" เสมอ ส่วน vatRate บอกว่าต้องบวกกี่เปอร์เซ็นต์
- * เก็บแยกกันแบบนี้เพื่อให้กดปิด VAT แล้วได้ยอดเดิมกลับมาตรงๆ ถ้าเก็บยอดรวมไว้
- * ค่าเดียว พอเปิดปิดสลับไปมาจะบวกซ้อนกันจนยอดเพี้ยนโดยไม่มีทางย้อนกลับ
+ * โหมด VAT ของรายการ
+ * รายการเก่าที่มีแต่ vatRate ให้ถือเป็น add เพราะตอนนั้นมีความหมายเดียวคือบวกเพิ่ม
  */
-export function billedAmount(item) {
-  const base = Number(item?.fixedAmount ?? 0)
-  const rate = Number(item?.vatRate ?? 0)
-  return round2(rate > 0 ? base * (1 + rate / 100) : base)
+export function vatMode(item) {
+  const mode = item?.vatMode
+  if (mode === 'none' || mode === 'included' || mode === 'add') return mode
+  return Number(item?.vatRate ?? 0) > 0 ? 'add' : 'none'
 }
 
-/** ยอดฐาน + VAT จากตัวเลขดิบ ใช้ตอนแสดงตัวอย่างในฟอร์มที่ยังไม่ได้บันทึก */
-export function withVat(base, rate) {
-  const b = Number(base) || 0
+export const hasVat = (item) => vatMode(item) !== 'none'
+
+/** ยอดที่ต้องจ่ายจริง — มีแต่โหมด add เท่านั้นที่ยอดโตขึ้นจากที่กรอก */
+export function billedAmount(item) {
+  const base = Number(item?.fixedAmount ?? 0)
+  const rate = Number(item?.vatRate ?? VAT_RATE)
+  return round2(vatMode(item) === 'add' ? base * (1 + rate / 100) : base)
+}
+
+/** แยกยอดเป็นฐานภาษี / VAT / ยอดที่ต้องจ่าย ใช้แสดงรายละเอียดในฟอร์มและการ์ด */
+export function vatBreakdown(amount, mode, rate = VAT_RATE) {
+  const n = Number(amount) || 0
   const r = Number(rate) || 0
-  return round2(r > 0 ? b * (1 + r / 100) : b)
+  if (mode === 'add') {
+    const vat = round2(n * (r / 100))
+    return { base: round2(n), vat, total: round2(n + vat) }
+  }
+  if (mode === 'included') {
+    const base = round2(n / (1 + r / 100))
+    return { base, vat: round2(n - base), total: round2(n) }
+  }
+  return { base: round2(n), vat: 0, total: round2(n) }
+}
+
+/** ป้ายสั้นสำหรับการ์ด เช่น "รวม VAT 7%" */
+export function vatLabel(item) {
+  const mode = vatMode(item)
+  const rate = Number(item?.vatRate ?? VAT_RATE)
+  if (mode === 'add') return `+VAT ${rate}%`
+  if (mode === 'included') return `รวม VAT ${rate}%`
+  return ''
 }
 
 // ── พักการเรียกเก็บชั่วคราว ─────────────────────────────────────────────────

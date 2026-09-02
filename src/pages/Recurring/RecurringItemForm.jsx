@@ -2,7 +2,7 @@ import { useState } from 'react'
 import CategorySelect from '../../components/shared/CategorySelect'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import NumpadPopup from '../../components/shared/NumpadPopup'
-import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL, VAT_RATE, withVat } from '../../lib/recurringSchedule'
+import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL, VAT_MODES, VAT_RATE, vatBreakdown, vatMode } from '../../lib/recurringSchedule'
 
 const EMPTY = {
   name: '',
@@ -12,7 +12,7 @@ const EMPTY = {
   billingDay: '',
   frequency: 'monthly',       // monthly | yearly
   billingMonth: '',            // ใช้เฉพาะรายปี (1–12)
-  vatRate: 0,                 // 0 = ไม่บวก VAT, 7 = บวก VAT ไทย (fixedAmount เก็บยอดก่อนภาษี)
+  vatMode: 'none',            // none | included | add — fixedAmount เก็บตัวเลขที่กรอกเสมอ
   vendor: '',
   note: '',
   enabled: true,
@@ -41,7 +41,7 @@ function toFormValues(item) {
     fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '',
     frequency: item.frequency ?? 'monthly',
     billingMonth: item.billingMonth ?? '',
-    vatRate: Number(item.vatRate ?? 0),
+    vatMode: vatMode(item),
   }
   for (const key of TEXT_FIELDS) form[key] = form[key] ?? ''
   return form
@@ -84,7 +84,8 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
         billingDay: Number(form.billingDay),
         frequency: form.frequency === 'yearly' ? 'yearly' : 'monthly',
         billingMonth: form.frequency === 'yearly' ? Number(form.billingMonth) : null,
-        vatRate: form.amountType === 'fixed' ? Number(form.vatRate) || 0 : 0,
+        vatMode: form.amountType === 'fixed' ? (form.vatMode ?? 'none') : 'none',
+        vatRate: form.amountType === 'fixed' && form.vatMode !== 'none' ? VAT_RATE : 0,
         // ช่องที่ผู้ใช้ล้างต้องส่งเป็น null ไม่ใช่ undefined — toRow() ทิ้งคีย์ undefined
         // ทำให้ค่าเดิมค้างอยู่ในฐานข้อมูล (ลบโน้ตแล้วโน้ตไม่หาย, ยกเลิกวิธีจ่ายประจำแล้วยังถูกเลือกให้)
         fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : null,
@@ -175,37 +176,48 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
               />
               {error.fixedAmount && <p className="text-xs text-red-500 mt-1">{error.fixedAmount}</p>}
 
-              {/* VAT — ยอดที่กรอกคือยอดก่อนภาษี ระบบบวกให้ตอนออกบิล
-                  เก็บแยกกันแบบนี้เพื่อให้ปิด VAT แล้วได้ยอดเดิมกลับมา ไม่บวกซ้อนกันเอง */}
-              <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-700">เพิ่ม VAT {VAT_RATE}%</p>
-                  <p className="text-xs text-gray-400">ยอดที่กรอกคือยอดก่อนภาษี</p>
+              {/* VAT 3 แบบ — ตัวเลขในช่องยอดเงินคือ "ตัวที่ผู้ใช้กรอก" เสมอ ไม่ว่าเลือกแบบไหน
+                  สลับไปมาได้โดยยอดไม่เพี้ยนและไม่บวกซ้อนกันเอง */}
+              <div className="mt-2">
+                <div className="grid grid-cols-3 gap-2">
+                  {VAT_MODES.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => set('vatMode', opt.value)}
+                      className={`py-2 px-1 rounded-lg border-2 transition-all ${
+                        form.vatMode === opt.value
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      <p className="text-xs font-semibold leading-tight">{opt.label}</p>
+                      <p className="text-[10px] text-gray-400 leading-tight mt-0.5">{opt.desc}</p>
+                    </button>
+                  ))}
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={Number(form.vatRate) > 0}
-                  onClick={() => set('vatRate', Number(form.vatRate) > 0 ? 0 : VAT_RATE)}
-                  className={`relative w-11 h-6 flex-shrink-0 rounded-full transition-colors ${
-                    Number(form.vatRate) > 0 ? 'bg-blue-500' : 'bg-gray-300'
-                  }`}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                    Number(form.vatRate) > 0 ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
 
-              {Number(form.vatRate) > 0 && Number(form.fixedAmount) > 0 && (
-                <p className="text-xs text-blue-600 mt-1.5 text-right">
-                  ยอดที่จะเรียกเก็บ{' '}
-                  <span className="font-bold tabular-nums">
-                    {withVat(form.fixedAmount, form.vatRate).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
-                  </span>{' '}
-                  บาท ({Number(form.fixedAmount).toLocaleString('th-TH')} + VAT {VAT_RATE}%)
-                </p>
-              )}
+                {form.vatMode !== 'none' && Number(form.fixedAmount) > 0 && (() => {
+                  const b = vatBreakdown(form.fixedAmount, form.vatMode, VAT_RATE)
+                  const fmt = (n) => n.toLocaleString('th-TH', { minimumFractionDigits: 2 })
+                  return (
+                    <div className="mt-2 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2 text-xs space-y-0.5">
+                      <div className="flex justify-between text-gray-600">
+                        <span>ฐานภาษี</span>
+                        <span className="tabular-nums">{fmt(b.base)}</span>
+                      </div>
+                      <div className="flex justify-between text-gray-600">
+                        <span>VAT {VAT_RATE}%</span>
+                        <span className="tabular-nums">{fmt(b.vat)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-blue-700 pt-1 border-t border-blue-200">
+                        <span>ยอดที่จะเรียกเก็บ</span>
+                        <span className="tabular-nums">{fmt(b.total)} บาท</span>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
             </div>
           )}
 

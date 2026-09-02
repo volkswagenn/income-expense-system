@@ -8,6 +8,9 @@ import useNoteStore from '../../store/useNoteStore'
 import useRecurringStore from '../../store/useRecurringStore'
 import CalendarDayCell from './CalendarDayCell'
 import CalendarNotePopup from './CalendarNotePopup'
+import YearlyRecurringPopup from './YearlyRecurringPopup'
+import { isYearly, pauseInfo } from '../../lib/recurringSchedule'
+import { localMonthStr } from '../../lib/dateUtils'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -49,6 +52,7 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
     startDate ? new Date(startDate + 'T00:00:00').getMonth() : today.getMonth()
   )
   const [noteDate, setNoteDate] = useState(null)
+  const [showYearly, setShowYearly] = useState(false)
   const [show, setShow] = useState(ALL_ON)
 
   const toggleLayer = (key) => setShow((s) => ({ ...s, [key]: !s[key] }))
@@ -119,6 +123,18 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
     return map
   }, [taxInvoices])
 
+  // รายปีโผล่ในปฏิทินแค่เดือนเดียวจาก 12 เดือน จึงต้องมีทางเห็นได้ทุกเดือน
+  // (ปุ่มบนหัวปฏิทิน + ป้ายบนวันที่ 1 ของทุกเดือน)
+  const yearlyItems = useMemo(
+    () => recurringItems.filter((it) => it.enabled && !it.deleted && isYearly(it)),
+    [recurringItems]
+  )
+
+  const yearlyDueThisMonth = useMemo(() => {
+    const mon = viewMonth + 1
+    return yearlyItems.filter((it) => Number(it.billingMonth) === mon && !pauseInfo(it, localMonthStr()))
+  }, [yearlyItems, viewMonth])
+
   const recurringByDate = useMemo(() => {
     const map = {}
     recurringEntries.forEach((entry) => {
@@ -185,7 +201,21 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
             ›
           </button>
         </div>
-        <button className="btn btn-secondary text-sm" onClick={goToToday}>วันนี้</button>
+        <div className="flex items-center gap-2">
+          {yearlyItems.length > 0 && (
+            <button
+              className="btn btn-secondary text-sm gap-1"
+              onClick={() => setShowYearly(true)}
+              title="ดูรายจ่ายประจำแบบรายปีทั้งหมด"
+            >
+              📆 รายปี
+              <span className="ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-violet-100 text-violet-700 text-[11px] font-bold inline-flex items-center justify-center">
+                {yearlyItems.length}
+              </span>
+            </button>
+          )}
+          <button className="btn btn-secondary text-sm" onClick={goToToday}>วันนี้</button>
+        </div>
       </div>
 
       {/* ตัวกรองสิ่งที่แสดงบนปฏิทิน */}
@@ -247,6 +277,9 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
               onClick={() => navigate('/transactions')}
               getCategoryName={getCategoryName}
               todayStr={todayStr}
+              yearlyItems={date.getDate() === 1 && date.getMonth() === viewMonth ? yearlyItems : []}
+              yearlyDueThisMonth={yearlyDueThisMonth}
+              onYearlyClick={() => setShowYearly(true)}
             />
           )
         })}
@@ -254,6 +287,13 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
 
       {noteDate && (
         <CalendarNotePopup date={noteDate} onClose={() => setNoteDate(null)} />
+      )}
+      {showYearly && (
+        <YearlyRecurringPopup
+          items={yearlyItems}
+          entries={recurringEntries}
+          onClose={() => setShowYearly(false)}
+        />
       )}
     </div>
   )

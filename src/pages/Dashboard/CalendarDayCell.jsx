@@ -192,6 +192,7 @@ export default function CalendarDayCell({
   date, dateStr, isCurrentMonth, isToday, isHighlighted, isInCustomRange,
   transactions, pendingItems, pendingIncomeItems = [], taxItems, recurringItems = [], note,
   onContextMenu, onClick, getCategoryName, todayStr,
+  yearlyItems = [], yearlyDueThisMonth = [], onYearlyClick,
 }) {
   const cellRef = useRef(null)
   const [tooltipPos, setTooltipPos] = useState(null)
@@ -276,6 +277,27 @@ export default function CalendarDayCell({
             {date.getDate()}
           </span>
         </div>
+
+        {/* ป้ายรายปี — ติดไว้ที่วันที่ 1 ของทุกเดือน เพื่อให้เห็นทุกเดือนว่ามีรายจ่ายรายปีอยู่
+            ไม่ใช่โผล่ปีละครั้งแล้วหายไปจากสายตาอีก 11 เดือน */}
+        {yearlyItems.length > 0 && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onYearlyClick?.() }}
+            className={`w-full text-[10px] leading-tight rounded px-1 py-0.5 mb-0.5 font-medium truncate transition-colors ${
+              yearlyDueThisMonth.length > 0
+                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                : 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+            }`}
+            title={
+              yearlyDueThisMonth.length > 0
+                ? `เดือนนี้มีรายจ่ายรายปีครบกำหนด ${yearlyDueThisMonth.length} รายการ`
+                : `มีรายจ่ายประจำรายปี ${yearlyItems.length} รายการ กดเพื่อดูทั้งหมด`
+            }
+          >
+            📆 {yearlyDueThisMonth.length > 0 ? `ครบ ${yearlyDueThisMonth.length}` : `รายปี ${yearlyItems.length}`}
+          </button>
+        )}
 
         {/* Amounts */}
         <div className="flex-1 space-y-0.5 mt-0.5">

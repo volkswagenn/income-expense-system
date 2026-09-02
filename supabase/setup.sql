@@ -450,6 +450,8 @@ alter table recurring_items add column if not exists deleted boolean not null de
 alter table recurring_items add column if not exists paused_from  date;
 alter table recurring_items add column if not exists paused_until date;
 alter table recurring_items add column if not exists vat_rate     numeric(5,2) not null default 0;
+alter table recurring_items add column if not exists vat_mode     text not null default 'none'
+  check (vat_mode in ('none', 'included', 'add'));
 
 -- ── recurring_entries (รอบรายเดือนของรายการประจำ) ──────────────────────────
 -- transfer_account_id : บัญชีที่จ่ายจริงในรอบนั้น (ใช้คืนเงินให้ถูกบัญชีตอนยกเลิกการจ่าย)
@@ -471,7 +473,7 @@ select table_name, column_name
   or (table_name = 'pending_payments'  and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'pending_incomes'   and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'tax_invoices'      and column_name in ('due_date','document_path','document_type','document_label'))
-  or (table_name = 'recurring_items'   and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted','paused_from','paused_until','vat_rate'))
+  or (table_name = 'recurring_items'   and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted','paused_from','paused_until','vat_rate','vat_mode'))
   or (table_name = 'recurring_entries' and column_name in ('transfer_account_id','amount_updated_at'))
    )
  order by table_name, column_name;
@@ -1328,7 +1330,7 @@ select 'คอลัมน์ที่เติมเพิ่ม', count(*)::te
      or (table_name='pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
      or (table_name='pending_incomes' and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
      or (table_name='tax_invoices' and column_name in ('due_date','document_path','document_type','document_label'))
-     or (table_name='recurring_items' and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted','paused_from','paused_until','vat_rate')))
+     or (table_name='recurring_items' and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted','paused_from','paused_until','vat_rate','vat_mode')))
 union all
 select 'ฟังก์ชัน RPC', count(*)::text || ' / 20'
   from information_schema.routines
