@@ -2175,10 +2175,12 @@ alter table card_installment_entries add column if not exists paid_method       
 alter table card_installment_entries add column if not exists transfer_account_id uuid
   references transfer_accounts(id) on delete set null;
 
--- เดิม check อนุญาตแค่ pending / billed / cancelled ต้องเปิดรับ 'paid' เพิ่ม
+-- ต้องมี 'prepaid' อยู่ในลิสต์ตั้งแต่ครั้งแรกที่ตั้ง เพราะฐานข้อมูลที่เคยรันไฟล์นี้ไปแล้ว
+-- มีงวดสถานะ prepaid อยู่จริง ถ้าลิสต์แรกไม่มี การรันซ้ำจะล้มที่บรรทัดนี้
+-- (ERROR 23514 check constraint ... violated by some row) แล้วทั้งไฟล์ถูก rollback
 alter table card_installment_entries drop constraint if exists card_installment_entries_status_check;
 alter table card_installment_entries add  constraint card_installment_entries_status_check
-  check (status in ('pending', 'billed', 'paid', 'cancelled'));
+  check (status in ('pending', 'billed', 'paid', 'prepaid', 'cancelled'));
 
 -- ── 2. จ่ายค่างวด ──────────────────────────────────────────────────────────
 
@@ -2315,6 +2317,98 @@ begin
     from unnest(p_ids) with ordinality as pos(id, idx)
    where c.id = pos.id
      and c.shop_id = p_shop;
+end;
+$$;
+
+
+-- ###########################################################################
+-- ##  ผ่อนขั้นบันได + สัญญาที่ผ่อนมาก่อนแล้ว
+-- ###########################################################################
+--
+-- โปรผ่อนจริงมักไม่ได้จ่ายเท่ากันทุกงวด เช่น 6 งวดแรก 390 แล้วงวดที่เหลือ 820
+-- ทั้งโปรลดราคาช่วงแรก งวดแรกฟรี และขั้นบันไดหลายช่วง เขียนได้ด้วยโครงเดียวกัน
+-- คือ "งวดที่ X ถึง Y จ่ายงวดละ Z" ต่อกันหลายบรรทัด จึงเก็บเป็น jsonb array
+-- ไว้ดูย้อนหลังและใช้ตอนแก้ไข ส่วนยอดจริงของแต่ละงวดอยู่ในตารางงวดเหมือนเดิม
+--
+-- สัญญาที่ผ่อนมาก่อนเริ่มใช้แอป: งวดที่จ่ายไปแล้วถูกทำเครื่องหมาย 'prepaid'
+-- ซึ่ง close_card_statement มองข้ามอยู่แล้ว (กรองเฉพาะ status = 'pending')
+-- จึงไม่สร้างรายจ่ายย้อนหลังและไม่ขยับยอดหนี้บัตร เพราะเงินก้อนนั้นจ่ายไปก่อน
+-- จะมาใช้ระบบ ถ้าลงย้อนหลังให้ รายงานเดือนที่ผ่านมาจะพองขึ้นและอาจนับซ้ำกับ
+-- ที่ผู้ใช้เคยบันทึกไว้ด้วยวิธีอื่น งวดพวกนี้มีไว้ให้เลขงวดกับยอดคงเหลือถูกต้องเท่านั้น
+
+-- สัญญาเช่าใช้จริงยาวได้ถึง 84 งวด (7 ปี) เพดาน 60 เดิมจึงต่ำเกินไป
+alter table card_installments drop constraint if exists card_installments_months_check;
+alter table card_installments add  constraint card_installments_months_check
+  check (months between 1 and 120);
+
+alter table card_installments add column if not exists tiers jsonb;
+alter table card_installments add column if not exists prepaid_count int not null default 0;
+
+-- เปิดรับสถานะ prepaid เพิ่ม (ของเดิมมี pending / billed / paid / cancelled)
+alter table card_installment_entries drop constraint if exists card_installment_entries_status_check;
+alter table card_installment_entries add  constraint card_installment_entries_status_check
+  check (status in ('pending', 'billed', 'paid', 'prepaid', 'cancelled'));
+
+-- ── สร้างสัญญาผ่อน: รับ tiers / prepaid_count และสถานะรายงวด ────────────────
+-- p_entries รับ status รายงวดได้แล้ว ('pending' หรือ 'prepaid') ค่าเริ่มต้นคือ pending
+-- ยอดต่องวดคำนวณที่ฝั่ง client (src/lib/cardCycle.js ซึ่งมีเทสต์แล้ว) เหมือนเดิม
+-- จะได้ไม่ต้องเขียนสูตรซ้ำสองภาษาแล้วปัดเศษคนละแบบ
+
+create or replace function public.create_card_installment(
+  p_shop    uuid,
+  p_card    uuid,
+  p_data    jsonb,
+  p_entries jsonb,
+  p_log     jsonb default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare v_ins card_installments; v_e jsonb;
+begin
+  perform assert_can_edit(p_shop);
+  if not exists (select 1 from credit_cards where id = p_card and shop_id = p_shop) then
+    raise exception 'ไม่พบบัตรเครดิตของร้านนี้';
+  end if;
+  if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
+    raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
+  end if;
+
+  insert into card_installments (
+    shop_id, card_id, name, vendor, category_id, note,
+    principal_amount, total_amount, months, monthly_amount, interest_rate,
+    tiers, prepaid_count, purchase_date, first_cycle, created_by
+  ) values (
+    p_shop, p_card,
+    coalesce(p_data->>'name', ''),
+    p_data->>'vendor',
+    nullif(p_data->>'category_id', '')::uuid,
+    p_data->>'note',
+    coalesce((p_data->>'principal_amount')::numeric, (p_data->>'total_amount')::numeric),
+    (p_data->>'total_amount')::numeric,
+    (p_data->>'months')::int,
+    (p_data->>'monthly_amount')::numeric,
+    coalesce((p_data->>'interest_rate')::numeric, 0),
+    p_data->'tiers',
+    coalesce((p_data->>'prepaid_count')::int, 0),
+    (p_data->>'purchase_date')::date,
+    p_data->>'first_cycle',
+    auth.uid()
+  ) returning * into v_ins;
+
+  for v_e in select * from jsonb_array_elements(p_entries) loop
+    insert into card_installment_entries (shop_id, installment_id, seq, cycle, due_date, amount, status)
+    values (
+      p_shop, v_ins.id,
+      (v_e->>'seq')::int,
+      v_e->>'cycle',
+      (v_e->>'due_date')::date,
+      (v_e->>'amount')::numeric,
+      coalesce(v_e->>'status', 'pending')
+    );
+  end loop;
+
+  -- ยังไม่แตะ outstanding และยังไม่สร้าง transactions โดยเจตนา
+  -- งวด prepaid จะไม่ถูกเรียกเก็บเลย เพราะ close_card_statement กรองเฉพาะ pending
+  perform write_log(p_shop, p_log);
+  return v_ins;
 end;
 $$;
 

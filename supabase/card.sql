@@ -1023,10 +1023,12 @@ alter table card_installment_entries add column if not exists paid_method       
 alter table card_installment_entries add column if not exists transfer_account_id uuid
   references transfer_accounts(id) on delete set null;
 
--- เดิม check อนุญาตแค่ pending / billed / cancelled ต้องเปิดรับ 'paid' เพิ่ม
+-- ต้องมี 'prepaid' อยู่ในลิสต์ตั้งแต่ครั้งแรกที่ตั้ง เพราะฐานข้อมูลที่เคยรันไฟล์นี้ไปแล้ว
+-- มีงวดสถานะ prepaid อยู่จริง ถ้าลิสต์แรกไม่มี การรันซ้ำจะล้มที่บรรทัดนี้
+-- (ERROR 23514 check constraint ... violated by some row) แล้วทั้งไฟล์ถูก rollback
 alter table card_installment_entries drop constraint if exists card_installment_entries_status_check;
 alter table card_installment_entries add  constraint card_installment_entries_status_check
-  check (status in ('pending', 'billed', 'paid', 'cancelled'));
+  check (status in ('pending', 'billed', 'paid', 'prepaid', 'cancelled'));
 
 -- ── 2. จ่ายค่างวด ──────────────────────────────────────────────────────────
 
