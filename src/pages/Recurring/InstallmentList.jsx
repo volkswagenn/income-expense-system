@@ -6,6 +6,8 @@ import { buildLogEntry } from '../../lib/logBuilder'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import DatePicker from '../../components/shared/DatePicker'
 import BankLogo from '../../components/shared/BankLogo'
+import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
+import useWalletStore from '../../store/useWalletStore'
 import { formatIsoThai } from '../../lib/cardCycle'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
@@ -192,14 +194,53 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
 
 export default function InstallmentList() {
   const installments = useCreditCardStore((s) => s.installments)
-  const { settleInstallment, cancelInstallment } = useCreditCardStore()
+  const { settleInstallment, cancelInstallment, payStatement } = useCreditCardStore()
+  const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
+  const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
+  const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
+  const refreshWallet = useWalletStore((s) => s.refresh)
   const { addLog } = useLogStore()
 
   const [showDone, setShowDone] = useState(false)
   const [settleTarget, setSettleTarget] = useState(null)
   const [cancelTarget, setCancelTarget] = useState(null)
+  const [payTarget, setPayTarget] = useState(null) // { statement }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  // งวดผ่อนถูกเรียกเก็บผ่านบิลบัตร การจ่ายจริงจึงเกิดที่บิล ไม่ใช่ที่ตัวสัญญาผ่อน
+  // เดิมหน้านี้ไม่มีทางไปจ่ายเลย ต้องข้ามไปหน้ากระเป๋าเงินเอง จึงยกบิลที่ค้างมาไว้ตรงนี้
+  const unpaidBills = getUnpaidStatements()
+  const unpaidTotal = unpaidBills.reduce(
+    (sum, s) => sum + (Number(s.amount || 0) - Number(s.paidAmount || 0)), 0
+  )
+
+  const handlePayBill = async ({ method, accountId, amount, date }) => {
+    const statement = payTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await payStatement(statement.id, {
+        method, accountId, amount, date,
+        log: buildLogEntry({
+          activityType: 'CARD_PAYMENT',
+          description:
+            `จ่ายบิลบัตร "${getCardLabel(statement.cardId)}" รอบ ${statement.cycle} ` +
+            `${fmt(amount)} บาท จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
+          walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
+          newValue: { statementId: statement.id, cardId: statement.cardId, amount, date, method },
+        }),
+      })
+      // เงินออกจากกระเป๋าที่เซิร์ฟเวอร์แล้ว ดึงยอดจริงกลับมา
+      await refreshWallet()
+      setPayTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const active = installments.filter((i) => i.status === 'active')
   const done = installments.filter((i) => i.status !== 'active')
@@ -256,12 +297,47 @@ export default function InstallmentList() {
       <div>
         <h2 className="section-title">ผ่อนชำระผ่านบัตรเครดิต</h2>
         <p className="text-xs text-gray-500 mt-1">
-          รายการที่แบ่งจ่ายเป็นงวด ไม่มีปุ่มจ่ายเพราะถูกเรียกเก็บผ่านบิลบัตรอัตโนมัติ
-          เริ่มผ่อนได้จากฟอร์มบันทึกรายจ่าย เลือกบัตรเครดิตแล้วติ๊ก "แบ่งชำระ"
+          รายการที่แบ่งจ่ายเป็นงวด แต่ละงวดถูกเรียกเก็บรวมในบิลบัตรอัตโนมัติ
+          จึงจ่ายที่บิลไม่ใช่ที่ตัวรายการผ่อน เริ่มผ่อนได้จากฟอร์มบันทึกรายจ่าย
+          เลือกบัตรเครดิตแล้วติ๊ก "แบ่งชำระ"
         </p>
       </div>
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+
+      {/* บิลที่ถึงกำหนดแล้ว — จ่ายได้จากหน้านี้เลย ไม่ต้องข้ามไปหน้ากระเป๋าเงิน */}
+      {unpaidBills.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 overflow-hidden">
+          <div className="px-4 py-2.5 flex items-center justify-between border-b border-amber-200">
+            <span className="text-sm font-semibold text-amber-900">
+              💳 บิลบัตรที่ต้องจ่าย {unpaidBills.length} ใบ
+            </span>
+            <span className="text-sm font-bold tabular-nums text-amber-800">{fmt(unpaidTotal)} บาท</span>
+          </div>
+          <div className="divide-y divide-amber-200/70">
+            {unpaidBills.map((s) => {
+              const remaining = Number(s.amount || 0) - Number(s.paidAmount || 0)
+              const overdue = s.dueDate < format(new Date(), 'yyyy-MM-dd')
+              return (
+                <div key={s.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{getCardShortLabel(s.cardId)}</p>
+                    <p className={`text-xs ${overdue ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                      รอบ {s.cycle} · ครบกำหนด {formatIsoThai(s.dueDate)}{overdue ? ' · เลยกำหนดแล้ว' : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="text-sm font-bold tabular-nums text-gray-900">{fmt(remaining)}</span>
+                    <button className="btn btn-warning text-xs !h-8 px-3" onClick={() => setPayTarget(s)}>
+                      จ่ายบิล
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {active.length === 0 && done.length === 0 ? (
         <div className="text-center py-10 text-gray-400">
@@ -316,6 +392,16 @@ export default function InstallmentList() {
             </div>
           )}
         </>
+      )}
+
+      {payTarget && (
+        <PayCardBillPopup
+          statement={payTarget}
+          cardLabel={getCardLabel(payTarget.cardId)}
+          onConfirm={handlePayBill}
+          onCancel={() => setPayTarget(null)}
+          busy={busy}
+        />
       )}
 
       {settleTarget && (
