@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import useWalletStore from '../../store/useWalletStore'
 import DatePicker from './DatePicker'
 import TransferAccountPicker from './TransferAccountPicker'
+import { formatIsoThai } from '../../lib/cardCycle'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -63,7 +64,7 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
             <p className="text-xs text-rose-700">{cardLabel}</p>
             <p className="text-2xl font-bold text-rose-700 tabular-nums mt-0.5">{fmt(remaining)}</p>
             <p className="text-xs text-rose-600 mt-0.5">
-              ครบกำหนด {statement.dueDate}
+              ครบกำหนด {formatIsoThai(statement.dueDate)}
               {Number(statement.paidAmount) > 0 && ` · จ่ายไปแล้ว ${fmt(statement.paidAmount)}`}
             </p>
           </div>

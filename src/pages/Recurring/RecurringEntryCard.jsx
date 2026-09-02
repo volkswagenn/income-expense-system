@@ -1,7 +1,7 @@
 import useCategoryStore from '../../store/useCategoryStore'
 import { isYearly, scheduleLabel } from '../../lib/recurringSchedule'
 
-const METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', pending: 'ค้างชำระ' }
+const METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', card: 'บัตรเครดิต', pending: 'ค้างชำระ' }
 
 function StatusBadge({ status }) {
   if (status === 'paid') return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✅ จ่ายแล้ว</span>

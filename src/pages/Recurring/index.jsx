@@ -7,6 +7,8 @@ import usePendingStore from '../../store/usePendingStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { addToWallet, willGoNegative } from '../../lib/walletEngine'
+import useCreditCardStore from '../../store/useCreditCardStore'
+import { methodLabel } from '../../lib/walletEngine'
 import { walletTarget } from '../../lib/api/transactions'
 import { cancelTransaction } from '../../lib/transactionActions'
 import useWalletStore from '../../store/useWalletStore'
@@ -176,7 +178,7 @@ export default function RecurringPage() {
    * โดยไม่ await ทำให้ tx.id เป็น undefined entry จึงไม่เคยผูกกับรายการ (ยกเลิกไม่ได้)
    * และเงินถูกตัดแยกอีกคำสั่ง ถ้าอันใดอันหนึ่งล้มยอดจะไม่ตรง
    */
-  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null) => {
+  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null, cardId = null) => {
     if (busy) return
     setBusy(true)
     setActionError('')
@@ -200,8 +202,8 @@ export default function RecurringPage() {
         })
         pendingPaymentId = p.id
       } else {
-        const target = walletTarget(paidMethod, { transferAccountId: accountId })
-        if (!target) throw new Error('กรุณาเลือกบัญชีเงินโอน')
+        const target = walletTarget(paidMethod, { transferAccountId: accountId, cardId })
+        if (!target) throw new Error(paidMethod === 'card' ? 'กรุณาเลือกบัตรเครดิต' : 'กรุณาเลือกบัญชีเงินโอน')
         tx = await addTransaction({
           type: 'expense',
           date: paidDate,
@@ -209,6 +211,7 @@ export default function RecurringPage() {
           category: item.category,
           method: paidMethod,
           ...(accountId ? { transferAccountId: accountId } : {}),
+          ...(cardId ? { cardId } : {}),
           itemName: item.name,
           vendor: item.vendor,
           note: item.note,
@@ -218,11 +221,12 @@ export default function RecurringPage() {
           log: buildLogEntry({
             activityType: 'RECURRING_PAID',
             description: `จ่ายรายการประจำ "${item.name}" ${amount.toLocaleString()} บาท`,
-            walletEffect: { target: paidMethod, delta: -amount, transferAccountId: accountId },
+            walletEffect: { target: paidMethod, delta: -amount, transferAccountId: accountId, cardId },
             newValue: { recurringEntryId: entry.id, recurringId: item.id, amount, paidDate },
           }),
         })
-        await refreshWallet()
+        if (cardId) await useCreditCardStore.getState().refresh()
+        else await refreshWallet()
       }
 
       await updateEntry(entry.id, {
@@ -230,6 +234,7 @@ export default function RecurringPage() {
         amount,
         paidMethod,
         transferAccountId: accountId,
+        cardId,
         paidAt: new Date(`${paidDate}T12:00:00`).toISOString(),
         transactionId: tx?.id ?? null,
         pendingPaymentId,
@@ -243,19 +248,20 @@ export default function RecurringPage() {
     }
   }
 
-  const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null) => {
+  const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null, cardId = null) => {
     const { entry, item } = payTarget
-    if (paidMethod !== 'pending' && willGoNegative(paidMethod, amount, accountId)) {
-      setNegativeWarn({ amount, paidMethod, paidDate, accountId, entry, item })
+    // บัตรเครดิตไม่ต้องเช็คยอดติดลบ เป็นหนี้อยู่แล้วโดยธรรมชาติ
+    if (paidMethod !== 'pending' && paidMethod !== 'card' && willGoNegative(paidMethod, amount, accountId)) {
+      setNegativeWarn({ amount, paidMethod, paidDate, accountId, cardId, entry, item })
       setPayTarget(null)
       return
     }
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId)
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId)
   }
 
   const handleNegativeConfirm = () => {
-    const { entry, item, amount, paidMethod, paidDate, accountId } = negativeWarn
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId)
+    const { entry, item, amount, paidMethod, paidDate, accountId, cardId } = negativeWarn
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId)
     setNegativeWarn(null)
   }
 
@@ -286,11 +292,11 @@ export default function RecurringPage() {
     const lines = []
     const linked = linkedPendingOf(entry)
     if (entry.paidMethod && entry.paidMethod !== 'pending') {
-      lines.push(`คืนเงิน ${entry.amount.toLocaleString()} บาท เข้า${entry.paidMethod === 'cash' ? 'เงินสด' : 'เงินโอน'}`)
+      lines.push(`คืนเงิน ${entry.amount.toLocaleString()} บาท เข้า${methodLabel(entry.paidMethod)}`)
       if (entry.transactionId) lines.push('ลบรายการบันทึกที่เชื่อมโยง')
     }
     if (linked?.status === 'paid') {
-      lines.push(`คืนเงิน ${linked.amount.toLocaleString()} บาท เข้า${linked.paidMethod === 'cash' ? 'เงินสด' : 'เงินโอน'} (ชำระผ่านรายการค้างจ่าย)`)
+      lines.push(`คืนเงิน ${linked.amount.toLocaleString()} บาท เข้า${methodLabel(linked.paidMethod)} (ชำระผ่านรายการค้างจ่าย)`)
       if (linked.transactionId) lines.push('ลบรายการบันทึกของการชำระ')
     }
     if (linked) lines.push('ลบรายการค้างจ่ายที่เชื่อมโยง')
@@ -619,7 +625,7 @@ export default function RecurringPage() {
       <ConfirmPopup
         open={!!negativeWarn}
         title="ยอดเงินไม่เพียงพอ"
-        message={`${negativeWarn?.paidMethod === 'cash' ? 'เงินสด' : 'เงินโอน'}ไม่เพียงพอ ต้องการจ่ายต่อไปหรือไม่?\nยอดจะติดลบ`}
+        message={`${methodLabel(negativeWarn?.paidMethod)}ไม่เพียงพอ ต้องการจ่ายต่อไปหรือไม่?\nยอดจะติดลบ`}
         onConfirm={handleNegativeConfirm}
         onCancel={() => setNegativeWarn(null)}
         confirmLabel="จ่ายต่อไป"

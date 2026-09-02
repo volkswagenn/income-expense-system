@@ -28,12 +28,21 @@ function StatTile({ label, amount, tone = 'gray', sub }) {
   )
 }
 
+const METHOD_FILTERS = [
+  { value: 'all', label: 'ทั้งหมด' },
+  { value: 'cash', label: '💵 เงินสด' },
+  { value: 'transfer', label: '🏦 เงินโอน' },
+  { value: 'card', label: '💳 บัตรเครดิต' },
+  { value: 'installment', label: '📆 เฉพาะงวดผ่อน' },
+]
+
 export default function ReportsPage() {
   const [type, setType] = useState('daily_income')
   const [preset, setPreset] = useState('month')
   const [[startDate, endDate], setRange] = useState(() => presetRange('month'))
   const [showChart, setShowChart] = useState(true)
   const [groupBy, setGroupBy] = useState('day')
+  const [methodFilter, setMethodFilter] = useState('all')
 
   const { transactions, ensureRange } = useTransactionStore()
 
@@ -43,10 +52,16 @@ export default function ReportsPage() {
     ensureRange(startDate).catch((err) => console.warn('โหลดรายการย้อนหลังไม่สำเร็จ:', err))
   }, [startDate, ensureRange])
 
-  const filtered = useMemo(
-    () => transactions.filter((t) => t.date >= startDate && t.date <= endDate),
-    [transactions, startDate, endDate]
-  )
+  const filtered = useMemo(() => {
+    let rows = transactions.filter((t) => t.date >= startDate && t.date <= endDate)
+    if (methodFilter === 'installment') {
+      // งวดผ่อนคือรายจ่ายที่ถูกสร้างตอนปิดรอบ จำได้จาก installment_entry_id
+      rows = rows.filter((t) => !!t.installmentEntryId)
+    } else if (methodFilter !== 'all') {
+      rows = rows.filter((t) => t.method === methodFilter)
+    }
+    return rows
+  }, [transactions, startDate, endDate, methodFilter])
 
   const stats = useMemo(() => {
     let income = 0, expense = 0
@@ -82,6 +97,28 @@ export default function ReportsPage() {
       {/* 1. เลือกประเภทรายงาน */}
       <SectionCard title="1 · เลือกประเภทรายงาน">
         <ReportSelector type={type} setType={setType} />
+
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <label className="label">กรองตามวิธีชำระเงิน</label>
+          <div className="flex gap-1.5 flex-wrap">
+            {METHOD_FILTERS.map((m) => (
+              <button
+                key={m.value}
+                className={`btn text-xs py-1.5 px-3 ${methodFilter === m.value ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setMethodFilter(m.value)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {methodFilter !== 'all' && (
+            <p className="text-xs text-gray-500 mt-1.5">
+              {methodFilter === 'installment'
+                ? 'แสดงเฉพาะงวดผ่อนที่ถูกเรียกเก็บแล้ว ใช้ดูว่าเดือนนี้ภาระผ่อนกินไปเท่าไร'
+                : `แสดงเฉพาะรายการที่ชำระด้วย${METHOD_FILTERS.find((m) => m.value === methodFilter)?.label ?? ''}`}
+            </p>
+          )}
+        </div>
       </SectionCard>
 
       {/* 2. สรุปยอดในช่วงที่เลือก */}

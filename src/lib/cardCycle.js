@@ -146,6 +146,14 @@ export function formatThaiDate(date) {
   return `${date.getDate()} ${THAI_MONTHS[date.getMonth()]} ${date.getFullYear() + 543}`
 }
 
+/** '2026-10-15' → '15 ต.ค. 2569' — ใช้กับวันที่ที่อ่านมาจากฐานข้อมูล */
+export function formatIsoThai(iso) {
+  if (!iso) return '-'
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return String(iso)
+  return formatThaiDate(new Date(y, m - 1, d))
+}
+
 /** 'yyyy-MM-dd' สำหรับส่งเข้าฐานข้อมูล — ห้ามใช้ toISOString เพราะจะเลื่อนตามโซนเวลา */
 export function toDateString(date) {
   const m = String(date.getMonth() + 1).padStart(2, '0')

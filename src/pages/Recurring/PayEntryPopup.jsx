@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import DatePicker from '../../components/shared/DatePicker'
 import useWalletStore from '../../store/useWalletStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
 
 const METHOD_OPTIONS = [
   { value: 'cash', label: '💵 เงินสด' },
   { value: 'transfer', label: '🏦 โอนเงิน' },
+  { value: 'card', label: '💳 บัตรเครดิต' },
   { value: 'pending', label: '📋 ค้างชำระ' },
 ]
 
@@ -16,15 +19,20 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
   // ใช้วิธีจ่าย/บัญชีที่ตั้งไว้ตอนสร้างรายการประจำเป็นค่าเริ่มต้น
   const [method, setMethod] = useState(item.defaultMethod ?? '')
   const [accountId, setAccountId] = useState(item.defaultTransferAccountId ?? '')
+  const [cardId, setCardId] = useState('')
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [error, setError] = useState('')
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+  const resolveCard = useCreditCardStore((s) => s.resolveCardId)
 
   const parsedAmount = parseFloat(amount)
   const canSaveAmount = !isNaN(parsedAmount) && parsedAmount > 0
   const needsAccount = method === 'transfer'
-  const canSubmit = method && paidDate && canSaveAmount && (!needsAccount || !!resolveAccount(accountId))
+  const needsCard = method === 'card'
+  const canSubmit = method && paidDate && canSaveAmount
+    && (!needsAccount || !!resolveAccount(accountId))
+    && (!needsCard || !!resolveCard(cardId))
 
   const handleSaveAmount = () => {
     if (!canSaveAmount) { setError('กรุณากรอกยอดเงินที่ถูกต้อง'); return }
@@ -36,7 +44,12 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
     if (!parsedAmount || parsedAmount <= 0) { setError('กรุณากรอกยอดเงินที่ถูกต้อง'); return }
     if (!paidDate) { setError('กรุณาเลือกวันที่จ่ายเงิน'); return }
     if (needsAccount && !resolveAccount(accountId)) { setError('กรุณาเลือกบัญชีที่จะตัดเงิน'); return }
-    onConfirm(parsedAmount, method, paidDate, needsAccount ? resolveAccount(accountId) : null)
+    if (needsCard && !resolveCard(cardId)) { setError('กรุณาเลือกบัตรเครดิต'); return }
+    onConfirm(
+      parsedAmount, method, paidDate,
+      needsAccount ? resolveAccount(accountId) : null,
+      needsCard ? resolveCard(cardId) : null
+    )
   }
 
   return (
@@ -76,7 +89,7 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               วิธีชำระ <span className="text-red-500">*</span>
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {METHOD_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
@@ -99,6 +112,16 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
           {/* บัญชีที่จะตัดเงิน */}
           {needsAccount && (
             <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+          )}
+
+          {/* รูดบัตร — ไม่ตัดเงินสด/เงินโอน แต่ไปเพิ่มหนี้ในบัตรแทน */}
+          {needsCard && (
+            <>
+              <CreditCardPicker value={cardId} onChange={setCardId} label="รูดบัตร" />
+              <p className="text-xs text-gray-500">
+                ยอดนี้จะไปสะสมเป็นหนี้ในบัตร แล้วไปรวมอยู่ในบิลของรอบนั้น ไม่ตัดเงินตอนนี้
+              </p>
+            </>
           )}
 
           {/* Paid date */}

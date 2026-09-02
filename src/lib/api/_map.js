@@ -22,7 +22,9 @@ const NUMERIC_FIELDS = new Set([
   // บัตรเครดิต — ไม่ใส่ไว้ที่นี่ numeric จะกลับมาเป็น string แล้วบวกเลขกลายเป็นต่อสตริง
   'creditLimit', 'outstanding', 'closingDay', 'dueDay', 'cashbackRate', 'cardMinRate',
   // ใบแจ้งยอด
-  'previousBalance', 'spendAmount', 'creditAmount', 'minimumAmount', 'paidAmount',
+  'previousBalance', 'spendAmount', 'creditAmount', 'minimumAmount', 'paidAmount', 'autopayAmount',
+  // ผ่อนชำระ
+  'totalAmount', 'months', 'monthlyAmount', 'interestRate', 'seq',
 ])
 
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())

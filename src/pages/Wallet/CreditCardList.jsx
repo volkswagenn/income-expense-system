@@ -2,19 +2,42 @@ import { useState, useEffect } from 'react'
 import { differenceInDays, parseISO } from 'date-fns'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
+import useTransactionStore from '../../store/useTransactionStore'
+import useCategoryStore from '../../store/useCategoryStore'
 import useAppStore from '../../store/useAppStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
+import { walletTarget } from '../../lib/api/transactions'
 import { formatCard } from '../../components/shared/CreditCardPicker'
-import { nextClosingDate, formatThaiDate, daysUntil } from '../../lib/cardCycle'
+import { nextClosingDate, formatThaiDate, formatIsoThai, daysUntil } from '../../lib/cardCycle'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
+import CardCashbackPopup from '../../components/shared/CardCashbackPopup'
+import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import BankSelect from '../../components/shared/BankSelect'
 import BankLogo from '../../components/shared/BankLogo'
 import { BANKS } from '../../lib/banks'
 
 const BANK_NAMES = BANKS.map((b) => b.name)
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
+const CASHBACK_CATEGORY = 'เครดิตเงินคืนบัตร'
+
+const AUTOPAY_MODES = [
+  { value: 'off', label: 'ไม่ได้ผูกไว้' },
+  { value: 'full', label: 'เต็มจำนวน' },
+  { value: 'minimum', label: 'ขั้นต่ำ' },
+  { value: 'fixed', label: 'จำนวนคงที่' },
+]
+
+/** ยอดที่ธนาคารจะหักตามที่ผูกไว้ */
+export function autopayAmountOf(card, statement) {
+  if (!card || !statement || card.autopayMode === 'off') return 0
+  const remaining = Number(statement.amount) - Number(statement.paidAmount)
+  if (remaining <= 0) return 0
+  if (card.autopayMode === 'full') return remaining
+  if (card.autopayMode === 'minimum') return Math.min(Number(statement.minimumAmount) || 0, remaining)
+  return Math.min(Number(card.autopayAmount) || 0, remaining)
+}
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -45,6 +68,9 @@ function CardFormPopup({ card, onSave, onClose }) {
   const [closingDay, setClosingDay] = useState(String(card?.closingDay ?? 25))
   const [dueDay, setDueDay] = useState(String(card?.dueDay ?? 15))
   const [cashbackRate, setCashbackRate] = useState(card ? String(card.cashbackRate) : '')
+  const [autopayMode, setAutopayMode] = useState(card?.autopayMode ?? 'off')
+  const [autopayAccountId, setAutopayAccountId] = useState(card?.autopayAccountId ?? '')
+  const [autopayAmount, setAutopayAmount] = useState(card ? String(card.autopayAmount ?? '') : '')
   const [showMore, setShowMore] = useState(false)
   const [error, setError] = useState('')
 
@@ -55,6 +81,8 @@ function CardFormPopup({ card, onSave, onClose }) {
     if (!bank) return setError('เลือกหรือพิมพ์ชื่อธนาคาร')
     if (!name.trim()) return setError('กรอกชื่อบัตร')
     if (last4 && !/^\d{4}$/.test(last4.trim())) return setError('เลขสี่ตัวท้ายต้องเป็นตัวเลข 4 หลัก')
+    if (autopayMode !== 'off' && !autopayAccountId) return setError('เลือกบัญชีที่ผูกหักบัญชีไว้')
+    if (autopayMode === 'fixed' && !(Number(autopayAmount) > 0)) return setError('ใส่จำนวนที่หักคงที่')
     onSave({
       bankName: bank,
       name: name.trim(),
@@ -64,6 +92,9 @@ function CardFormPopup({ card, onSave, onClose }) {
       closingDay: Number(closingDay) || 25,
       dueDay: Number(dueDay) || 15,
       cashbackRate: Number(cashbackRate) || 0,
+      autopayMode,
+      autopayAccountId: autopayMode === 'off' ? null : autopayAccountId,
+      autopayAmount: autopayMode === 'fixed' ? Number(autopayAmount) || 0 : 0,
     })
   }
 
@@ -175,27 +206,70 @@ function CardFormPopup({ card, onSave, onClose }) {
           </button>
 
           {showMore && (
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <div>
-                <label className="label">วงเงิน (บาท)</label>
-                <input
-                  className="input"
-                  type="number"
-                  value={creditLimit}
-                  onChange={(e) => clear(setCreditLimit)(e.target.value)}
-                  placeholder="0.00"
-                />
+            <div className="space-y-4 pt-1">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">วงเงิน (บาท)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={creditLimit}
+                    onChange={(e) => clear(setCreditLimit)(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="label">อัตราเงินคืน (%)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={cashbackRate}
+                    onChange={(e) => clear(setCashbackRate)(e.target.value)}
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">ใส่แล้วระบบจะประมาณเงินคืนของรอบให้ดู</p>
+                </div>
               </div>
-              <div>
-                <label className="label">อัตราเงินคืน (%)</label>
-                <input
+
+              <div className="border-t pt-3">
+                <label className="label">ผูกหักบัญชีอัตโนมัติไว้กับธนาคาร</label>
+                <select
                   className="input"
-                  type="number"
-                  step="0.01"
-                  value={cashbackRate}
-                  onChange={(e) => clear(setCashbackRate)(e.target.value)}
-                  placeholder="0"
-                />
+                  value={autopayMode}
+                  onChange={(e) => clear(setAutopayMode)(e.target.value)}
+                >
+                  {AUTOPAY_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  บอกแอปว่าคุณสมัครหักบัญชีไว้แบบไหน แอปจะเตรียมรายการจ่ายบิลให้ตรงกับ
+                  ที่ธนาคารจะหัก แล้วรอให้คุณกดยืนยัน <strong>แอปไม่หักเงินเอง</strong>{' '}
+                  เพราะไม่มีทางรู้ว่าธนาคารหักสำเร็จจริงหรือไม่
+                </p>
+
+                {autopayMode !== 'off' && (
+                  <div className="mt-3 space-y-2">
+                    <TransferAccountPicker
+                      value={autopayAccountId}
+                      onChange={clear(setAutopayAccountId)}
+                      label="บัญชีที่ผูกไว้"
+                    />
+                    {autopayMode === 'fixed' && (
+                      <div>
+                        <label className="label">จำนวนที่หักคงที่ (บาท)</label>
+                        <input
+                          className="input"
+                          type="number"
+                          value={autopayAmount}
+                          onChange={(e) => clear(setAutopayAmount)(e.target.value)}
+                          placeholder="0.00"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -212,7 +286,7 @@ function CardFormPopup({ card, onSave, onClose }) {
   )
 }
 
-function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
+function CardRow({ card, onEdit, onDelete, onPay, onUndoPay, onCashback, onAutopay }) {
   const [showHistory, setShowHistory] = useState(false)
   const notifyDays = useAppStore((s) => s.notifyDaysBefore)
   const statements = useCreditCardStore((s) => s.getStatements(card.id))
@@ -236,6 +310,11 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
   const closing = nextClosingDate(card.closingDay)
   const daysToClosing = daysUntil(closing)
   const alert = bill ? alertOf(bill.dueDate, notifyDays) : null
+
+  // แสดงการ์ดยืนยันเมื่อใกล้ถึงหรือเลยวันครบกำหนดแล้วเท่านั้น
+  const autopayDue = bill && daysUntil(new Date(bill.dueDate + 'T00:00:00')) <= notifyDays
+    ? autopayAmountOf(card, bill)
+    : 0
 
   // เงินคืนโดยประมาณของรอบนี้ — ตัวเลขคาดการณ์ล้วน ไม่แตะยอดหนี้และไม่เข้ารายงาน
   const estCashback = Number(card.cashbackRate) > 0 && current?.spend > 0
@@ -261,13 +340,29 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
         </div>
       </div>
 
+      {/* ผูกหักบัญชีไว้และถึงกำหนดแล้ว — เตรียมรายการไว้ให้ เหลือแค่กดยืนยัน
+          ไม่หักเงินเอง เพราะแอปไม่มีทางรู้ว่าธนาคารหักสำเร็จจริงหรือไม่ */}
+      {bill && autopayDue > 0 && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+          <p className="text-xs text-indigo-800">
+            🏦 ธนาคารจะหัก <strong className="tabular-nums">{fmt(autopayDue)}</strong> บาท
+            {card.autopayMode === 'minimum' && ' (ขั้นต่ำ)'}
+            {card.autopayMode === 'fixed' && ' (จำนวนคงที่)'}
+            {' '}จากบัญชีที่ผูกไว้ ในวันที่ {formatIsoThai(bill.dueDate)}
+          </p>
+          <button className="btn btn-primary text-xs mt-2" onClick={() => onAutopay(card, bill, autopayDue)}>
+            ยืนยันว่าถูกหักแล้ว
+          </button>
+        </div>
+      )}
+
       {/* บิลที่ปิดรอบแล้วและยังจ่ายไม่ครบ */}
       {bill && (
         <div className={`rounded-xl border p-3 ${alert.box}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className={`text-xs font-medium ${alert.text}`}>
-                ยอดที่ต้องชำระ · ครบกำหนด {bill.dueDate}
+                ยอดที่ต้องชำระ · ครบกำหนด {formatIsoThai(bill.dueDate)}
                 {alert.label && ` · ${alert.label}`}
               </p>
               <p className={`text-xl font-bold tabular-nums ${alert.text}`}>
@@ -347,6 +442,9 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
             {showHistory ? '▲ ซ่อนบิลที่จ่ายแล้ว' : `▼ บิลที่จ่ายแล้ว ${paidHistory.length} รอบ`}
           </button>
         )}
+        <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onCashback(card, estCashback)}>
+          บันทึกเงินคืน
+        </button>
         <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onEdit(card)}>แก้ไข</button>
         <button className="btn btn-secondary text-xs py-1 px-2.5 text-red-600" onClick={() => onDelete(card)}>ลบ</button>
       </div>
@@ -356,8 +454,8 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
           {paidHistory.map((s) => (
             <div key={s.id} className="flex items-center justify-between text-xs gap-2">
               <span className="text-gray-500">
-                รอบ {s.cycle} · ครบกำหนด {s.dueDate}
-                {s.paidAt && <span className="text-emerald-600"> · จ่าย {s.paidAt}</span>}
+                รอบ {s.cycle} · ครบกำหนด {formatIsoThai(s.dueDate)}
+                {s.paidAt && <span className="text-emerald-600"> · จ่าย {formatIsoThai(s.paidAt)}</span>}
               </span>
               <span className="flex items-center gap-2 shrink-0">
                 <span className="tabular-nums text-gray-700">{fmt(s.amount)}</span>
@@ -384,7 +482,11 @@ export default function CreditCardList() {
   const { createCard, updateCard, deleteCard, adjustOutstanding, ensureStatements, payStatement, undoPayment } =
     useCreditCardStore()
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
+  const refreshCards = useCreditCardStore((s) => s.refresh)
   const refreshWallet = useWalletStore((s) => s.refresh)
+  const addTransaction = useTransactionStore((s) => s.addTransaction)
+  const categories = useCategoryStore((s) => s.categories)
+  const addCategory = useCategoryStore((s) => s.addCategory)
   const { addLog } = useLogStore()
 
   const [formOpen, setFormOpen] = useState(false)
@@ -392,6 +494,8 @@ export default function CreditCardList() {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [payTarget, setPayTarget] = useState(null)      // { card, statement }
   const [undoTarget, setUndoTarget] = useState(null)    // { card, statement }
+  const [cashbackTarget, setCashbackTarget] = useState(null) // { card, estimate }
+  const [autopayTarget, setAutopayTarget] = useState(null)   // { card, statement, amount }
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -505,6 +609,86 @@ export default function CreditCardList() {
     }
   }
 
+  /**
+   * บันทึกเงินคืนเข้าบัตร
+   *
+   * ไม่มีกลไกพิเศษ — เป็นรายรับที่ปลายทางเป็นบัตร ฐานข้อมูลกลับเครื่องหมายให้เอง
+   * หนี้ลดลงพอดี และยอดไปโผล่ในรายงานรายรับให้เลย
+   */
+  const handleCashback = async ({ kind, amount, date, note }) => {
+    const { card } = cashbackTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      // หมวดหมู่แยกไว้ จะได้ไม่ปนกับรายได้จริงตอนดูรายงาน สร้างให้ครั้งแรกครั้งเดียว
+      let categoryId = categories.find(
+        (c) => c.type === 'income' && c.name === CASHBACK_CATEGORY && !c.deleted
+      )?.id
+      if (!categoryId) {
+        categoryId = (await addCategory(CASHBACK_CATEGORY, 'income'))?.id ?? null
+      }
+
+      const label = kind === 'refund' ? 'คืนสินค้าเข้าบัตร' : 'เครดิตเงินคืน'
+      const target = walletTarget('card', { cardId: card.id })
+      await addTransaction({
+        date,
+        type: 'income',
+        amount,
+        method: 'card',
+        cardId: card.id,
+        category: categoryId,
+        itemName: `${label} — ${formatCard(card)}`,
+        otherIncomeType: label,
+        note: note || null,
+      }, {
+        effect: { target, delta: +amount },
+        log: buildLogEntry({
+          activityType: 'CARD_CASHBACK',
+          description: `${label} ${fmt(amount)} บาท เข้าบัตร "${formatCard(card)}"`,
+          walletEffect: { target: 'card', delta: +amount, cardId: card.id },
+          newValue: { cardId: card.id, amount, date, kind },
+        }),
+      })
+      await refreshCards()
+      setCashbackTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** ยืนยันว่าธนาคารหักบัญชีไปแล้วจริง — บันทึกเป็นการจ่ายบิลตามปกติ */
+  const handleAutopayConfirm = async () => {
+    const { card, statement, amount } = autopayTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await payStatement(statement.id, {
+        method: 'transfer',
+        accountId: card.autopayAccountId,
+        amount,
+        date: statement.dueDate,
+        log: buildLogEntry({
+          activityType: 'CARD_AUTOPAY',
+          description:
+            `ยืนยันหักบัญชีอัตโนมัติ บัตร "${formatCard(card)}" รอบ ${statement.cycle} ` +
+            `${fmt(amount)} บาท`,
+          walletEffect: { target: 'transfer', delta: -amount, transferAccountId: card.autopayAccountId },
+          newValue: { statementId: statement.id, cardId: card.id, amount, mode: card.autopayMode },
+        }),
+      })
+      await refreshWallet()
+      setAutopayTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleUndoPay = async () => {
     const { card, statement } = undoTarget
     if (busy) return
@@ -560,6 +744,8 @@ export default function CreditCardList() {
                 onDelete={setConfirmDelete}
                 onPay={(c, s) => setPayTarget({ card: c, statement: s })}
                 onUndoPay={(c, s) => setUndoTarget({ card: c, statement: s })}
+                onCashback={(c, estimate) => setCashbackTarget({ card: c, estimate })}
+                onAutopay={(c, s, amount) => setAutopayTarget({ card: c, statement: s, amount })}
               />
             ))}
           </div>
@@ -589,6 +775,29 @@ export default function CreditCardList() {
           busy={busy}
         />
       )}
+
+      {cashbackTarget && (
+        <CardCashbackPopup
+          cardLabel={getCardLabel(cashbackTarget.card.id)}
+          estimate={cashbackTarget.estimate}
+          onConfirm={handleCashback}
+          onCancel={() => setCashbackTarget(null)}
+          busy={busy}
+        />
+      )}
+
+      <ConfirmPopup
+        open={!!autopayTarget}
+        title="ยืนยันการหักบัญชี"
+        message={
+          autopayTarget
+            ? `ยืนยันว่าธนาคารหัก ${fmt(autopayTarget.amount)} บาท จากบัญชีที่ผูกไว้แล้วจริง?\n\nระบบจะบันทึกเป็นการจ่ายบิลรอบ ${autopayTarget.statement.cycle} ลงวันที่ ${autopayTarget.statement.dueDate}\n\nกดยืนยันเฉพาะเมื่อเช็คแล้วว่าเงินถูกหักจริง ถ้าเงินไม่พอหรือธนาคารหักไม่สำเร็จ อย่ากดยืนยัน`
+            : ''
+        }
+        onConfirm={handleAutopayConfirm}
+        onCancel={() => setAutopayTarget(null)}
+        confirmLabel="ยืนยันว่าถูกหักแล้ว"
+      />
 
       <ConfirmPopup
         open={!!undoTarget}

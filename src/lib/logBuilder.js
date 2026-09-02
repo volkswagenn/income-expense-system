@@ -44,6 +44,8 @@ export const ACTIVITY_LABELS = {
   INSTALLMENT_CREATE: 'เริ่มผ่อนชำระ',
   INSTALLMENT_SETTLE: 'ปิดยอดผ่อนก่อนกำหนด',
   INSTALLMENT_CANCEL: 'ยกเลิกการผ่อน',
+  CARD_CASHBACK: 'เงินคืนเข้าบัตร',
+  CARD_AUTOPAY: 'ยืนยันหักบัญชีอัตโนมัติ',
   SUB_CREATE: 'สร้างกระเป๋าตังค์',
   SUB_DELETE: 'ลบกระเป๋าตังค์',
   SUB_RENAME: 'เปลี่ยนชื่อกระเป๋า',

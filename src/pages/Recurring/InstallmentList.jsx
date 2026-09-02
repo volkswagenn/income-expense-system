@@ -6,6 +6,7 @@ import { buildLogEntry } from '../../lib/logBuilder'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import DatePicker from '../../components/shared/DatePicker'
 import BankLogo from '../../components/shared/BankLogo'
+import { formatIsoThai } from '../../lib/cardCycle'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -76,7 +77,8 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
   const total = Number(installment.totalAmount)
   const done = progress.paidCount + progress.billedCount
   const pct = installment.months > 0 ? (done / installment.months) * 100 : 0
-  const nextRow = progress.rows.find((r) => r.status === 'pending' || r.status === 'billed')
+  // "งวดถัดไป" คืองวดที่ยังไม่ถูกเรียกเก็บ งวดที่อยู่ในบิลแล้วถือว่าเลยไปแล้ว
+  const nextRow = progress.rows.find((r) => r.status === 'pending')
   const isActive = installment.status === 'active'
 
   return (
@@ -115,7 +117,7 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
 
       {isActive && nextRow && (
         <p className="text-xs text-gray-600">
-          งวดถัดไป งวดที่ {nextRow.seq} · {fmt(nextRow.amount)} บาท · ครบกำหนด {nextRow.dueDate}
+          งวดถัดไป งวดที่ {nextRow.seq} · {fmt(nextRow.amount)} บาท · ครบกำหนด {formatIsoThai(nextRow.dueDate)}
         </p>
       )}
 
@@ -161,12 +163,12 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
                   <tr key={r.id} className="border-t border-gray-100">
                     <td className="py-1.5 pr-2 tabular-nums text-gray-600">{r.seq}</td>
                     <td className="py-1.5 pr-2 tabular-nums text-gray-500">{r.cycle}</td>
-                    <td className="py-1.5 pr-2 tabular-nums text-gray-500">{r.dueDate}</td>
+                    <td className="py-1.5 pr-2 tabular-nums text-gray-500">{formatIsoThai(r.dueDate)}</td>
                     <td className="py-1.5 pr-2 tabular-nums text-right text-gray-700">{fmt(r.amount)}</td>
                     <td className="py-1.5 pr-2">
                       <span className={`inline-block rounded-full border px-2 py-0.5 ${st.cls}`}>{st.label}</span>
                     </td>
-                    <td className="py-1.5 tabular-nums text-emerald-600">{r.paidAt ?? '—'}</td>
+                    <td className="py-1.5 tabular-nums text-emerald-600">{r.paidAt ? formatIsoThai(r.paidAt) : '—'}</td>
                   </tr>
                 )
               })}
