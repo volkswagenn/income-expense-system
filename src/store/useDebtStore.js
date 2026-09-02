@@ -30,6 +30,13 @@ const useDebtStore = create((set, get) => ({
   undoEntry: async (id, log) => { const r = await api.undoDebtEntry(id, log); await get().refresh(); return r },
   settleDebt: async (id, params) => { const r = await api.settleDebt(id, params); await get().refresh(); return r },
   cancelDebt: async (id, log) => { const r = await api.cancelDebt(id, log); await get().refresh(); return r },
+  /** แก้สัญญาทั้งฉบับ — งวดที่จ่ายไปแล้วไม่ถูกแตะ */
+  editDebt: async (id, data, schedule, log) => {
+    const d = await api.editDebt(id, data, schedule, log)
+    await get().refresh()
+    return d
+  },
+
   updateDebt: async (id, changes) => {
     const d = await api.updateDebt(id, changes)
     set((s) => ({ debts: s.debts.map((x) => (x.id === id ? { ...x, ...d } : x)) }))

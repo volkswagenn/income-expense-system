@@ -108,3 +108,43 @@ export async function updateDebt(id, { name, counterparty, categoryId, term, not
   )
   return fromRow('debts', row)
 }
+
+/**
+ * แก้ไขสัญญาทั้งฉบับ รวมยอด จำนวนงวด และวันครบกำหนด
+ *
+ * งวดที่จ่ายผ่านระบบไปแล้ว (paid) ฝั่งฐานข้อมูลจะไม่แตะเลย เพราะมีเงินออกจาก
+ * กระเป๋าและมีรายการผูกอยู่จริง ส่วนงวดที่เหลือถูกสร้างใหม่ตามตารางที่ส่งไป
+ * ต้องทำในคำสั่งเดียว ไม่งั้นเน็ตหลุดกลางทางจะได้ตารางงวดครึ่งเก่าครึ่งใหม่
+ */
+export async function editDebt(id, data, schedule, log = null) {
+  const prepaid = data.prepaidCount ?? 0
+  const row = await unwrap(supabase.rpc("edit_debt", {
+    p_debt: id,
+    p_data: {
+      name: data.name,
+      counterparty: data.counterparty || null,
+      category_id: data.categoryId || null,
+      term: data.term === "short" ? "short" : "long",
+      note: data.note || null,
+      principal_amount: data.principalAmount ?? data.totalAmount,
+      total_amount: data.totalAmount,
+      months: data.months,
+      monthly_amount: data.monthlyAmount,
+      interest_rate: data.interestRate ?? 0,
+      tiers: data.tiers ?? null,
+      prepaid_count: prepaid,
+      first_due: data.firstDue,
+      due_day: data.dueDay,
+      default_method: data.defaultMethod || null,
+      default_account_id: data.defaultAccountId || null,
+    },
+    p_entries: schedule.map((e) => ({
+      seq: e.seq,
+      due_date: toDateString(e.dueDate),
+      amount: e.amount,
+      status: e.seq <= prepaid ? "prepaid" : "pending",
+    })),
+    p_log: log,
+  }))
+  return fromRow("debts", row)
+}

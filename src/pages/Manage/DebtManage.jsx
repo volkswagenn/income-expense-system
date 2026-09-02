@@ -55,69 +55,78 @@ function DebtFormPopup({ onSave, onClose, busy }) {
 }
 
 /**
- * แก้ไขข้อมูลอธิบายของหนี้ — ชื่อ เจ้าหนี้ หมวดหมู่ ระยะ หมายเหตุ
- * ยอดกับตารางงวดแก้ไม่ได้ เพราะงวดที่จ่ายไปแล้วเป็นรายการจริง ถ้าผิดให้ยกเลิกแล้วสร้างใหม่
+ * แก้ไขหนี้สิน — แก้ได้ทุกอย่างเหมือนตอนสร้าง รวมยอด จำนวนงวด และวันครบกำหนด
+ *
+ * เดิมแก้ได้แค่ชื่อกับหมายเหตุ เพราะกลัวไปทับงวดที่จ่ายเงินไปแล้ว แต่คนกรอกผิด
+ * ตั้งแต่แรกก็มี การบังคับให้ยกเลิกแล้วสร้างใหม่ทำให้ประวัติการจ่ายที่ถูกต้องอยู่แล้ว
+ * หายไปด้วย ซึ่งแย่กว่าปัญหาเดิม
+ *
+ * ฝั่งฐานข้อมูลจะไม่แตะงวดที่จ่ายผ่านระบบไปแล้วเลย (ดู edit_debt ใน debt.sql)
+ * ตรงนี้จึงบอกผู้ใช้ให้ชัดว่าอะไรจะถูกสร้างใหม่และอะไรจะคงเดิม
  */
-function DebtEditPopup({ debt, onSave, onClose, busy }) {
-  const isRecv = debt.direction === 'receivable'
-  const [v, setV] = useState({
+function DebtEditPopup({ debt, entries = [], onSave, onClose, busy }) {
+  const paidCount = entries.filter((e) => e.status === 'paid').length
+  const prepaidCount = entries.filter((e) => e.status === 'prepaid').length
+
+  // แปลงสัญญาที่บันทึกไว้กลับเป็นค่าในฟอร์ม เพื่อให้แก้ต่อจากของเดิมได้
+  const [v, setV] = useState(() => ({
+    ...EMPTY_DEBT,
+    direction: debt.direction ?? 'payable',
     name: debt.name ?? '',
     counterparty: debt.counterparty ?? '',
     categoryId: debt.categoryId ?? '',
-    term: debt.term ?? 'long',
     note: debt.note ?? '',
-  })
+    term: debt.term ?? 'long',
+    mode: Number(debt.interestRate) > 0 ? 'calc' : 'known',
+    monthly: String(debt.monthlyAmount ?? ''),
+    principal: String(debt.principalAmount ?? ''),
+    rate: String(debt.interestRate ?? '0'),
+    months: String(debt.months ?? ''),
+    dueDay: String(debt.dueDay ?? ''),
+    firstDue: debt.firstDue ?? '',
+    prepaid: (debt.prepaidCount ?? 0) > 0,
+    prepaidCount: String(debt.prepaidCount ?? ''),
+    method: debt.defaultMethod ?? 'transfer',
+    accountId: debt.defaultAccountId ?? '',
+  }))
   const [error, setError] = useState('')
-  const set = (k, x) => { setV({ ...v, [k]: x }); setError('') }
+  const calc = computeDebt(v)
+
   const submit = () => {
-    if (!v.name.trim()) return setError('กรอกชื่อรายการ')
-    onSave(v)
+    const err = validateDebt(v, calc)
+    if (err) return setError(err)
+    if (calc.months < paidCount) {
+      return setError(`ลดเหลือ ${calc.months} งวดไม่ได้ เพราะจ่ายผ่านระบบไปแล้ว ${paidCount} งวด`)
+    }
+    onSave(v, calc)
   }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
           <h3 className="font-semibold text-base">📒 แก้ไขหนี้สิน</h3>
           <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
         </div>
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="label">ชื่อรายการ</label>
-            <input className="input" value={v.name} onChange={(e) => set('name', e.target.value)} />
-          </div>
-          <div>
-            <label className="label">{isRecv ? 'ใครยืม' : 'เจ้าหนี้ / ผู้ให้กู้'}</label>
-            <input className="input" value={v.counterparty} onChange={(e) => set('counterparty', e.target.value)} />
-          </div>
-          <div>
-            <label className="label">หมวดหมู่ของหนี้</label>
-            <CategorySelect type={isRecv ? 'income' : 'expense'} value={v.categoryId} onChange={(id) => set('categoryId', id)} />
-            <p className="text-xs text-gray-400 mt-1">ค่างวดที่จ่ายจะลงหมวดนี้ในรายงาน</p>
-          </div>
-          <div>
-            <label className="label">ระยะของหนี้</label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {Object.entries(TERMS).map(([k, t]) => (
-                <button key={k} type="button"
-                  className={`rounded-xl border px-3 py-2 text-left ${v.term === k ? 'border-gray-900 ring-1 ring-gray-900 bg-white' : 'border-gray-200 bg-white'}`}
-                  onClick={() => set('term', k)}>
-                  <span className="block text-sm font-medium">{t.label}</span>
-                  <span className="block text-xs text-gray-500">{t.note}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="label">หมายเหตุ</label>
-            <input className="input" value={v.note} onChange={(e) => set('note', e.target.value)} />
-          </div>
-          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-            ยอด จำนวนงวด และวันครบกำหนดแก้ไม่ได้ เพราะงวดที่จ่ายไปแล้วเป็นรายการจริง
-            ถ้าสัญญาผิดให้ยกเลิกแล้วสร้างใหม่
+
+        <div className="p-5">
+          {paidCount > 0 && (
+            <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3">
+              จ่ายผ่านระบบไปแล้ว {paidCount} งวด — งวดเหล่านี้จะไม่ถูกแตะ แก้ได้เฉพาะงวดที่ยังไม่จ่าย
+            </p>
+          )}
+
+          <DebtFields value={v} onChange={(x) => { setV(x); setError('') }} />
+
+          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mt-3">
+            กดบันทึกแล้วตารางงวดที่ยังไม่จ่ายจะถูกสร้างใหม่ตามค่าที่แก้
+            {prepaidCount > 0 && ' รวมงวดที่ทำเครื่องหมายว่าจ่ายมาก่อนใช้ระบบด้วย'}
           </p>
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">⚠️ {error}</p>}
         </div>
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
+
+        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
           <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
           <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? '⏳' : 'บันทึก'}</button>
         </div>
@@ -172,7 +181,7 @@ function DebtRow({ debt, categoryName, onEdit, onCancelDebt }) {
 
 export default function DebtManage() {
   const debts = useDebtStore((s) => s.debts)
-  const { createDebt, updateDebt, cancelDebt, getProgress } = useDebtStore()
+  const { createDebt, editDebt, cancelDebt, getProgress, getEntries } = useDebtStore()
   const categories = useCategoryStore((s) => s.categories)
   const { addLog } = useLogStore()
 
@@ -208,18 +217,23 @@ export default function DebtManage() {
     setFormOpen(false)
   })
 
-  const handleEdit = (v) => run(async () => {
+  const handleEdit = (v, calc) => run(async () => {
     const debt = editing
-    await updateDebt(debt.id, {
-      name: v.name.trim(), counterparty: v.counterparty.trim(), categoryId: v.categoryId || null,
-      term: v.term, note: v.note,
-      defaultMethod: debt.defaultMethod, defaultAccountId: debt.defaultAccountId,
-    })
-    addLog(buildLogEntry({
-      activityType: 'DEBT_UPDATE',
-      description: `แก้ไขหนี้สิน "${debt.name}"${v.name.trim() !== debt.name ? ` → "${v.name.trim()}"` : ''}`,
+    await editDebt(debt.id, {
+      name: v.name.trim(), counterparty: v.counterparty.trim(),
+      categoryId: v.categoryId || null, term: calc.term,
+      principalAmount: calc.principal, totalAmount: calc.total, months: calc.months,
+      monthlyAmount: calc.monthly, interestRate: v.mode === "calc" ? Number(v.rate) || 0 : 0,
+      prepaidCount: calc.prepaidCount, firstDue: format(calc.firstDue, "yyyy-MM-dd"), dueDay: calc.dueDay,
+      note: v.note,
+      defaultMethod: v.method, defaultAccountId: v.method === "transfer" ? v.accountId : null,
+    }, calc.rows, buildLogEntry({
+      activityType: "DEBT_UPDATE",
+      description:
+        `แก้ไขหนี้สิน "${debt.name}"${v.name.trim() !== debt.name ? ` → "${v.name.trim()}"` : ""} ` +
+        `${fmt(calc.total)} บาท ${calc.months} งวด งวดละ ${fmt(calc.monthly)}`,
       oldValue: debt,
-      newValue: { ...debt, ...v },
+      newValue: { name: v.name, total: calc.total, months: calc.months, term: calc.term, dueDay: calc.dueDay },
     }))
     setEditing(null)
   })
@@ -306,7 +320,15 @@ export default function DebtManage() {
       )}
 
       {formOpen && <DebtFormPopup onSave={handleCreate} onClose={() => setFormOpen(false)} busy={busy} />}
-      {editing && <DebtEditPopup debt={editing} onSave={handleEdit} onClose={() => setEditing(null)} busy={busy} />}
+      {editing && (
+        <DebtEditPopup
+          debt={editing}
+          entries={getEntries(editing.id)}
+          onSave={handleEdit}
+          onClose={() => setEditing(null)}
+          busy={busy}
+        />
+      )}
 
       <ConfirmPopup open={!!cancelTarget} title="ยกเลิกหนี้สิน"
         message={cancelTarget

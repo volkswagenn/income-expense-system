@@ -382,6 +382,94 @@ $$;
 
 
 -- ###########################################################################
+-- ##  5.5 แก้ไขสัญญา (ยอด จำนวนงวด วันครบกำหนด)
+-- ###########################################################################
+--
+-- เดิมแก้ได้แค่ชื่อกับหมายเหตุ เพราะกลัวไปทับงวดที่จ่ายเงินไปแล้ว
+-- แต่คนกรอกผิดตั้งแต่แรกก็มี การบังคับให้ยกเลิกแล้วสร้างใหม่ทำให้ประวัติการจ่าย
+-- ที่ทำไว้ถูกต้องแล้วหายไปด้วย ซึ่งแย่กว่าเดิม
+--
+-- วิธีที่ปลอดภัย: งวดที่ "จ่ายผ่านระบบแล้ว" (status = paid) ห้ามแตะเด็ดขาด
+-- เพราะมีเงินออกจากกระเป๋าและมีรายการผูกอยู่จริง ส่วนงวดที่เหลือสร้างใหม่ได้ทั้งหมด
+--
+-- ถ้าจำนวนงวดใหม่น้อยกว่างวดที่จ่ายไปแล้ว = ตัดประวัติทิ้ง จึงปฏิเสธไปตรงๆ
+
+create or replace function public.edit_debt(
+  p_debt    uuid,
+  p_data    jsonb,
+  p_entries jsonb,
+  p_log     jsonb default null
+) returns debts language plpgsql security definer set search_path = public as $$
+declare
+  v_debt debts;
+  v_paid int;
+  v_e    jsonb;
+begin
+  select * into v_debt from debts where id = p_debt;
+  if not found then raise exception 'ไม่พบรายการหนี้สินนี้'; end if;
+  perform assert_can_edit(v_debt.shop_id);
+
+  if v_debt.status = 'cancelled' then raise exception 'รายการนี้ถูกยกเลิกไปแล้ว'; end if;
+  if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
+    raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
+  end if;
+
+  select coalesce(max(seq), 0) into v_paid
+    from debt_entries where debt_id = p_debt and status = 'paid';
+
+  if (p_data->>'months')::int < v_paid then
+    raise exception 'ลดจำนวนงวดเหลือ % ไม่ได้ เพราะจ่ายผ่านระบบไปแล้วถึงงวดที่ %',
+      (p_data->>'months')::int, v_paid;
+  end if;
+
+  update debts set
+    name               = coalesce(p_data->>'name', name),
+    counterparty       = p_data->>'counterparty',
+    category_id        = nullif(p_data->>'category_id', '')::uuid,
+    note               = p_data->>'note',
+    term               = case when p_data->>'term' = 'short' then 'short' else 'long' end,
+    principal_amount   = coalesce((p_data->>'principal_amount')::numeric, (p_data->>'total_amount')::numeric),
+    total_amount       = (p_data->>'total_amount')::numeric,
+    months             = (p_data->>'months')::int,
+    monthly_amount     = (p_data->>'monthly_amount')::numeric,
+    interest_rate      = coalesce((p_data->>'interest_rate')::numeric, 0),
+    tiers              = p_data->'tiers',
+    prepaid_count      = coalesce((p_data->>'prepaid_count')::int, 0),
+    first_due          = (p_data->>'first_due')::date,
+    due_day            = (p_data->>'due_day')::int,
+    default_method     = nullif(p_data->>'default_method', ''),
+    default_account_id = nullif(p_data->>'default_account_id', '')::uuid,
+    updated_at         = now()
+  where id = p_debt
+  returning * into v_debt;
+
+  -- งวดที่ยังไม่ได้จ่ายผ่านระบบ ล้างทิ้งแล้วสร้างใหม่ตามตารางที่ส่งมา
+  delete from debt_entries where debt_id = p_debt and status <> 'paid';
+
+  for v_e in select * from jsonb_array_elements(p_entries) loop
+    -- ข้ามงวดที่จ่ายไปแล้ว ของเดิมยังอยู่ครบไม่ถูกแตะ
+    if (v_e->>'seq')::int <= v_paid then
+      continue;
+    end if;
+    insert into debt_entries (shop_id, debt_id, seq, due_date, amount, status)
+    values (
+      v_debt.shop_id, p_debt,
+      (v_e->>'seq')::int,
+      (v_e->>'due_date')::date,
+      (v_e->>'amount')::numeric,
+      coalesce(v_e->>'status', 'pending')
+    )
+    on conflict (debt_id, seq) do update
+      set due_date = excluded.due_date, amount = excluded.amount, status = excluded.status;
+  end loop;
+
+  perform write_log(v_debt.shop_id, p_log);
+  return v_debt;
+end;
+$$;
+
+
+-- ###########################################################################
 -- ##  6. RLS + Realtime
 -- ###########################################################################
 
