@@ -26,19 +26,29 @@ const METHOD_OPTIONS = [
   { value: 'pending', label: '📋 ค้างชำระ' },
 ]
 
+/**
+ * ช่องข้อความที่ว่างได้ ฐานข้อมูลเก็บเป็น null ไม่ใช่ '' — พอ spread เข้าฟอร์มตรงๆ
+ * ค่า null จะทับค่าตั้งต้น '' ของ EMPTY แล้วไปพังตอน .trim() ตอนกดบันทึก
+ * (อาการ: แก้รายการที่ไม่ได้กรอกผู้รับเงิน/หมายเหตุ แล้วขึ้น Cannot read properties of null)
+ */
+const TEXT_FIELDS = ['name', 'category', 'vendor', 'note', 'defaultMethod', 'defaultTransferAccountId']
+
+function toFormValues(item) {
+  if (!item) return { ...EMPTY }
+  const form = {
+    ...EMPTY,
+    ...item,
+    fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '',
+    frequency: item.frequency ?? 'monthly',
+    billingMonth: item.billingMonth ?? '',
+    vatRate: Number(item.vatRate ?? 0),
+  }
+  for (const key of TEXT_FIELDS) form[key] = form[key] ?? ''
+  return form
+}
+
 export default function RecurringItemForm({ item, onSave, onClose }) {
-  const [form, setForm] = useState(
-    item
-      ? {
-          ...EMPTY,
-          ...item,
-          fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '',
-          frequency: item.frequency ?? 'monthly',
-          billingMonth: item.billingMonth ?? '',
-          vatRate: Number(item.vatRate ?? 0),
-        }
-      : { ...EMPTY }
-  )
+  const [form, setForm] = useState(() => toFormValues(item))
   const [error, setError] = useState({})
   const [showNumpad, setShowNumpad] = useState(false)
   // กันกดซ้ำ — การบันทึกต้องรอเซิร์ฟเวอร์ตอบ ระหว่างนั้นหน้าต่างยังเปิดอยู่
@@ -49,7 +59,7 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
 
   const validate = () => {
     const e = {}
-    if (!form.name.trim()) e.name = 'กรอกชื่อรายการ'
+    if (!(form.name ?? '').trim()) e.name = 'กรอกชื่อรายการ'
     if (!form.category) e.category = 'เลือกหมวดหมู่'
     if (!form.billingDay || isNaN(Number(form.billingDay)) || Number(form.billingDay) < 1 || Number(form.billingDay) > 31)
       e.billingDay = 'วันที่ 1–31'
@@ -70,7 +80,7 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
     try {
       await onSave({
         ...form,
-        name: form.name.trim(),
+        name: (form.name ?? '').trim(),
         billingDay: Number(form.billingDay),
         frequency: form.frequency === 'yearly' ? 'yearly' : 'monthly',
         billingMonth: form.frequency === 'yearly' ? Number(form.billingMonth) : null,
@@ -78,8 +88,8 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
         // ช่องที่ผู้ใช้ล้างต้องส่งเป็น null ไม่ใช่ undefined — toRow() ทิ้งคีย์ undefined
         // ทำให้ค่าเดิมค้างอยู่ในฐานข้อมูล (ลบโน้ตแล้วโน้ตไม่หาย, ยกเลิกวิธีจ่ายประจำแล้วยังถูกเลือกให้)
         fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : null,
-        vendor: form.vendor.trim() || null,
-        note: form.note.trim() || null,
+        vendor: (form.vendor ?? '').trim() || null,
+        note: (form.note ?? '').trim() || null,
         defaultMethod: form.defaultMethod || null,
         defaultTransferAccountId:
           form.defaultMethod === 'transfer' ? (form.defaultTransferAccountId || null) : null,
