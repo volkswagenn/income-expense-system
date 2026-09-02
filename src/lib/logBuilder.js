@@ -42,6 +42,8 @@ export const ACTIVITY_LABELS = {
   CARD_PAYMENT: 'จ่ายบิลบัตรเครดิต',
   CARD_PAYMENT_UNDO: 'ย้อนการจ่ายบิลบัตร',
   INSTALLMENT_CREATE: 'เริ่มผ่อนชำระ',
+  INSTALLMENT_PAY: 'จ่ายค่างวดผ่อน',
+  INSTALLMENT_PAY_UNDO: 'ย้อนการจ่ายค่างวด',
   INSTALLMENT_SETTLE: 'ปิดยอดผ่อนก่อนกำหนด',
   INSTALLMENT_CANCEL: 'ยกเลิกการผ่อน',
   CARD_CASHBACK: 'เงินคืนเข้าบัตร',

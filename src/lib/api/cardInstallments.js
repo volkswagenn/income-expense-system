@@ -106,3 +106,27 @@ export async function updateInstallment(id, { name, vendor, categoryId, note }) 
   )
   return fromRow('card_installments', row)
 }
+
+/**
+ * จ่ายค่างวดทีละงวดจากบัญชี/เงินสด
+ *
+ * ตัดเงิน สร้างรายจ่าย และปิดงวด จบในทรานแซกชันเดียวที่ฐานข้อมูล
+ * ถ้าแยกยิงหลายคำสั่งแล้วเน็ตหลุดคั่นกลาง จะได้เงินที่หายไปโดยไม่มีรายการ
+ */
+export async function payInstallmentEntry(entryId, { method, accountId = null, amount, paidAt, log = null }) {
+  const row = await unwrap(supabase.rpc('pay_installment_entry', {
+    p_entry: entryId,
+    p_method: method,
+    p_account: accountId,
+    p_amount: amount,
+    p_paid_at: paidAt,
+    p_log: log,
+  }))
+  return fromRow('card_installment_entries', row)
+}
+
+/** ย้อนการจ่ายค่างวด — คืนเงินเข้ากระเป๋าเดิมและลบรายจ่ายที่ผูกไว้ */
+export async function undoInstallmentEntry(entryId, log = null) {
+  const row = await unwrap(supabase.rpc('undo_installment_entry', { p_entry: entryId, p_log: log }))
+  return fromRow('card_installment_entries', row)
+}

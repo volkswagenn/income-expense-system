@@ -122,6 +122,20 @@ const useCreditCardStore = create((set, get) => ({
     return ins
   },
 
+  /** จ่ายค่างวดทีละงวด — เงินออกจากบัญชี/เงินสด ไม่ผ่านบัตร */
+  payEntry: async (entryId, params) => {
+    const entry = await instApi.payInstallmentEntry(entryId, params)
+    await get().refresh()
+    return entry
+  },
+
+  /** ย้อนการจ่ายค่างวด */
+  undoEntry: async (entryId, log) => {
+    const entry = await instApi.undoInstallmentEntry(entryId, log)
+    await get().refresh()
+    return entry
+  },
+
   settleInstallment: async (id, params) => {
     const ins = await instApi.settleInstallment(id, params)
     await get().refresh()
@@ -158,9 +172,12 @@ const useCreditCardStore = create((set, get) => ({
 
     const rows = entries.map((e) => {
       const stmt = e.statementId ? stmts.find((s) => s.id === e.statementId) : null
-      let status = e.status                       // pending | billed | cancelled
+      // งวดจ่ายแล้วได้ 2 ทาง: จ่ายผ่านบิล (ดูจากใบแจ้งยอด) หรือจ่ายทีละงวดจากบัญชี
+      // (สถานะ paid มาจากฐานข้อมูลตรงๆ พร้อมเวลาที่จ่ายของตัวเอง)
+      let status = e.status                       // pending | billed | paid | cancelled
       if (status === 'billed' && stmt?.status === 'paid') status = 'paid'
-      return { ...e, status, paidAt: stmt?.status === 'paid' ? stmt.paidAt : null }
+      const paidAt = e.status === 'paid' ? e.paidAt : (stmt?.status === 'paid' ? stmt.paidAt : null)
+      return { ...e, status, paidAt }
     })
 
     const paid = rows.filter((r) => r.status === 'paid')

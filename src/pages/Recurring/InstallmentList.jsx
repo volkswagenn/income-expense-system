@@ -8,6 +8,7 @@ import DatePicker from '../../components/shared/DatePicker'
 import BankLogo from '../../components/shared/BankLogo'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
 import PickBillPopup from './PickBillPopup'
+import PayInstallmentPopup from './PayInstallmentPopup'
 import useWalletStore from '../../store/useWalletStore'
 import { formatIsoThai } from '../../lib/cardCycle'
 
@@ -70,7 +71,7 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
   )
 }
 
-function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
+function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry }) {
   const [open, setOpen] = useState(false)
   const progress = useCreditCardStore((s) => s.getInstallmentProgress(installment.id))
   const cardLabel = useCreditCardStore((s) => s.getCardLabel(installment.cardId))
@@ -129,9 +130,18 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
       </div>
 
       {isActive && nextRow && (
-        <p className="text-xs text-gray-600">
-          งวดถัดไป งวดที่ {nextRow.seq} · {fmt(nextRow.amount)} บาท · ครบกำหนด {formatIsoThai(nextRow.dueDate)}
-        </p>
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+          <p className="text-xs text-gray-600 min-w-0">
+            งวดถัดไป งวดที่ {nextRow.seq} · {fmt(nextRow.amount)} บาท · ครบกำหนด {formatIsoThai(nextRow.dueDate)}
+          </p>
+          {/* เงินจริงออกจากบัญชีเสมอ บัตรแค่ติดตามวงเงิน จึงจ่ายงวดได้ตลอดไม่ต้องรอบิล */}
+          <button
+            className="btn btn-primary text-xs !h-8 px-3 flex-shrink-0"
+            onClick={() => onPayEntry(installment, nextRow)}
+          >
+            จ่ายค่างวด
+          </button>
+        </div>
       )}
 
       <div className="flex gap-2 items-center">
@@ -195,10 +205,11 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
 
 export default function InstallmentList() {
   const installments = useCreditCardStore((s) => s.installments)
-  const { settleInstallment, cancelInstallment, payStatement } = useCreditCardStore()
+  const { settleInstallment, cancelInstallment, payStatement, payEntry } = useCreditCardStore()
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
   const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
+  const getCard = useCreditCardStore((s) => s.getCard)
   const refreshWallet = useWalletStore((s) => s.refresh)
   const { addLog } = useLogStore()
 
@@ -207,6 +218,7 @@ export default function InstallmentList() {
   const [cancelTarget, setCancelTarget] = useState(null)
   const [payTarget, setPayTarget] = useState(null)   // ใบแจ้งยอดที่กำลังจ่าย
   const [pickBill, setPickBill] = useState(false)   // หน้าต่างเลือกบิล
+  const [payEntryTarget, setPayEntryTarget] = useState(null) // { installment, entry }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -217,6 +229,32 @@ export default function InstallmentList() {
     (sum, s) => sum + (Number(s.amount || 0) - Number(s.paidAmount || 0)), 0
   )
 
+
+  const handlePayEntry = async ({ method, accountId, amount, paidAt }) => {
+    const { installment, entry } = payEntryTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await payEntry(entry.id, {
+        method, accountId, amount, paidAt,
+        log: buildLogEntry({
+          activityType: 'INSTALLMENT_PAY',
+          description:
+            `จ่ายค่างวด "${installment.name}" งวดที่ ${entry.seq}/${installment.months} ` +
+            `${fmt(amount)} บาท จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
+          walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
+          newValue: { entryId: entry.id, installmentId: installment.id, amount, method, paidAt },
+        }),
+      })
+      await refreshWallet()
+      setPayEntryTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const handlePayBill = async ({ method, accountId, amount, date }) => {
     const statement = payTarget
@@ -339,6 +377,7 @@ export default function InstallmentList() {
               <InstallmentCard
                 key={i.id}
                 installment={i}
+                onPayEntry={(ins, row) => setPayEntryTarget({ installment: ins, entry: row })}
                 onSettle={(ins, progress) => setSettleTarget({ installment: ins, progress })}
                 onCancelInstallment={(ins, progress) => setCancelTarget({ installment: ins, progress })}
               />
@@ -368,6 +407,17 @@ export default function InstallmentList() {
             </div>
           )}
         </>
+      )}
+
+      {payEntryTarget && (
+        <PayInstallmentPopup
+          installment={payEntryTarget.installment}
+          entry={payEntryTarget.entry}
+          card={getCard(payEntryTarget.installment.cardId)}
+          onConfirm={handlePayEntry}
+          onCancel={() => setPayEntryTarget(null)}
+          busy={busy}
+        />
       )}
 
       {pickBill && (
