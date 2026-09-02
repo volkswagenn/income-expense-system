@@ -6,6 +6,7 @@ import { buildLogEntry } from '../../lib/logBuilder'
 import SectionCard from '../../components/shared/SectionCard'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import ContextMenu from './ContextMenu'
+import SortableList from './SortableList'
 import { CATEGORY_THEME, CATEGORY_TYPE_LIST } from './categoryTheme'
 
 // ── แถวสำหรับพิมพ์ชื่อใหม่ / เปลี่ยนชื่อ ────────────────────────────────────────
@@ -70,7 +71,7 @@ function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, th
 // ── หน้าเพจ ────────────────────────────────────────────────────────────────────
 export default function CategoriesPage() {
   const categories = useCategoryStore((s) => s.categories)
-  const { addCategory, updateCategory, softDeleteCategory } = useCategoryStore()
+  const { addCategory, updateCategory, softDeleteCategory, reorderCategories } = useCategoryStore()
   const transactions = useTransactionStore((s) => s.transactions)
   const { addLog } = useLogStore()
 
@@ -80,6 +81,7 @@ export default function CategoriesPage() {
   const [renamingId, setRenamingId] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
+  const [sorting, setSorting] = useState(false)   // โหมดลากจัดลำดับ
 
   const theme = CATEGORY_THEME[catType]
   const tree = useMemo(() => buildCategoryTree(categories, catType), [categories, catType])
@@ -91,6 +93,7 @@ export default function CategoriesPage() {
     setRenamingId(null)
     setSelectedId(null)
     setMenu(null)
+    setSorting(false)
   }
 
   // จำนวนรายการที่ใช้แต่ละหมวดหมู่ (นับเฉพาะตัวมันเอง ไม่รวมย่อย)
@@ -104,6 +107,15 @@ export default function CategoriesPage() {
 
   const usageWithChildren = (node) =>
     (usageById[node.id] ?? 0) + (node.children ?? []).reduce((n, c) => n + (usageById[c.id] ?? 0), 0)
+
+  const handleReorder = async (ids) => {
+    await reorderCategories(ids)
+    addLog(buildLogEntry({
+      activityType: 'CATEGORY_UPDATE',
+      description: `จัดลำดับหมวดหมู่${theme.label}ใหม่ (${ids.length} รายการ)`,
+      newValue: { order: ids },
+    }))
+  }
 
   const openMenu = (e, node, depth) => {
     e.preventDefault()
@@ -252,12 +264,22 @@ export default function CategoriesPage() {
               หมวดหมู่{theme.label}ทั้งหมด
             </span>
             <span className="text-xs text-gray-500">{tree.length} หมวดหมู่หลัก</span>
-            <button
-              className={`btn text-xs py-1 px-2.5 ${theme.button}`}
-              onClick={() => { setCreatingUnder(null); setRenamingId(null) }}
-            >
-              + หมวดหมู่หลัก
-            </button>
+            {tree.length > 1 && (
+              <button
+                className={`btn text-xs py-1 px-2.5 ${sorting ? theme.button : 'btn-secondary'}`}
+                onClick={() => { setSorting((v) => !v); setCreatingUnder(undefined); setRenamingId(null); setMenu(null) }}
+              >
+                {sorting ? '✓ เสร็จแล้ว' : '⇅ จัดลำดับ'}
+              </button>
+            )}
+            {!sorting && (
+              <button
+                className={`btn text-xs py-1 px-2.5 ${theme.button}`}
+                onClick={() => { setCreatingUnder(null); setRenamingId(null) }}
+              >
+                + หมวดหมู่หลัก
+              </button>
+            )}
           </div>
 
           {/* ช่องสร้างหมวดหมู่หลัก */}
@@ -278,7 +300,49 @@ export default function CategoriesPage() {
             </p>
           )}
 
-          {tree.map((main) => (
+          {/* โหมดจัดลำดับ — แสดงรายการแบบเรียบๆ ที่ลากได้อย่างเดียว
+              ตัดเมนูคลิกขวาและการเปลี่ยนชื่อออก จะได้ไม่เผลอกดตอนกำลังลาก */}
+          {sorting ? (
+            <SortableList
+              items={tree}
+              onReorder={handleReorder}
+              renderItem={(main) => (
+                <div>
+                  <div className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 border ${theme.rowHover} border-transparent cursor-grab active:cursor-grabbing`}>
+                    <span className="text-gray-300 select-none">⋮⋮</span>
+                    <span className="select-none">📁</span>
+                    <span className={`flex-1 text-sm font-medium truncate ${theme.mainText}`}>{main.name}</span>
+                    {main.children.length > 0 && (
+                      <span className={`text-xs shrink-0 ${theme.countText}`}>{main.children.length} ย่อย</span>
+                    )}
+                  </div>
+
+                  {main.children.length > 1 && (
+                    <div className="ml-[26px]">
+                      <SortableList
+                        items={main.children}
+                        onReorder={handleReorder}
+                        renderItem={(sub) => (
+                          <div className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 border border-transparent ${theme.rowHover} cursor-grab active:cursor-grabbing`}>
+                            <span className="text-gray-300 select-none">⋮⋮</span>
+                            <span className="select-none">📄</span>
+                            <span className={`flex-1 text-sm truncate ${theme.subText}`}>{sub.name}</span>
+                          </div>
+                        )}
+                      />
+                    </div>
+                  )}
+
+                  {main.children.length === 1 && (
+                    <div className="ml-[26px] flex items-center gap-2.5 rounded-lg px-2.5 py-2 opacity-60">
+                      <span className="select-none">📄</span>
+                      <span className={`flex-1 text-sm truncate ${theme.subText}`}>{main.children[0].name}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            />
+          ) : tree.map((main) => (
             <div key={main.id}>
               {renamingId === main.id ? (
                 <InlineInput

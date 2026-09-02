@@ -14,11 +14,22 @@ export const INITIAL = { categories: [], vendors: [], quickItems: [] }
  * แปลงรายการหมวดหมู่แบนๆ เป็นโครงสร้างต้นไม้ [{ ...หลัก, children: [ย่อย] }]
  * แยกออกมาเป็นฟังก์ชันบริสุทธิ์เพื่อให้คอมโพเนนต์ห่อด้วย useMemo ได้
  */
+// เรียงตามลำดับที่ผู้ใช้จัดเอง แล้วใช้วันที่สร้างเป็นตัวตัดสินเมื่อลำดับเท่ากัน
+// (หมวดหมู่เก่าที่ยังไม่เคยถูกจัดจะมี sortOrder เป็น 0 เท่ากันหมด จึงเรียงตามเดิม)
+const byOrder = (a, b) =>
+  (Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)) ||
+  String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")) ||
+  String(a.id).localeCompare(String(b.id))
+
 export function buildCategoryTree(categories, type) {
   const active = categories.filter((c) => !c.deleted && (!type || c.type === type))
   return active
     .filter((c) => !c.parentId)
-    .map((main) => ({ ...main, children: active.filter((c) => c.parentId === main.id) }))
+    .sort(byOrder)
+    .map((main) => ({
+      ...main,
+      children: active.filter((c) => c.parentId === main.id).sort(byOrder),
+    }))
 }
 
 /**
@@ -74,6 +85,15 @@ const useCategoryStore = create((set, get) => ({
   },
 
   // ลบหมวดหมู่หลักจะลบหมวดหมู่ย่อยข้างในตามไปด้วย
+  /** จัดลำดับหมวดหมู่ใหม่ — อัปเดตหน้าจอทันทีแล้วค่อยยืนยันกับเซิร์ฟเวอร์ */
+  reorderCategories: async (ids) => {
+    const order = new Map(ids.map((id, i) => [id, i]))
+    set((s) => ({
+      categories: s.categories.map((c) => (order.has(c.id) ? { ...c, sortOrder: order.get(c.id) } : c)),
+    }))
+    await categoriesApi.reorderCategories(ids)
+  },
+
   softDeleteCategory: async (id) => {
     await categoriesApi.softDeleteCategory(id)
     const deletedAt = new Date().toISOString()

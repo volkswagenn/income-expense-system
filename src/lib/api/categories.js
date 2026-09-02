@@ -10,7 +10,8 @@ import { selectAll } from './_page'
 
 export async function listCategories() {
   return fromRows('categories', await selectAll(() =>
-    supabase.from('categories').select('*').eq('shop_id', getShopId()).order('created_at').order('id')
+    supabase.from('categories').select('*').eq('shop_id', getShopId())
+      .order('sort_order').order('created_at').order('id')
   ))
 }
 
@@ -101,4 +102,13 @@ export async function softDeleteQuickItem(id) {
       .select()
       .single()
   ))
+}
+
+/**
+ * จัดลำดับหมวดหมู่ใหม่ทั้งชุด — ส่ง id เรียงตามลำดับที่ต้องการ
+ * ทำเป็นคำสั่งเดียวที่ฐานข้อมูล ถ้าแยกอัปเดตทีละแถวแล้วเน็ตหลุดกลางทาง
+ * จะได้ลำดับครึ่งเก่าครึ่งใหม่ที่ไม่มีใครรู้ว่าเพี้ยน
+ */
+export async function reorderCategories(ids) {
+  await unwrap(supabase.rpc('reorder_categories', { p_shop: getShopId(), p_ids: ids }))
 }

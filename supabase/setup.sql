@@ -2287,3 +2287,34 @@ begin
 end;
 $$;
 
+
+-- ###########################################################################
+-- ##  จัดเรียงลำดับหมวดหมู่ (category-sort.sql)
+-- ###########################################################################
+
+alter table categories add column if not exists sort_order int not null default 0;
+
+create index if not exists categories_sort_idx
+  on categories (shop_id, type, sort_order, created_at);
+
+-- ── จัดลำดับใหม่ทั้งชุดในครั้งเดียว ────────────────────────────────────────
+--
+-- รับ id เรียงตามลำดับที่ต้องการ แล้วเขียน sort_order ตามตำแหน่งในอาเรย์
+-- ต้องทำเป็นคำสั่งเดียว ไม่ใช่ยิงอัปเดตทีละแถวจากหน้าจอ เพราะถ้าเน็ตหลุดกลางทาง
+-- จะได้ลำดับที่ครึ่งเก่าครึ่งใหม่ แล้วหมวดหมู่จะสลับตำแหน่งมั่วโดยไม่มีใครรู้
+
+create or replace function public.reorder_categories(
+  p_shop uuid,
+  p_ids  uuid[]
+) returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform assert_can_edit(p_shop);
+
+  update categories c
+     set sort_order = pos.idx
+    from unnest(p_ids) with ordinality as pos(id, idx)
+   where c.id = pos.id
+     and c.shop_id = p_shop;
+end;
+$$;
+
