@@ -130,7 +130,7 @@ export default function PayFromPicker({
 
       {open && draft && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={close}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-3.5 border-b bg-gray-50 flex items-center justify-between shrink-0">
               <h3 className="font-semibold text-base">จ่ายจาก</h3>
               <button type="button" className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={close}>×</button>
