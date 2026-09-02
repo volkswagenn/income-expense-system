@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import FilterBar from './FilterBar'
 import FinancialStatus from './FinancialStatus'
+import CardBillOutlook from './CardBillOutlook'
 import CalendarView from './CalendarView'
 import SectionCard from '../../components/shared/SectionCard'
 
@@ -33,6 +34,9 @@ export default function Dashboard() {
       <SectionCard title="สถานะการเงินปัจจุบัน">
         <FinancialStatus />
       </SectionCard>
+
+      {/* หัวข้อนี้ซ่อนตัวเองเมื่อยังไม่มีบัตร — คนที่ไม่ใช้บัตรจะไม่เห็นเลย */}
+      <CardBillOutlook months={2} />
 
       {/* Calendar + Sidebar */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import * as cardApi from '../lib/api/creditCards'
 import * as stmtApi from '../lib/api/cardStatements'
 import * as instApi from '../lib/api/cardInstallments'
-import { cyclePeriod, pendingCycles, toDateString } from '../lib/cardCycle'
+import { cyclePeriod, pendingCycles, toDateString, clampedDate, dueDateFor, cycleKey } from '../lib/cardCycle'
 import useTransactionStore from './useTransactionStore'
 
 /**
@@ -238,6 +238,92 @@ const useCreditCardStore = create((set, get) => ({
   /** ยอดที่ต้องจ่ายรวมทุกใบที่ยังค้าง */
   getDueTotal: () =>
     get().getUnpaidStatements().reduce((sum, s) => sum + (Number(s.amount) - Number(s.paidAmount)), 0),
+
+  /**
+   * บิลบัตรที่ต้องจ่ายในอีก N เดือนข้างหน้า — ทั้งที่ปิดรอบแล้วและที่ยังไม่ปิด
+   *
+   * มีสองชนิดที่ต้องแยกให้ผู้ใช้เห็นชัด
+   *   • ปิดรอบแล้ว (closed) — ยอดนิ่งแล้ว ไม่เปลี่ยนอีก
+   *   • ประมาณการ (projected) — รอบยังไม่ปิด ยอดยังขยับได้ทุกครั้งที่รูด
+   *     คิดจากรายการที่รูดไปแล้วในรอบ บวกงวดผ่อนที่จะถูกเรียกเก็บในรอบนั้น
+   *
+   * ตั้งใจไม่รวมยอดยกมาในตัวประมาณการ เพราะยังไม่รู้ว่าบิลรอบก่อนจะถูกจ่ายครบไหม
+   * เดาแล้วผิดแย่กว่าไม่เดา
+   */
+  getUpcomingBills: (months = 2) => {
+    const today = new Date()
+    const horizon = new Date(today.getFullYear(), today.getMonth() + months, today.getDate())
+    const txs = useTransactionStore.getState().transactions
+    const rows = []
+
+    for (const card of get().cards.filter((c) => c.enabled)) {
+      // 1) ใบที่ปิดรอบแล้วและยังจ่ายไม่ครบ — ยอดแน่นอน
+      for (const s of get().statements) {
+        if (s.cardId !== card.id || s.status === 'paid') continue
+        const due = new Date(`${s.dueDate}T00:00:00`)
+        if (due > horizon) continue
+        rows.push({
+          key: `s-${s.id}`,
+          kind: 'closed',
+          cardId: card.id,
+          cycle: s.cycle,
+          dueDate: s.dueDate,
+          due,
+          amount: Number(s.amount) - Number(s.paidAmount),
+          overdue: due < new Date(today.getFullYear(), today.getMonth(), today.getDate()),
+        })
+      }
+
+      // 2) รอบที่ยังไม่ปิด ไล่ไปข้างหน้าจนพ้นช่วงที่ดู
+      const closed = new Set(get().statements.filter((s) => s.cardId === card.id).map((s) => s.cycle))
+      const base = cyclePeriod(card.closingDay, card.dueDay)
+      for (let k = 0; k <= months + 1; k++) {
+        const end = clampedDate(base.end.getFullYear(), base.end.getMonth() + k, card.closingDay)
+        const due = dueDateFor(end, card.dueDay)
+        if (due > horizon) break
+        const cycle = cycleKey(end)
+        if (closed.has(cycle)) continue
+
+        const prevEnd = clampedDate(end.getFullYear(), end.getMonth() - 1, card.closingDay)
+        const start = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate() + 1)
+        const from = toDateString(start)
+        const to = toDateString(end)
+
+        const inRange = txs.filter((t) => t.cardId === card.id && t.date >= from && t.date <= to)
+        const spend = inRange.filter((t) => t.type === 'expense')
+          .reduce((s, t) => s + Number(t.amount || 0), 0)
+        const credit = inRange.filter((t) => t.type === 'income')
+          .reduce((s, t) => s + Number(t.amount || 0), 0)
+
+        // งวดผ่อนที่จะถูกเรียกเก็บในรอบนี้ ยังไม่เป็น transaction จึงต้องบวกเพิ่ม
+        const activeIds = new Set(
+          get().installments.filter((i) => i.status === 'active' && i.cardId === card.id).map((i) => i.id)
+        )
+        const installment = get().entries
+          .filter((e) => activeIds.has(e.installmentId) && e.cycle === cycle && e.status === 'pending')
+          .reduce((s, e) => s + Number(e.amount || 0), 0)
+
+        const amount = spend - credit + installment
+        if (amount <= 0) continue
+        rows.push({
+          key: `p-${card.id}-${cycle}`,
+          kind: 'projected',
+          cardId: card.id,
+          cycle,
+          dueDate: toDateString(due),
+          due,
+          amount,
+          installment,
+          overdue: false,
+        })
+      }
+    }
+
+    rows.sort((a, b) => a.due - b.due)
+    const closedTotal = rows.filter((r) => r.kind === 'closed').reduce((s, r) => s + r.amount, 0)
+    const projectedTotal = rows.filter((r) => r.kind === 'projected').reduce((s, r) => s + r.amount, 0)
+    return { rows, closedTotal, projectedTotal, total: closedTotal + projectedTotal, months, horizon }
+  },
 
   /**
    * ยอดที่สะสมอยู่ในรอบที่ยังไม่ปิด — คำนวณสดจากรายการ ไม่เก็บในฐานข้อมูล
