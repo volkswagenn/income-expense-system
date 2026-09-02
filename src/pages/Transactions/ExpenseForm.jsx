@@ -532,17 +532,15 @@ export default function ExpenseForm() {
               value={{ method: form.method, transferAccountId: form.transferAccountId, cardId: form.cardId }}
               onChange={setMany}
               options={['cash', 'transfer', 'card', 'debt', 'pending']}
+              itemName={form.itemName}
+              debt={form.debt}
+              onDebtChange={(d) => set('debt', d)}
+              pending={{ dueDate: form.dueDate, accountId: form.pendingAccountId }}
+              onPendingChange={(p) => setMany({ dueDate: p.dueDate, pendingAccountId: p.accountId })}
             />
           </div>
         </div>
 
-        {/* กู้ยืม: สร้างเป็นหนี้สินที่มีตารางงวด ยังไม่ตัดเงินและยังไม่สร้างรายจ่าย */}
-        {form.method === 'debt' && (
-          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
-            <p className="text-xs text-amber-800 font-medium">📒 กู้ยืม / ผ่อนกับสถาบัน — บันทึกเป็นหนี้สิน ชื่อรายการใช้จากช่องด้านบน</p>
-            <DebtFields value={form.debt} onChange={(d) => set('debt', d)} hideName />
-          </div>
-        )}
 
         {/* ผู้ใช้ไม่ต้องรู้เรื่องวันสรุปยอด — ระบบตอบคำถามเดียวที่เขาสนใจจริงๆ
             คือต้องหาเงินมาจ่ายเมื่อไร */}
@@ -871,25 +869,6 @@ export default function ExpenseForm() {
           </div>
         )}
 
-        {form.method === 'pending' && (
-          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
-            <p className="text-xs text-amber-700 font-medium">⏳ รายการค้างชำระ — ยังไม่ตัดเงินจนกว่าจะชำระ</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="label">วันที่กำหนดชำระ</label>
-                <DatePicker value={form.dueDate} onChange={(v) => set('dueDate', v)} placeholder="ไม่ระบุ" />
-              </div>
-              <div>
-                <TransferAccountPicker
-                  value={form.pendingAccountId}
-                  onChange={(v) => set('pendingAccountId', v)}
-                  label="ตั้งบัญชีที่จะจ่าย (ไม่บังคับ)"
-                />
-              </div>
-            </div>
-            <p className="text-xs text-amber-600">ตั้งบัญชีไว้แล้ว เวลากดชำระจะตัดจากบัญชีนั้นให้เลย</p>
-          </div>
-        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <EditableDropdown
