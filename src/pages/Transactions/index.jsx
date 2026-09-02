@@ -2,20 +2,31 @@ import { useState } from 'react'
 import IncomeForm from './IncomeForm'
 import ExpenseForm from './ExpenseForm'
 import RecurringPage from '../Recurring'
+import InstallmentList from '../Recurring/InstallmentList'
 import TransactionHistoryPanel from './TransactionHistoryPanel'
 import useRecurringStore from '../../store/useRecurringStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
 import SectionCard from '../../components/shared/SectionCard'
 
+/**
+ * ผ่อนชำระอยู่คนละแท็บกับรายจ่ายประจำโดยตั้งใจ
+ *
+ * ทั้งสองอย่างเป็นเรื่อง "สิ่งที่เรียกเก็บทุกเดือน" เหมือนกัน แต่ต่างกันสามข้อ
+ * คือมีจุดจบแน่นอน ยอดคงที่ และ **ไม่มีปุ่มจ่าย** เพราะถูกเรียกเก็บผ่านบิลบัตรเอง
+ * ถ้าเอาไปวางปนในลิสต์เดียว ผู้ใช้จะเจอแถวที่กดจ่ายไม่ได้แล้วไม่เข้าใจว่าทำไม
+ */
 const TABS = [
   { key: 'income', label: '📥 บันทึกรายรับ' },
   { key: 'expense', label: '📤 บันทึกรายจ่าย' },
   { key: 'recurring', label: '🔁 รายการประจำ' },
+  { key: 'installment', label: '💳 ผ่อนชำระ' },
   { key: 'history', label: '🔍 ค้นหารายการ' },
 ]
 
 export default function TransactionsPage() {
   const [tab, setTab] = useState('income')
   const recurringPendingCount = useRecurringStore((s) => s.getPendingCountCurrentMonth())
+  const installmentCount = useCreditCardStore((s) => s.getActiveInstallments().length)
 
   return (
     <div className="space-y-5">
@@ -32,6 +43,9 @@ export default function TransactionsPage() {
             {t.key === 'recurring' && recurringPendingCount > 0 && (
               <span className="ml-1.5 badge badge-red">{recurringPendingCount}</span>
             )}
+            {t.key === 'installment' && installmentCount > 0 && (
+              <span className="ml-1.5 badge badge-red">{installmentCount}</span>
+            )}
           </button>
         ))}
       </div>
@@ -40,6 +54,7 @@ export default function TransactionsPage() {
         {tab === 'income' && <IncomeForm />}
         {tab === 'expense' && <ExpenseForm />}
         {tab === 'recurring' && <RecurringPage />}
+        {tab === 'installment' && <InstallmentList />}
         {tab === 'history' && <TransactionHistoryPanel />}
       </SectionCard>
     </div>

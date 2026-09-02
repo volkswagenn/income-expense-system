@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import * as cardApi from '../lib/api/creditCards'
 import * as stmtApi from '../lib/api/cardStatements'
+import * as instApi from '../lib/api/cardInstallments'
 import { cyclePeriod, pendingCycles, toDateString } from '../lib/cardCycle'
 import useTransactionStore from './useTransactionStore'
 
@@ -14,7 +15,7 @@ import useTransactionStore from './useTransactionStore'
  * บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน จึงไม่ถูกรวมเข้า total() ของกระเป๋าเงิน
  * ยอดรวมหน้าแรกยังตอบคำถามว่า "มีเงินเท่าไร" ไม่ใช่ "รวยเท่าไร"
  */
-export const INITIAL = { cards: [], statements: [], closing: false }
+export const INITIAL = { cards: [], statements: [], installments: [], entries: [], closing: false }
 
 const useCreditCardStore = create((set, get) => ({
   ...INITIAL,
@@ -23,15 +24,18 @@ const useCreditCardStore = create((set, get) => ({
   _hydrate: (data) => set({
     cards: data?.cards ?? [],
     statements: data?.statements ?? [],
+    installments: data?.installments ?? [],
+    entries: data?.entries ?? [],
   }),
 
   refresh: async () => {
-    const [cards, statements] = await Promise.all([
+    const [cards, statements, inst] = await Promise.all([
       cardApi.listCreditCards(),
       stmtApi.listCardStatements(),
+      instApi.listInstallments(),
     ])
-    set({ cards, statements })
-    return { cards, statements }
+    set({ cards, statements, installments: inst.installments, entries: inst.entries })
+    return { cards, statements, ...inst }
   },
 
   // ── จัดการบัตร ────────────────────────────────────────────────────────────
@@ -108,6 +112,94 @@ const useCreditCardStore = create((set, get) => ({
     const statement = await stmtApi.undoPayment(statementId, amount, log)
     await get().refresh()
     return statement
+  },
+
+  // ── ผ่อนชำระ ──────────────────────────────────────────────────────────────
+
+  createInstallment: async (cardId, data, schedule, log) => {
+    const ins = await instApi.createInstallment(cardId, data, schedule, log)
+    await get().refresh()
+    return ins
+  },
+
+  settleInstallment: async (id, params) => {
+    const ins = await instApi.settleInstallment(id, params)
+    await get().refresh()
+    return ins
+  },
+
+  cancelInstallment: async (id, log) => {
+    const ins = await instApi.cancelInstallment(id, log)
+    await get().refresh()
+    return ins
+  },
+
+  updateInstallment: async (id, changes) => {
+    const ins = await instApi.updateInstallment(id, changes)
+    set((s) => ({ installments: s.installments.map((x) => (x.id === id ? { ...x, ...ins } : x)) }))
+    return ins
+  },
+
+  /** งวดของสัญญาหนึ่ง เรียงตามลำดับงวด */
+  getEntries: (installmentId) =>
+    get().entries.filter((e) => e.installmentId === installmentId).sort((a, b) => a.seq - b.seq),
+
+  /**
+   * สรุปความคืบหน้าของสัญญาผ่อนหนึ่งรายการ
+   *
+   * งวดถือว่า "จ่ายแล้ว" เมื่อใบแจ้งยอดที่งวดนั้นอยู่ถูกจ่ายครบ — อ่านจากใบ ไม่เก็บซ้ำ
+   * ถ้าเก็บสองที่ วันหนึ่งจะมีที่หนึ่งอัปเดตไม่ทันแล้วตัวเลขสองหน้าจะขัดกัน
+   */
+  getInstallmentProgress: (installmentId) => {
+    const ins = get().installments.find((i) => i.id === installmentId)
+    if (!ins) return null
+    const entries = get().getEntries(installmentId)
+    const stmts = get().statements
+
+    const rows = entries.map((e) => {
+      const stmt = e.statementId ? stmts.find((s) => s.id === e.statementId) : null
+      let status = e.status                       // pending | billed | cancelled
+      if (status === 'billed' && stmt?.status === 'paid') status = 'paid'
+      return { ...e, status, paidAt: stmt?.status === 'paid' ? stmt.paidAt : null }
+    })
+
+    const paid = rows.filter((r) => r.status === 'paid')
+    const remaining = rows.filter((r) => r.status === 'pending')
+    return {
+      rows,
+      paidCount: paid.length,
+      billedCount: rows.filter((r) => r.status === 'billed').length,
+      remainingCount: remaining.length,
+      remainingAmount: remaining.reduce((s, r) => s + Number(r.amount || 0), 0),
+      paidAmount: paid.reduce((s, r) => s + Number(r.amount || 0), 0),
+    }
+  },
+
+  /** สัญญาที่ยังผ่อนอยู่ ใช้ทำ badge บนแท็บ */
+  getActiveInstallments: (cardId = null) =>
+    get().installments.filter((i) => i.status === 'active' && (!cardId || i.cardId === cardId)),
+
+  /** ยอดผ่อนที่ยังไม่ถูกเรียกเก็บของบัตรใบหนึ่ง — ธนาคารกันวงเงินไว้แล้วตั้งแต่วันซื้อ */
+  getUnbilledInstallmentTotal: (cardId) => {
+    const ids = new Set(
+      get().installments.filter((i) => i.status === 'active' && i.cardId === cardId).map((i) => i.id)
+    )
+    return get().entries
+      .filter((e) => ids.has(e.installmentId) && e.status === 'pending')
+      .reduce((s, e) => s + Number(e.amount || 0), 0)
+  },
+
+  /**
+   * วงเงินที่ใช้ไปจริง = หนี้คงค้าง + ยอดผ่อนที่ยังไม่ถูกเรียกเก็บ
+   * เพราะธนาคารกันวงเงินเต็มก้อนตั้งแต่วันที่ซื้อ ไม่ได้กันทีละงวด
+   */
+  getCardLimitUsage: (cardId) => {
+    const card = get().getCard(cardId)
+    if (!card) return null
+    const unbilled = get().getUnbilledInstallmentTotal(cardId)
+    const used = (Number(card.outstanding) || 0) + unbilled
+    const limit = Number(card.creditLimit) || 0
+    return { used, unbilled, limit, remaining: limit - used, over: limit > 0 && used > limit }
   },
 
   // ── ตัวช่วยอ่านค่า ────────────────────────────────────────────────────────

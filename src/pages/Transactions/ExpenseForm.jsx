@@ -11,7 +11,7 @@ import TransferAccountPicker from '../../components/shared/TransferAccountPicker
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
-import { nextDueDate, formatThaiDate } from '../../lib/cardCycle'
+import { nextDueDate, formatThaiDate, installmentSchedule } from '../../lib/cardCycle'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -24,9 +24,11 @@ import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 
 const EMPTY = {
   itemName: '', category: '', amount: '', method: 'cash', transferAccountId: '', pendingAccountId: '',
-  cardId: '',
+  cardId: '', installment: false, installmentMonths: '6',
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
+
+const MONTH_PRESETS = [3, 6, 10]
 
 export default function ExpenseForm() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -52,15 +54,16 @@ export default function ExpenseForm() {
   const refreshWallet = useWalletStore((s) => s.refresh)
   const resolveCard = useCreditCardStore((s) => s.resolveCardId)
   const refreshCards = useCreditCardStore((s) => s.refresh)
+  const createInstallment = useCreditCardStore((s) => s.createInstallment)
   const cards = useCreditCardStore((s) => s.cards)
 
   // สิ่งที่บันทึกลงเซิร์ฟเวอร์สำเร็จแล้วในรอบนี้ (รายการ / รายการค้าง) — ถ้าขั้นถัดไปล้ม
   // (เช่นสร้างการ์ดรอใบกำกับภาษีไม่สำเร็จ) ผู้ใช้กดบันทึกซ้ำได้โดยไม่สร้างรายการ
   // และตัดเงินซ้ำอีกรอบ ล้างเมื่อสำเร็จครบหรือเมื่อแก้ฟอร์ม
-  const savedRef = useRef({ tx: null, pending: null })
+  const savedRef = useRef({ tx: null, pending: null, installment: null })
 
   const set = (k, v) => {
-    savedRef.current = { tx: null, pending: null }
+    savedRef.current = { tx: null, pending: null, installment: null }
     setForm((f) => ({ ...f, [k]: v }))
   }
 
@@ -105,6 +108,8 @@ export default function ExpenseForm() {
     const amt = Number(form.amount)
     const accountId = form.method === 'transfer' ? resolveAccount(form.transferAccountId) : null
     const cardId = form.method === 'card' ? resolveCard(form.cardId) : null
+    const months = Math.max(1, Math.round(Number(form.installmentMonths) || 0))
+    const isInstallment = form.method === 'card' && form.installment && !!selectedCard
     let tx = null
 
     setSaving(true)
@@ -142,6 +147,29 @@ export default function ExpenseForm() {
         walletEffect: null,
       }))
       savedRef.current.pending = pending
+    } else if (isInstallment && savedRef.current.installment) {
+      // สัญญาผ่อนถูกสร้างไปแล้วในรอบก่อน — ห้ามสร้างซ้ำ
+    } else if (isInstallment) {
+      // ผ่อน: ยังไม่สร้างรายจ่ายและยังไม่ขยับหนี้ บันทึกแค่สัญญากับตารางงวด
+      // งวดจะกลายเป็นรายจ่ายทีละงวดตอนปิดรอบ เพราะเงินไหลออกจริงทีละงวด
+      const schedule = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), months, amt)
+      const ins = await createInstallment(cardId, {
+        name: form.itemName,
+        vendor: form.vendor,
+        categoryId: form.category || null,
+        note: form.note,
+        totalAmount: amt,
+        months,
+        monthlyAmount: schedule[0].amount,
+        interestRate: 0,
+        purchaseDate: date,
+      }, schedule, buildLogEntry({
+        activityType: 'INSTALLMENT_CREATE',
+        description: `ผ่อน "${form.itemName}" ${amt.toLocaleString()} บาท ${months} งวด งวดละ ${schedule[0].amount.toLocaleString()} บาท`,
+        newValue: { itemName: form.itemName, amount: amt, months, cardId, date },
+      }))
+      savedRef.current.installment = ins
+      await refreshCards()
     } else if (savedRef.current.tx) {
       // รายการถูกบันทึกและตัดเงินไปแล้วในรอบก่อน — ห้ามสร้างซ้ำ
       tx = savedRef.current.tx
@@ -194,7 +222,7 @@ export default function ExpenseForm() {
       }))
     }
 
-    savedRef.current = { tx: null, pending: null }
+    savedRef.current = { tx: null, pending: null, installment: null }
     clearDraft()
     setSaved(true)
     setUploadStatus(null)
@@ -218,6 +246,10 @@ export default function ExpenseForm() {
     if (form.method === 'card' && !resolveCard(form.cardId)) {
       return setErrMsg('กรุณาเลือกบัตรเครดิตที่ใช้รูด')
     }
+    if (form.method === 'card' && form.installment) {
+      const m = Math.round(Number(form.installmentMonths) || 0)
+      if (!(m >= 1) || m > 60) return setErrMsg('จำนวนงวดต้องอยู่ระหว่าง 1 ถึง 60')
+    }
     setErrMsg('')
     // บัตรเครดิตไม่ต้องเช็คยอดติดลบ — เป็นหนี้อยู่แล้วโดยธรรมชาติ และไม่บล็อกเรื่องวงเงิน
     if (form.method === 'pending' || form.method === 'card') {
@@ -239,6 +271,18 @@ export default function ExpenseForm() {
   const selectedCard = form.method === 'card'
     ? cards.find((c) => c.id === resolveCard(form.cardId)) ?? null
     : null
+
+  // ตัวอย่างตารางผ่อน คำนวณสดขณะพิมพ์ ผู้ใช้จะได้เห็นยอดต่องวดก่อนกดบันทึก
+  const installmentPreview = (() => {
+    if (!form.installment || !selectedCard) return null
+    const amt = Number(form.amount)
+    const m = Math.round(Number(form.installmentMonths) || 0)
+    if (!(amt > 0) || !(m >= 1) || m > 60) return null
+    const rows = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), m, amt)
+    const first = rows[0]
+    const last = rows[rows.length - 1]
+    return { months: m, first, last, hasRemainder: rows.length > 1 && last.amount !== first.amount }
+  })()
 
   const recurringAllItems = useRecurringStore((s) => s.items)
   const recurringEntries = useRecurringStore((s) => s.entries)
@@ -354,9 +398,73 @@ export default function ExpenseForm() {
         {/* ผู้ใช้ไม่ต้องรู้เรื่องวันสรุปยอด — ระบบตอบคำถามเดียวที่เขาสนใจจริงๆ
             คือต้องหาเงินมาจ่ายเมื่อไร */}
         {form.method === 'card' && selectedCard && (
-          <div className="p-2.5 bg-rose-50 rounded-lg border border-rose-200 text-xs text-rose-700">
-            💳 ยังไม่ตัดเงินตอนนี้ — รายการนี้จะไปอยู่ในบิลที่ครบกำหนด{' '}
-            <strong>{formatThaiDate(nextDueDate(selectedCard.closingDay, selectedCard.dueDay, new Date(date + 'T00:00:00')))}</strong>
+          <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 space-y-2.5">
+            {!form.installment && (
+              <p className="text-xs text-rose-700">
+                💳 ยังไม่ตัดเงินตอนนี้ — รายการนี้จะไปอยู่ในบิลที่ครบกำหนด{' '}
+                <strong>{formatThaiDate(nextDueDate(selectedCard.closingDay, selectedCard.dueDay, new Date(date + 'T00:00:00')))}</strong>
+              </p>
+            )}
+
+            <label className="flex items-center gap-2 text-xs text-rose-800 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-rose-600"
+                checked={form.installment}
+                onChange={(e) => set('installment', e.target.checked)}
+              />
+              <span className="font-medium">แบ่งชำระ (ผ่อน)</span>
+            </label>
+
+            {form.installment && (
+              <div className="space-y-2">
+                <div className="flex items-end gap-2 flex-wrap">
+                  <div className="w-28">
+                    <label className="label">จำนวนงวด</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={form.installmentMonths}
+                      onChange={(e) => set('installmentMonths', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-1.5 pb-0.5">
+                    {MONTH_PRESETS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`btn text-xs py-1 px-2.5 ${String(m) === String(form.installmentMonths) ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => set('installmentMonths', String(m))}
+                      >
+                        {m} งวด
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {installmentPreview ? (
+                  <p className="text-xs text-rose-800 bg-white/70 rounded-lg px-3 py-2 leading-relaxed">
+                    งวดละ <strong>{installmentPreview.first.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</strong> บาท{' '}
+                    {installmentPreview.months} งวด
+                    {installmentPreview.hasRemainder && (
+                      <> (งวดสุดท้าย {installmentPreview.last.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท)</>
+                    )}
+                    <br />
+                    งวดแรกอยู่ในบิลที่ครบกำหนด <strong>{formatThaiDate(installmentPreview.first.dueDate)}</strong>{' '}
+                    งวดสุดท้าย <strong>{formatThaiDate(installmentPreview.last.dueDate)}</strong>
+                  </p>
+                ) : (
+                  <p className="text-xs text-rose-600">ใส่จำนวนเงินก่อน ระบบจะคำนวณยอดต่องวดให้</p>
+                )}
+
+                <p className="text-xs text-rose-600">
+                  ไม่บันทึกรายจ่ายก้อนเดียวตอนนี้ — จะทยอยลงทีละงวดตามที่ธนาคารเรียกเก็บ
+                  ติดตามได้ที่แท็บ <strong>ผ่อนชำระ</strong>
+                </p>
+              </div>
+            )}
           </div>
         )}
 

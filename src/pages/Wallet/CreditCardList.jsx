@@ -224,10 +224,14 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
   const bill = unpaid[0] ?? null
   const paidHistory = statements.filter((s) => s.status === 'paid')
 
-  const used = Number(card.outstanding) || 0
-  const limit = Number(card.creditLimit) || 0
+  // วงเงินที่ใช้ไปนับยอดผ่อนที่ยังไม่ถูกเรียกเก็บด้วย เพราะธนาคารกันวงเงิน
+  // ไว้เต็มก้อนตั้งแต่วันที่ซื้อ ไม่ได้กันทีละงวด
+  const usage = useCreditCardStore((s) => s.getCardLimitUsage(card.id))
+  const debt = Number(card.outstanding) || 0
+  const used = usage?.used ?? debt
+  const limit = usage?.limit ?? 0
   const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0
-  const overLimit = limit > 0 && used > limit
+  const overLimit = usage?.over ?? false
 
   const closing = nextClosingDate(card.closingDay)
   const daysToClosing = daysUntil(closing)
@@ -251,8 +255,8 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs text-gray-400">ยอดหนี้รวม</p>
-          <p className={`font-bold tabular-nums ${used > 0 ? 'text-rose-600' : 'text-gray-500'}`}>
-            {fmt(used)}
+          <p className={`font-bold tabular-nums ${debt > 0 ? 'text-rose-600' : 'text-gray-500'}`}>
+            {fmt(debt)}
           </p>
         </div>
       </div>
@@ -325,6 +329,11 @@ function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
             {overLimit
               ? <span className="text-rose-500"> · เกินวงเงิน {fmt(used - limit)}</span>
               : ` · เหลือ ${fmt(limit - used)}`}
+            {usage?.unbilled > 0 && (
+              <span className="block text-gray-400">
+                รวมยอดผ่อนที่ยังไม่ถูกเรียกเก็บ {fmt(usage.unbilled)} ซึ่งธนาคารกันวงเงินไว้แล้ว
+              </span>
+            )}
           </p>
         </div>
       )}

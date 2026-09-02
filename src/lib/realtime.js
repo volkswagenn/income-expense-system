@@ -31,6 +31,8 @@ const TABLE_STORES = {
   loans: [useWalletStore],
   credit_cards: [useCreditCardStore],
   card_statements: [useCreditCardStore],
+  card_installments: [useCreditCardStore],
+  card_installment_entries: [useCreditCardStore],
   pending_payments: [usePendingStore],
   pending_incomes: [usePendingStore],
   tax_invoices: [usePendingStore],

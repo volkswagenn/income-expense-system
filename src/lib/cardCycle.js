@@ -106,6 +106,34 @@ export function pendingCycles(card, existingCycles, { from = new Date(), maxMont
   return out.reverse()
 }
 
+/**
+ * ตารางงวดผ่อน — งวดแรกตกในรอบเดียวกับที่รูด แล้วไล่ไปเดือนละงวด
+ *
+ * เศษที่หารไม่ลงตัวไปรวมที่งวดสุดท้าย ซึ่งเป็นวิธีที่ธนาคารส่วนใหญ่ใช้
+ * และทำให้ผลรวมทุกงวดเท่ากับยอดเต็มพอดีเสมอ ไม่มีเศษหลงเหลือ
+ */
+export function installmentSchedule(card, purchaseDate, months, totalAmount) {
+  const first = nextClosingDate(card.closingDay, purchaseDate)
+  const per = Math.floor((totalAmount / months) * 100) / 100
+  const entries = []
+  let allocated = 0
+
+  for (let i = 0; i < months; i++) {
+    const end = clampedDate(first.getFullYear(), first.getMonth() + i, card.closingDay)
+    const isLast = i === months - 1
+    const amount = isLast ? Math.round((totalAmount - allocated) * 100) / 100 : per
+    allocated = Math.round((allocated + amount) * 100) / 100
+    entries.push({
+      seq: i + 1,
+      cycle: cycleKey(end),
+      closingDate: end,
+      dueDate: dueDateFor(end, card.dueDay),
+      amount,
+    })
+  }
+  return entries
+}
+
 /** จำนวนวันจากวันนี้ถึงวันที่ระบุ — ติดลบแปลว่าเลยมาแล้ว */
 export function daysUntil(date, from = new Date()) {
   const MS_PER_DAY = 86_400_000
