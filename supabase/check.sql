@@ -13,7 +13,7 @@
 --   2 บัญชีเข้าร้านไหนได้  → แอปเลือกร้านที่เป็นสมาชิกเก่าที่สุดเสมอ
 --   3 ร้านที่ไม่มี owner   → ข้อมูลอยู่ครบแต่ RLS บล็อก แก้ด้วย access.sql
 --   4 ร่องรอยการลบ        → มีบรรทัด = ถูกลบจากในแอป, ไม่มี = ถูกลบจากนอกแอป
---   5 คอลัมน์ที่ติดตั้งแล้ว → ต้องครบ 7 ตัว ถ้าขาดตัวไหนให้รัน update.sql
+--   5 ของที่ต้องมี      → ต้องขึ้น "ติดตั้งแล้ว" ครบ ถ้าขาดตัวไหนจะบอกว่าต้องรันไฟล์ไหน
 -- ============================================================================
 
 select * from (
@@ -92,23 +92,40 @@ select * from (
 
   union all
 
-  -- ── 5. คอลัมน์ใหม่ติดตั้งครบหรือยัง (ต้องได้ครบ 3 ตัว) ────────────────────
-  select 5, '5 คอลัมน์ที่ต้องมี', t.col,
+  -- ── 5. ของใหม่ติดตั้งครบหรือยัง (แยกตามไฟล์ที่ต้องรัน) ────────────────────
+  select 5, '5 ของที่ต้องมี', t.tbl || '.' || t.col,
          case when exists (
            select 1 from information_schema.columns c
-            where c.table_schema = 'public' and c.table_name = 'recurring_items'
-              and c.column_name = t.col
+            where c.table_schema = 'public' and c.table_name = t.tbl and c.column_name = t.col
          ) then 'ติดตั้งแล้ว'
             else 'ยังไม่มี → รัน ' || t.file end
   from (values
-    ('frequency',     'update.sql'),
-    ('billing_month', 'update.sql'),
-    ('deleted',       'update.sql'),
-    ('paused_from',   'update.sql'),
-    ('paused_until',  'update.sql'),
-    ('vat_rate',      'update.sql'),
-    ('vat_mode',      'update.sql')
-  ) as t(col, file)
+    ('recurring_items',          'frequency',           'recurring.sql'),
+    ('recurring_items',          'billing_month',       'recurring.sql'),
+    ('recurring_items',          'deleted',             'recurring.sql'),
+    ('recurring_items',          'paused_from',         'recurring.sql'),
+    ('recurring_items',          'paused_until',        'recurring.sql'),
+    ('recurring_items',          'vat_rate',            'recurring.sql'),
+    ('recurring_items',          'vat_mode',            'recurring.sql'),
+    ('card_installment_entries', 'paid_at',             'card.sql'),
+    ('card_installment_entries', 'paid_method',         'card.sql'),
+    ('card_installment_entries', 'transfer_account_id', 'card.sql'),
+    ('categories',               'sort_order',          'categories.sql')
+  ) as t(tbl, col, file)
+
+  union all
+
+  select 5, '5 ของที่ต้องมี', 'ฟังก์ชัน ' || t.fn,
+         case when exists (
+           select 1 from information_schema.routines r
+            where r.routine_schema = 'public' and r.routine_name = t.fn
+         ) then 'ติดตั้งแล้ว'
+            else 'ยังไม่มี → รัน ' || t.file end
+  from (values
+    ('pay_installment_entry',  'card.sql'),
+    ('undo_installment_entry', 'card.sql'),
+    ('reorder_categories',     'categories.sql')
+  ) as t(fn, file)
 
 ) as "ผลตรวจ"
 order by "ลำดับ", "รายการ";
