@@ -13,7 +13,7 @@
 --   2 บัญชีเข้าร้านไหนได้  → แอปเลือกร้านที่เป็นสมาชิกเก่าที่สุดเสมอ
 --   3 ร้านที่ไม่มี owner   → ข้อมูลอยู่ครบแต่ RLS บล็อก แก้ด้วย access.sql
 --   4 ร่องรอยการลบ        → มีบรรทัด = ถูกลบจากในแอป, ไม่มี = ถูกลบจากนอกแอป
---   5 คอลัมน์ที่ติดตั้งแล้ว → ต้องครบ 3 ตัว ถ้าขาดให้รัน yearly.sql และ keep.sql
+--   5 คอลัมน์ที่ติดตั้งแล้ว → ต้องครบ 7 ตัว ถ้าขาดตัวไหนให้รัน recurring.sql
 -- ============================================================================
 
 select * from (
@@ -101,9 +101,13 @@ select * from (
          ) then 'ติดตั้งแล้ว'
             else 'ยังไม่มี → รัน ' || t.file end
   from (values
-    ('frequency',     'yearly.sql'),
-    ('billing_month', 'yearly.sql'),
-    ('deleted',       'keep.sql')
+    ('frequency',     'recurring.sql'),
+    ('billing_month', 'recurring.sql'),
+    ('deleted',       'recurring.sql'),
+    ('paused_from',   'recurring.sql'),
+    ('paused_until',  'recurring.sql'),
+    ('vat_rate',      'recurring.sql'),
+    ('vat_mode',      'recurring.sql')
   ) as t(col, file)
 
 ) as "ผลตรวจ"
