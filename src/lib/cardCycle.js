@@ -53,18 +53,57 @@ export function nextDueDate(closingDay, dueDay, from = new Date()) {
   return dueDateFor(nextClosingDate(closingDay, from), dueDay)
 }
 
+/** รหัสรอบ 'YYYY-MM' ของเดือนที่ปิดรอบ */
+export function cycleKey(closingDate) {
+  return `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** วันแรกของรอบที่ปิดในวันที่ closingDate — คือวันถัดจากวันสรุปยอดของรอบก่อน */
+function startForClosing(closingDate, closingDay) {
+  const prev = clampedDate(closingDate.getFullYear(), closingDate.getMonth() - 1, closingDay)
+  return new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1)
+}
+
 /**
  * ขอบเขตของรอบบิลที่ครอบวันที่ที่ระบุ
  * คืน { start, end, due, cycle } โดย cycle เป็น 'YYYY-MM' ของเดือนที่ปิดรอบ
- * ใช้ตอนปิดรอบในเฟสถัดไป และใช้ตอบว่า "รายการนี้อยู่บิลไหน" ได้เลย
+ * ใช้ตอบว่า "รายการนี้อยู่บิลไหน" และใช้หายอดสะสมของรอบที่กำลังเดินอยู่
  */
 export function cyclePeriod(closingDay, dueDay, on = new Date()) {
   const end = nextClosingDate(closingDay, on)
-  // ต้นรอบคือวันถัดจากวันสรุปยอดของรอบก่อนหน้า
-  const prevClosing = clampedDate(end.getFullYear(), end.getMonth() - 1, closingDay)
-  const start = new Date(prevClosing.getFullYear(), prevClosing.getMonth(), prevClosing.getDate() + 1)
-  const cycle = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`
-  return { start, end, due: dueDateFor(end, dueDay), cycle }
+  return { start: startForClosing(end, closingDay), end, due: dueDateFor(end, dueDay), cycle: cycleKey(end) }
+}
+
+/**
+ * รอบที่ผ่านวันสรุปยอดไปแล้วแต่ยังไม่มีใบแจ้งยอด — เรียงจากเก่าไปใหม่
+ *
+ * เรียงเก่าก่อนสำคัญมาก เพราะยอดค้างของรอบก่อนถูกยกไปเป็นยอดยกมาของรอบถัดไป
+ * ถ้าปิดสลับลำดับ ยอดยกมาจะผูกผิดใบ
+ *
+ * ผู้ใช้ที่ไม่ได้เปิดแอปหลายเดือนจะได้ใบย้อนหลังครบตอนกลับมาเปิด
+ * แต่ไม่สร้างใบของช่วงก่อนที่บัตรจะถูกเพิ่มเข้าระบบ เพราะไม่มีข้อมูลรายการอยู่แล้ว
+ */
+export function pendingCycles(card, existingCycles, { from = new Date(), maxMonths = 24 } = {}) {
+  const today = atMidnight(from)
+  const createdAt = card.createdAt ? atMidnight(new Date(card.createdAt)) : null
+  const out = []
+
+  for (let i = 0; i <= maxMonths; i++) {
+    const ref = new Date(today.getFullYear(), today.getMonth() - i, 1)
+    const end = clampedDate(ref.getFullYear(), ref.getMonth(), card.closingDay)
+    // ยังไม่พ้นวันสรุปยอด — รายการของวันนั้นยังนับอยู่ในรอบนี้ ปิดไม่ได้
+    if (end >= today) continue
+    if (createdAt && end < createdAt) continue
+    const cycle = cycleKey(end)
+    if (existingCycles.has(cycle)) continue
+    out.push({
+      cycle,
+      start: startForClosing(end, card.closingDay),
+      end,
+      due: dueDateFor(end, card.dueDay),
+    })
+  }
+  return out.reverse()
 }
 
 /** จำนวนวันจากวันนี้ถึงวันที่ระบุ — ติดลบแปลว่าเลยมาแล้ว */

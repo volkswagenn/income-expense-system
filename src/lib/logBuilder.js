@@ -39,6 +39,8 @@ export const ACTIVITY_LABELS = {
   CARD_UPDATE: 'แก้ไขบัตรเครดิต',
   CARD_DELETE: 'ลบบัตรเครดิต',
   CARD_ADJUST: 'ปรับยอดหนี้บัตร',
+  CARD_PAYMENT: 'จ่ายบิลบัตรเครดิต',
+  CARD_PAYMENT_UNDO: 'ย้อนการจ่ายบิลบัตร',
   SUB_CREATE: 'สร้างกระเป๋าตังค์',
   SUB_DELETE: 'ลบกระเป๋าตังค์',
   SUB_RENAME: 'เปลี่ยนชื่อกระเป๋า',

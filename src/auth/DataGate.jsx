@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Icon from '../components/shared/Icon'
 import { hydrateStores } from '../store/hydrate'
 import { subscribeRealtime } from '../lib/realtime'
+import useCreditCardStore from '../store/useCreditCardStore'
 import { useAuth } from './AuthProvider'
 
 /**
@@ -32,7 +33,13 @@ export default function DataGate({ children }) {
   useEffect(() => {
     let alive = true
     hydrateStores()
-      .then(() => alive && setStatus('ready'))
+      .then(() => {
+        if (!alive) return
+        setStatus('ready')
+        // ปิดรอบบิลบัตรที่ผ่านวันสรุปยอดไปแล้ว — ทำหลังข้อมูลพร้อม และไม่ให้บล็อกการเข้าแอป
+        // ถ้าล้มก็แค่ยังไม่มีใบแจ้งยอด ไม่กระทบส่วนอื่น (store จับ error ไว้เองแล้ว)
+        useCreditCardStore.getState().ensureStatements()
+      })
       .catch((err) => {
         if (!alive) return
         setError(err.message)

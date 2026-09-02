@@ -1,28 +1,37 @@
 import { create } from 'zustand'
 import * as cardApi from '../lib/api/creditCards'
+import * as stmtApi from '../lib/api/cardStatements'
+import { cyclePeriod, pendingCycles, toDateString } from '../lib/cardCycle'
+import useTransactionStore from './useTransactionStore'
 
 /**
- * บัตรเครดิต
+ * บัตรเครดิตและใบแจ้งยอด
  *
  * store นี้เป็นแค่ "แคชของยอดบนเซิร์ฟเวอร์" เหมือน useWalletStore
  * ยอดหนี้ (outstanding) ถูกขยับที่ฐานข้อมูลผ่าน apply_wallet_effect ตอนบันทึก/แก้/ยกเลิก
- * รายการ ฝั่งหน้าจอจึงต้องเรียก refresh() หลังงานพวกนั้นเสมอ ห้ามคำนวณยอดเอง
+ * รายการ และตอนจ่ายบิล ฝั่งหน้าจอจึงต้องเรียก refresh() หลังงานพวกนั้นเสมอ
  *
  * บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน จึงไม่ถูกรวมเข้า total() ของกระเป๋าเงิน
  * ยอดรวมหน้าแรกยังตอบคำถามว่า "มีเงินเท่าไร" ไม่ใช่ "รวยเท่าไร"
  */
-export const INITIAL = { cards: [] }
+export const INITIAL = { cards: [], statements: [], closing: false }
 
 const useCreditCardStore = create((set, get) => ({
   ...INITIAL,
   _reset: () => set(INITIAL),
 
-  _hydrate: (cards) => set({ cards: cards ?? [] }),
+  _hydrate: (data) => set({
+    cards: data?.cards ?? [],
+    statements: data?.statements ?? [],
+  }),
 
   refresh: async () => {
-    const cards = await cardApi.listCreditCards()
-    set({ cards })
-    return cards
+    const [cards, statements] = await Promise.all([
+      cardApi.listCreditCards(),
+      stmtApi.listCardStatements(),
+    ])
+    set({ cards, statements })
+    return { cards, statements }
   },
 
   // ── จัดการบัตร ────────────────────────────────────────────────────────────
@@ -50,9 +59,55 @@ const useCreditCardStore = create((set, get) => ({
     await get().refresh()
   },
 
-  reorderCards: async (orderedIds) => {
-    await cardApi.reorderCreditCards(orderedIds)
-    set((s) => ({ cards: orderedIds.map((id) => s.cards.find((c) => c.id === id)).filter(Boolean) }))
+  // ── รอบบิล ────────────────────────────────────────────────────────────────
+
+  /**
+   * ปิดทุกรอบที่ผ่านวันสรุปยอดไปแล้วแต่ยังไม่มีใบแจ้งยอด
+   *
+   * เรียกตอนเปิดหน้า แบบเดียวกับ generateEntries ของรายการประจำ — ไม่ต้องมี cron
+   * ปิดทีละรอบตามลำดับเก่าไปใหม่ เพราะยอดค้างของรอบก่อนถูกยกไปเป็นยอดยกมาของรอบถัดไป
+   * ฝั่งฐานข้อมูลกันปิดซ้ำด้วย unique (card_id, cycle) อยู่แล้ว เรียกซ้ำจึงไม่เสียหาย
+   */
+  ensureStatements: async () => {
+    if (get().closing) return
+    const cards = get().cards.filter((c) => !c.deleted)
+    if (cards.length === 0) return
+
+    const todo = []
+    for (const card of cards) {
+      const existing = new Set(
+        get().statements.filter((s) => s.cardId === card.id).map((s) => s.cycle)
+      )
+      for (const period of pendingCycles(card, existing)) {
+        todo.push({ cardId: card.id, period })
+      }
+    }
+    if (todo.length === 0) return
+
+    set({ closing: true })
+    try {
+      // ต้องทีละใบตามลำดับ ห้ามยิงขนาน — ยอดยกมาของใบถัดไปอ่านจากใบก่อนหน้า
+      for (const { cardId, period } of todo) {
+        await stmtApi.closeStatement(cardId, period)
+      }
+      await get().refresh()
+    } catch (err) {
+      console.warn('ปิดรอบบิลไม่สำเร็จ:', err?.message ?? err)
+    } finally {
+      set({ closing: false })
+    }
+  },
+
+  payStatement: async (statementId, params) => {
+    const statement = await stmtApi.payStatement(statementId, params)
+    await get().refresh()
+    return statement
+  },
+
+  undoPayment: async (statementId, amount, log) => {
+    const statement = await stmtApi.undoPayment(statementId, amount, log)
+    await get().refresh()
+    return statement
   },
 
   // ── ตัวช่วยอ่านค่า ────────────────────────────────────────────────────────
@@ -78,6 +133,37 @@ const useCreditCardStore = create((set, get) => ({
 
   /** หนี้รวมทุกใบ — ใช้บนหน้าแรกและหน้ากระเป๋าเงิน */
   getTotalOutstanding: () => get().cards.reduce((sum, c) => sum + (Number(c.outstanding) || 0), 0),
+
+  /** ใบแจ้งยอดของบัตรใบหนึ่ง เรียงใหม่ก่อน */
+  getStatements: (cardId) => get().statements.filter((s) => s.cardId === cardId),
+
+  /** ใบที่ยังจ่ายไม่ครบ ทั้งร้าน เรียงตามวันครบกำหนด */
+  getUnpaidStatements: () =>
+    get().statements
+      .filter((s) => s.status !== 'paid')
+      .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
+
+  /** ยอดที่ต้องจ่ายรวมทุกใบที่ยังค้าง */
+  getDueTotal: () =>
+    get().getUnpaidStatements().reduce((sum, s) => sum + (Number(s.amount) - Number(s.paidAmount)), 0),
+
+  /**
+   * ยอดที่สะสมอยู่ในรอบที่ยังไม่ปิด — คำนวณสดจากรายการ ไม่เก็บในฐานข้อมูล
+   * ตอบคำถามว่า "ตอนนี้ก่อหนี้ก้อนหน้าไว้เท่าไรแล้ว"
+   */
+  getCurrentCycle: (cardId) => {
+    const card = get().getCard(cardId)
+    if (!card) return null
+    const period = cyclePeriod(card.closingDay, card.dueDay)
+    const from = toDateString(period.start)
+    const to = toDateString(period.end)
+    const txs = useTransactionStore.getState().transactions
+      .filter((t) => t.cardId === cardId && t.date >= from && t.date <= to)
+
+    const spend = txs.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0)
+    const credit = txs.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0)
+    return { ...period, spend, credit, net: spend - credit, count: txs.length }
+  },
 }))
 
 export default useCreditCardStore

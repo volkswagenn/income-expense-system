@@ -82,6 +82,7 @@ function StatCard({ icon, label, amount, tone, onClick, sub }) {
 export default function FinancialStatus() {
   const { cash, transfer } = useWalletStore()
   const cardDebt = useCreditCardStore((s) => s.getTotalOutstanding())
+  const cardDue = useCreditCardStore((s) => s.getDueTotal())
   const pendingTotal = usePendingStore((s) => s.getPendingTotal())
   const pendingIncomeTotal = usePendingStore((s) => s.getPendingIncomeTotal())
   const navigate = useNavigate()
@@ -106,6 +107,18 @@ export default function FinancialStatus() {
         onClick={() => navigate('/pending-tasks?tab=income')}
         sub={pendingIncomeTotal > 0 ? 'คลิกดูรายละเอียด' : 'ไม่มีรายการรอรับ'}
       />
+      {/* แสดงเฉพาะเมื่อมีบิลบัตรที่ปิดรอบแล้วและยังจ่ายไม่ครบ
+          คนที่ไม่ได้ใช้บัตรจะไม่เห็นการ์ดนี้เลย หน้าแรกจึงไม่รกขึ้นโดยไม่จำเป็น */}
+      {cardDue > 0 && (
+        <StatCard
+          icon="credit_card"
+          label="บิลบัตรที่ต้องจ่าย"
+          amount={cardDue}
+          tone="expense"
+          onClick={() => navigate('/wallet')}
+          sub="คลิกไปหน้ากระเป๋าเงิน"
+        />
+      )}
     </div>
   )
 }

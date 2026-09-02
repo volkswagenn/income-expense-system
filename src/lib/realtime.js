@@ -30,6 +30,7 @@ const TABLE_STORES = {
   sub_wallets: [useWalletStore],
   loans: [useWalletStore],
   credit_cards: [useCreditCardStore],
+  card_statements: [useCreditCardStore],
   pending_payments: [usePendingStore],
   pending_incomes: [usePendingStore],
   tax_invoices: [usePendingStore],

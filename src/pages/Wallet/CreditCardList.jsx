@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { differenceInDays, parseISO } from 'date-fns'
 import useCreditCardStore from '../../store/useCreditCardStore'
+import useWalletStore from '../../store/useWalletStore'
+import useAppStore from '../../store/useAppStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { formatCard } from '../../components/shared/CreditCardPicker'
-import { nextDueDate, nextClosingDate, daysUntil, formatThaiDate } from '../../lib/cardCycle'
+import { nextClosingDate, formatThaiDate, daysUntil } from '../../lib/cardCycle'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
 import BankSelect from '../../components/shared/BankSelect'
 import BankLogo from '../../components/shared/BankLogo'
 import { BANKS } from '../../lib/banks'
@@ -13,6 +17,19 @@ const BANK_NAMES = BANKS.map((b) => b.name)
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
+
+/** สีเตือนตามวันครบกำหนด — ชุดเดียวกับรายการค้างชำระ */
+function alertOf(dueDate, notifyDays) {
+  if (!dueDate) return { box: 'bg-gray-50 border-gray-200', text: 'text-gray-700' }
+  try {
+    const diff = differenceInDays(parseISO(dueDate), new Date())
+    if (diff < 0) return { box: 'bg-red-100 border-red-400', text: 'text-red-800', label: `เกินกำหนด ${Math.abs(diff)} วัน` }
+    if (diff <= notifyDays) return { box: 'bg-red-50 border-red-300', text: 'text-red-700', label: `อีก ${diff} วัน` }
+    return { box: 'bg-amber-50 border-amber-200', text: 'text-amber-800', label: `อีก ${diff} วัน` }
+  } catch {
+    return { box: 'bg-gray-50 border-gray-200', text: 'text-gray-700' }
+  }
+}
 
 function CardFormPopup({ card, onSave, onClose }) {
   const isEdit = !!card
@@ -51,7 +68,15 @@ function CardFormPopup({ card, onSave, onClose }) {
   }
 
   // แสดงให้เห็นทันทีว่าตั้งวันแล้วบิลจะครบกำหนดเมื่อไร ผู้ใช้จะได้ไม่ต้องเดา
-  const preview = nextDueDate(Number(closingDay) || 25, Number(dueDay) || 15)
+  const cd = Number(closingDay) || 25
+  const dd = Number(dueDay) || 15
+  const preview = (() => {
+    const closing = nextClosingDate(cd)
+    const sameMonth = new Date(closing.getFullYear(), closing.getMonth(), Math.min(dd, 28))
+    return sameMonth > closing
+      ? new Date(closing.getFullYear(), closing.getMonth(), dd)
+      : new Date(closing.getFullYear(), closing.getMonth() + 1, dd)
+  })()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -187,14 +212,31 @@ function CardFormPopup({ card, onSave, onClose }) {
   )
 }
 
-function CardRow({ card, onEdit, onDelete }) {
-  const due = nextDueDate(card.closingDay, card.dueDay)
-  const closing = nextClosingDate(card.closingDay)
-  const daysToDue = daysUntil(due)
+function CardRow({ card, onEdit, onDelete, onPay, onUndoPay }) {
+  const [showHistory, setShowHistory] = useState(false)
+  const notifyDays = useAppStore((s) => s.notifyDaysBefore)
+  const statements = useCreditCardStore((s) => s.getStatements(card.id))
+  const current = useCreditCardStore((s) => s.getCurrentCycle(card.id))
+
+  const unpaid = statements
+    .filter((s) => s.status !== 'paid')
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))
+  const bill = unpaid[0] ?? null
+  const paidHistory = statements.filter((s) => s.status === 'paid')
+
   const used = Number(card.outstanding) || 0
   const limit = Number(card.creditLimit) || 0
   const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0
   const overLimit = limit > 0 && used > limit
+
+  const closing = nextClosingDate(card.closingDay)
+  const daysToClosing = daysUntil(closing)
+  const alert = bill ? alertOf(bill.dueDate, notifyDays) : null
+
+  // เงินคืนโดยประมาณของรอบนี้ — ตัวเลขคาดการณ์ล้วน ไม่แตะยอดหนี้และไม่เข้ารายงาน
+  const estCashback = Number(card.cashbackRate) > 0 && current?.spend > 0
+    ? (current.spend * Number(card.cashbackRate)) / 100
+    : 0
 
   return (
     <div className="rounded-xl border border-gray-200 p-4 space-y-3">
@@ -203,17 +245,72 @@ function CardRow({ card, onEdit, onDelete }) {
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm truncate">{formatCard(card)}</p>
           <p className="text-xs text-gray-500">
-            สรุปยอด {formatThaiDate(closing)} · ครบกำหนด {formatThaiDate(due)}
-            {daysToDue >= 0 && <span className="text-gray-400"> (อีก {daysToDue} วัน)</span>}
+            สรุปยอด {formatThaiDate(closing)}
+            {daysToClosing >= 0 && <span className="text-gray-400"> (อีก {daysToClosing} วัน)</span>}
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-xs text-gray-400">ยอดหนี้</p>
+          <p className="text-xs text-gray-400">ยอดหนี้รวม</p>
           <p className={`font-bold tabular-nums ${used > 0 ? 'text-rose-600' : 'text-gray-500'}`}>
             {fmt(used)}
           </p>
         </div>
       </div>
+
+      {/* บิลที่ปิดรอบแล้วและยังจ่ายไม่ครบ */}
+      {bill && (
+        <div className={`rounded-xl border p-3 ${alert.box}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className={`text-xs font-medium ${alert.text}`}>
+                ยอดที่ต้องชำระ · ครบกำหนด {bill.dueDate}
+                {alert.label && ` · ${alert.label}`}
+              </p>
+              <p className={`text-xl font-bold tabular-nums ${alert.text}`}>
+                {fmt(Number(bill.amount) - Number(bill.paidAmount))}
+              </p>
+              <p className="text-xs text-gray-600 mt-0.5">
+                ขั้นต่ำ {fmt(bill.minimumAmount)}
+                {Number(bill.paidAmount) > 0 && ` · จ่ายไปแล้ว ${fmt(bill.paidAmount)}`}
+                {Number(bill.previousBalance) > 0 && ` · ยกมา ${fmt(bill.previousBalance)}`}
+              </p>
+            </div>
+            <button className="btn btn-primary text-xs shrink-0" onClick={() => onPay(card, bill)}>
+              จ่ายบิล
+            </button>
+          </div>
+          {unpaid.length > 1 && (
+            <p className="text-xs text-gray-600 mt-2">
+              มีบิลค้างอีก {unpaid.length - 1} รอบ รวมทั้งหมด{' '}
+              {fmt(unpaid.reduce((s, b) => s + Number(b.amount) - Number(b.paidAmount), 0))} บาท
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* รอบที่ยังเดินอยู่ — คำนวณสดจากรายการ ยังไม่ปิดจึงยังไม่ต้องจ่าย */}
+      {current && (
+        <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-gray-500">
+                รอบถัดไปสะสมแล้ว · ครบกำหนด {formatThaiDate(current.due)}
+              </p>
+              <p className="text-sm font-semibold tabular-nums text-gray-700">
+                {fmt(current.net)}
+                <span className="text-xs font-normal text-gray-400 ml-1.5">
+                  {current.count} รายการ
+                </span>
+              </p>
+            </div>
+            {estCashback > 0 && (
+              <p className="text-xs text-emerald-600 shrink-0 text-right">
+                เงินคืนโดยประมาณ<br />≈ {fmt(estCashback)}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {limit > 0 && (
         <div>
@@ -232,24 +329,68 @@ function CardRow({ card, onEdit, onDelete }) {
         </div>
       )}
 
-      <div className="flex gap-2 justify-end">
+      <div className="flex gap-2 justify-end items-center">
+        {paidHistory.length > 0 && (
+          <button
+            className="text-xs text-gray-400 hover:text-gray-600 mr-auto"
+            onClick={() => setShowHistory((v) => !v)}
+          >
+            {showHistory ? '▲ ซ่อนบิลที่จ่ายแล้ว' : `▼ บิลที่จ่ายแล้ว ${paidHistory.length} รอบ`}
+          </button>
+        )}
         <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onEdit(card)}>แก้ไข</button>
         <button className="btn btn-secondary text-xs py-1 px-2.5 text-red-600" onClick={() => onDelete(card)}>ลบ</button>
       </div>
+
+      {showHistory && (
+        <div className="border-t pt-2 space-y-1.5">
+          {paidHistory.map((s) => (
+            <div key={s.id} className="flex items-center justify-between text-xs gap-2">
+              <span className="text-gray-500">
+                รอบ {s.cycle} · ครบกำหนด {s.dueDate}
+                {s.paidAt && <span className="text-emerald-600"> · จ่าย {s.paidAt}</span>}
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                <span className="tabular-nums text-gray-700">{fmt(s.amount)}</span>
+                {Number(s.paidAmount) > 0 && (
+                  <button
+                    className="text-gray-400 hover:text-red-600"
+                    onClick={() => onUndoPay(card, s)}
+                    title="ย้อนการจ่ายบิลนี้"
+                  >
+                    ย้อน
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 export default function CreditCardList() {
   const cards = useCreditCardStore((s) => s.cards)
-  const { createCard, updateCard, deleteCard, adjustOutstanding } = useCreditCardStore()
+  const { createCard, updateCard, deleteCard, adjustOutstanding, ensureStatements, payStatement, undoPayment } =
+    useCreditCardStore()
+  const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
+  const refreshWallet = useWalletStore((s) => s.refresh)
   const { addLog } = useLogStore()
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [payTarget, setPayTarget] = useState(null)      // { card, statement }
+  const [undoTarget, setUndoTarget] = useState(null)    // { card, statement }
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // เผื่อกรณีเปิดหน้านี้ค้างไว้ข้ามวันสรุปยอด — DataGate ปิดรอบให้ตอนเปิดแอปอยู่แล้ว
+  // เรียกซ้ำไม่เสียหาย ฐานข้อมูลกันด้วย unique (card_id, cycle)
+  useEffect(() => {
+    ensureStatements()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCreate = () => { setEditing(null); setFormOpen(true); setError('') }
   const openEdit = (card) => { setEditing(card); setFormOpen(true); setError('') }
@@ -297,6 +438,7 @@ export default function CreditCardList() {
       }
       setFormOpen(false)
       setEditing(null)
+      await ensureStatements()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -324,6 +466,58 @@ export default function CreditCardList() {
     }
   }
 
+  const handlePay = async ({ method, accountId, amount, date }) => {
+    const { card, statement } = payTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await payStatement(statement.id, {
+        method,
+        accountId,
+        amount,
+        date,
+        log: buildLogEntry({
+          activityType: 'CARD_PAYMENT',
+          description:
+            `จ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ` +
+            `${fmt(amount)} บาท จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
+          walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
+          newValue: { statementId: statement.id, cardId: card.id, amount, date, method },
+        }),
+      })
+      // เงินออกจากกระเป๋าที่เซิร์ฟเวอร์แล้ว ดึงยอดจริงกลับมา
+      await refreshWallet()
+      setPayTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleUndoPay = async () => {
+    const { card, statement } = undoTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const amount = Number(statement.paidAmount)
+      await undoPayment(statement.id, amount, buildLogEntry({
+        activityType: 'CARD_PAYMENT_UNDO',
+        description: `ย้อนการจ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ${fmt(amount)} บาท`,
+        oldValue: statement,
+        newValue: { statementId: statement.id, cardId: card.id, amount },
+      }))
+      await refreshWallet()
+      setUndoTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const totalOutstanding = cards.reduce((sum, c) => sum + (Number(c.outstanding) || 0), 0)
 
   return (
@@ -331,6 +525,7 @@ export default function CreditCardList() {
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-gray-500">
           รูดบัตรแล้วยอดจะมาสะสมเป็นหนี้ที่นี่ ไม่ตัดเงินสดหรือเงินโอน
+          ระบบปิดรอบและคิดยอดที่ต้องชำระให้เองเมื่อถึงวันสรุปยอด
         </p>
         <button className="btn btn-primary text-xs shrink-0" onClick={openCreate}>
           + เพิ่มบัตร
@@ -349,7 +544,14 @@ export default function CreditCardList() {
         <>
           <div className="space-y-2.5">
             {cards.map((card) => (
-              <CardRow key={card.id} card={card} onEdit={openEdit} onDelete={setConfirmDelete} />
+              <CardRow
+                key={card.id}
+                card={card}
+                onEdit={openEdit}
+                onDelete={setConfirmDelete}
+                onPay={(c, s) => setPayTarget({ card: c, statement: s })}
+                onUndoPay={(c, s) => setUndoTarget({ card: c, statement: s })}
+              />
             ))}
           </div>
           {cards.length > 1 && (
@@ -368,6 +570,30 @@ export default function CreditCardList() {
           onClose={() => { setFormOpen(false); setEditing(null) }}
         />
       )}
+
+      {payTarget && (
+        <PayCardBillPopup
+          statement={payTarget.statement}
+          cardLabel={getCardLabel(payTarget.card.id)}
+          onConfirm={handlePay}
+          onCancel={() => setPayTarget(null)}
+          busy={busy}
+        />
+      )}
+
+      <ConfirmPopup
+        open={!!undoTarget}
+        title="ย้อนการจ่ายบิล"
+        message={
+          undoTarget
+            ? `คืนเงิน ${fmt(undoTarget.statement.paidAmount)} บาท กลับเข้า${undoTarget.statement.paidMethod === 'cash' ? 'เงินสด' : 'บัญชีเงินโอน'} และหนี้บัตรจะกลับมาเท่าเดิม\n\nยืนยันหรือไม่?`
+            : ''
+        }
+        onConfirm={handleUndoPay}
+        onCancel={() => setUndoTarget(null)}
+        confirmLabel="ย้อนการจ่าย"
+        danger
+      />
 
       <ConfirmPopup
         open={!!confirmDelete}
