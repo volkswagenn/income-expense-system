@@ -178,7 +178,7 @@ export default function RecurringPage() {
    * โดยไม่ await ทำให้ tx.id เป็น undefined entry จึงไม่เคยผูกกับรายการ (ยกเลิกไม่ได้)
    * และเงินถูกตัดแยกอีกคำสั่ง ถ้าอันใดอันหนึ่งล้มยอดจะไม่ตรง
    */
-  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null, cardId = null) => {
+  const executeMarkPaid = async (entry, item, amount, paidMethod, paidDate = format(new Date(), 'yyyy-MM-dd'), accountId = null, cardId = null, paidAt = null) => {
     if (busy) return
     setBusy(true)
     setActionError('')
@@ -235,7 +235,8 @@ export default function RecurringPage() {
         paidMethod,
         transferAccountId: accountId,
         cardId,
-        paidAt: new Date(`${paidDate}T12:00:00`).toISOString(),
+        // เวลาจากหน้าต่างจ่าย ถ้าไม่ได้ระบุใช้เที่ยงตรงของวันที่เลือกเหมือนเดิม
+        paidAt: paidAt ?? new Date(`${paidDate}T12:00:00`).toISOString(),
         transactionId: tx?.id ?? null,
         pendingPaymentId,
       })
@@ -248,20 +249,20 @@ export default function RecurringPage() {
     }
   }
 
-  const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null, cardId = null) => {
+  const handlePayConfirm = (amount, paidMethod, paidDate, accountId = null, cardId = null, paidAt = null) => {
     const { entry, item } = payTarget
     // บัตรเครดิตไม่ต้องเช็คยอดติดลบ เป็นหนี้อยู่แล้วโดยธรรมชาติ
     if (paidMethod !== 'pending' && paidMethod !== 'card' && willGoNegative(paidMethod, amount, accountId)) {
-      setNegativeWarn({ amount, paidMethod, paidDate, accountId, cardId, entry, item })
+      setNegativeWarn({ amount, paidMethod, paidDate, accountId, cardId, entry, item, paidAt })
       setPayTarget(null)
       return
     }
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId)
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt)
   }
 
   const handleNegativeConfirm = () => {
-    const { entry, item, amount, paidMethod, paidDate, accountId, cardId } = negativeWarn
-    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId)
+    const { entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt } = negativeWarn
+    executeMarkPaid(entry, item, amount, paidMethod, paidDate, accountId, cardId, paidAt)
     setNegativeWarn(null)
   }
 

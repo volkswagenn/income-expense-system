@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import TransferAccountPicker from './TransferAccountPicker'
-import DatePicker from './DatePicker'
+import DateTimeField, { toTimestamp } from './DateTimeField'
 import useWalletStore from '../../store/useWalletStore'
 
 export default function PayPendingDatePopup({ open, item, method, danger = false, onConfirm, onCancel }) {
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [paidTime, setPaidTime] = useState('')   // ว่าง = เที่ยงตรงของวันที่เลือก
   // ใช้บัญชีที่ผูกไว้ตอนเปิดบิล/ตั้งรายการประจำเป็นค่าเริ่มต้น
   const [accountId, setAccountId] = useState(item?.defaultTransferAccountId ?? '')
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -51,17 +52,19 @@ export default function PayPendingDatePopup({ open, item, method, danger = false
             <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
           )}
 
-          <div>
-            <label className="label">วันที่จ่ายเงิน</label>
-            <DatePicker value={paidDate} onChange={setPaidDate} />
-          </div>
+          <DateTimeField
+            label="วันที่จ่ายเงิน"
+            date={paidDate}
+            time={paidTime}
+            onChange={({ date, time }) => { setPaidDate(date); setPaidTime(time) }}
+          />
         </div>
 
         <div className="px-5 pb-5 flex gap-3">
           <button className="btn btn-secondary flex-1" onClick={onCancel}>ยกเลิก</button>
           <button
             className={`btn flex-1 ${danger ? 'btn-danger' : 'btn-primary'} disabled:opacity-50 disabled:cursor-not-allowed`}
-            onClick={() => onConfirm(paidDate, resolvedAccountId)}
+            onClick={() => onConfirm(paidDate, resolvedAccountId, toTimestamp(paidDate, paidTime))}
             disabled={!paidDate || (needsAccount && !resolvedAccountId)}
           >
             ยืนยันชำระ

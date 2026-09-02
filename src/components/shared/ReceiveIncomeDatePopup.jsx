@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import TransferAccountPicker from './TransferAccountPicker'
-import DatePicker from './DatePicker'
+import DateTimeField, { toTimestamp } from './DateTimeField'
 import useWalletStore from '../../store/useWalletStore'
 
 export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, onCancel }) {
   const today = format(new Date(), 'yyyy-MM-dd')
   const [receivedDate, setReceivedDate] = useState(today)
+  const [receivedTime, setReceivedTime] = useState('')   // ว่าง = เที่ยงตรงของวันที่เลือก
   // ใช้บัญชีที่ผูกไว้ตอนเปิดบิลรอรับเงินเป็นค่าเริ่มต้น
   const [accountId, setAccountId] = useState(item?.defaultTransferAccountId ?? '')
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -48,8 +49,12 @@ export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, 
           )}
 
           <div>
-            <label className="label">วันที่ได้รับเงิน {isToday && <span className="text-blue-500">(วันนี้)</span>}</label>
-            <DatePicker value={receivedDate} onChange={setReceivedDate} />
+            <DateTimeField
+              label={isToday ? "วันที่ได้รับเงิน (วันนี้)" : "วันที่ได้รับเงิน"}
+              date={receivedDate}
+              time={receivedTime}
+              onChange={({ date, time }) => { setReceivedDate(date); setReceivedTime(time) }}
+            />
             <div className="flex flex-wrap gap-2 mt-2">
               <button
                 type="button"
@@ -75,7 +80,7 @@ export default function ReceiveIncomeDatePopup({ open, item, method, onConfirm, 
           <button className="btn btn-secondary flex-1" onClick={onCancel}>ยกเลิก</button>
           <button
             className="btn btn-success flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => onConfirm(receivedDate, resolvedAccountId)}
+            onClick={() => onConfirm(receivedDate, resolvedAccountId, toTimestamp(receivedDate, receivedTime))}
             disabled={!receivedDate || (needsAccount && !resolvedAccountId)}
           >
             ยืนยันรับเงิน

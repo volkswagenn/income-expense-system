@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
-import DatePicker from '../../components/shared/DatePicker'
+import DateTimeField, { toTimestamp } from '../../components/shared/DateTimeField'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
 
@@ -21,6 +21,7 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
   const [accountId, setAccountId] = useState(item.defaultTransferAccountId ?? '')
   const [cardId, setCardId] = useState('')
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [paidTime, setPaidTime] = useState('')   // ว่าง = เที่ยงตรงของวันที่เลือก
   const [error, setError] = useState('')
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
@@ -48,7 +49,8 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
     onConfirm(
       parsedAmount, method, paidDate,
       needsAccount ? resolveAccount(accountId) : null,
-      needsCard ? resolveCard(cardId) : null
+      needsCard ? resolveCard(cardId) : null,
+      toTimestamp(paidDate, paidTime)
     )
   }
 
@@ -124,13 +126,13 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
             </>
           )}
 
-          {/* Paid date */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              วันที่จ่ายเงิน <span className="text-red-500">*</span>
-            </label>
-            <DatePicker value={paidDate} onChange={(v) => { setPaidDate(v); setError('') }} />
-          </div>
+          {/* Paid date + time */}
+          <DateTimeField
+            label="วันที่จ่ายเงิน *"
+            date={paidDate}
+            time={paidTime}
+            onChange={({ date, time }) => { setPaidDate(date); setPaidTime(time); setError('') }}
+          />
 
           {error && <p className="text-sm text-red-500">{error}</p>}
         </div>
