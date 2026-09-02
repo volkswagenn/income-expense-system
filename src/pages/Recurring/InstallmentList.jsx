@@ -80,7 +80,7 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
   )
 }
 
-function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry }) {
+function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry, onUndoEntry }) {
   const [open, setOpen] = useState(false)
   const progress = useCreditCardStore((s) => s.getInstallmentProgress(installment.id))
   const cardLabel = useCreditCardStore((s) => s.getCardLabel(installment.cardId))
@@ -210,7 +210,19 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
                     <td className="py-1.5 pr-2">
                       <span className={`inline-block rounded-full border px-2 py-0.5 ${st.cls}`}>{st.label}</span>
                     </td>
-                    <td className="py-1.5 tabular-nums text-emerald-600">{r.paidAt ? formatIsoThai(r.paidAt) : '—'}</td>
+                    <td className="py-1.5 tabular-nums text-emerald-600 whitespace-nowrap">
+                      {r.paidAt ? formatIsoThai(String(r.paidAt).slice(0, 10)) : '—'}
+                      {/* คืนยอดได้เฉพาะงวดที่จ่ายผ่านแอป — งวดที่จ่ายผ่านบิลบัตรต้องไปย้อนที่บิล
+                          ไม่งั้นยอดบิลกับยอดงวดจะขัดกัน */}
+                      {r.status === 'paid' && r.paidMethod && isActive && (
+                        <button
+                          className="ml-2 text-gray-400 hover:text-red-600"
+                          onClick={() => onUndoEntry(installment, r)}
+                        >
+                          ย้อน
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
@@ -224,7 +236,7 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
 
 export default function InstallmentList() {
   const installments = useCreditCardStore((s) => s.installments)
-  const { settleInstallment, cancelInstallment, payStatement, payEntry } = useCreditCardStore()
+  const { settleInstallment, cancelInstallment, payStatement, payEntry, undoEntry } = useCreditCardStore()
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
   const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
@@ -238,6 +250,7 @@ export default function InstallmentList() {
   const [payTarget, setPayTarget] = useState(null)   // ใบแจ้งยอดที่กำลังจ่าย
   const [pickBill, setPickBill] = useState(false)   // หน้าต่างเลือกบิล
   const [payEntryTarget, setPayEntryTarget] = useState(null) // { installment, entry }
+  const [undoEntryTarget, setUndoEntryTarget] = useState(null) // { installment, entry }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -268,6 +281,28 @@ export default function InstallmentList() {
       })
       await refreshWallet()
       setPayEntryTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleUndoEntry = async () => {
+    const { installment, entry } = undoEntryTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await undoEntry(entry.id, buildLogEntry({
+        activityType: 'INSTALLMENT_PAY_UNDO',
+        description:
+          `ย้อนการจ่ายค่างวด "${installment.name}" งวดที่ ${entry.seq}/${installment.months} ` +
+          `คืนเงิน ${fmt(entry.amount)} บาท`,
+        oldValue: entry,
+      }))
+      await refreshWallet()
+      setUndoEntryTarget(null)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -399,6 +434,7 @@ export default function InstallmentList() {
                 key={i.id}
                 installment={i}
                 onPayEntry={(ins, row) => setPayEntryTarget({ installment: ins, entry: row })}
+                onUndoEntry={(ins, row) => setUndoEntryTarget({ installment: ins, entry: row })}
                 onSettle={(ins, progress) => setSettleTarget({ installment: ins, progress })}
                 onCancelInstallment={(ins, progress) => setCancelTarget({ installment: ins, progress })}
               />
@@ -429,6 +465,27 @@ export default function InstallmentList() {
           )}
         </>
       )}
+
+      <ConfirmPopup
+        open={!!undoEntryTarget}
+        title="ย้อนการจ่ายค่างวด"
+        message={
+          undoEntryTarget
+            ? `ย้อนงวดที่ ${undoEntryTarget.entry.seq} ของ "${undoEntryTarget.installment.name}"?
+
+` +
+              `• คืนเงิน ${fmt(undoEntryTarget.entry.amount)} บาท เข้ากระเป๋าเดิม
+` +
+              `• ลบรายการจ่ายที่ผูกไว้
+` +
+              `• งวดกลับไปเป็น "ยังไม่ถึงรอบ" และจะถูกเรียกเก็บเข้าบิลตามปกติ`
+            : ''
+        }
+        confirmLabel="ย้อนการจ่าย"
+        danger
+        onConfirm={handleUndoEntry}
+        onCancel={() => setUndoEntryTarget(null)}
+      />
 
       {payEntryTarget && (
         <PayInstallmentPopup

@@ -447,8 +447,15 @@ begin
   delete from debt_entries where debt_id = p_debt and status <> 'paid';
 
   for v_e in select * from jsonb_array_elements(p_entries) loop
-    -- ข้ามงวดที่จ่ายไปแล้ว ของเดิมยังอยู่ครบไม่ถูกแตะ
-    if (v_e->>'seq')::int <= v_paid then
+    -- ข้ามเฉพาะงวดที่จ่ายไปแล้วจริงๆ ของเดิมยังอยู่ครบไม่ถูกแตะ
+    --
+    -- ต้องเช็คทีละงวด ไม่ใช่เทียบกับเลขงวดสูงสุดที่จ่าย เพราะงวดที่จ่ายอาจไม่ได้
+    -- เรียงต่อกันจากงวดแรก เช่นจ่ายมาก่อนใช้ระบบ 23 งวดแล้วมาจ่ายงวดที่ 24 ผ่านแอป
+    -- ถ้าข้ามทุกงวดที่เลขน้อยกว่า 24 งวด 1–23 จะถูกลบทิ้งแล้วไม่ถูกสร้างคืน
+    if exists (
+      select 1 from debt_entries
+       where debt_id = p_debt and seq = (v_e->>'seq')::int and status = 'paid'
+    ) then
       continue;
     end if;
     insert into debt_entries (shop_id, debt_id, seq, due_date, amount, status)
