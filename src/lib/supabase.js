@@ -45,6 +45,23 @@ export function toThaiError(error) {
   if (error.code === '42501' || /row-level security|permission denied/i.test(msg)) {
     return 'ไม่มีสิทธิ์ทำรายการนี้'
   }
+  // 23514 = ข้อมูลผิดกติกาที่ตั้งไว้ในตาราง ข้อความดิบมีแต่ชื่อ constraint ภาษาอังกฤษ
+  // ซึ่งผู้ใช้อ่านแล้วเดาไม่ออกว่าต้องแก้อะไร กติกาที่ชนบ่อยจึงแปลไว้ตรงนี้
+  //
+  // ส่วนใหญ่ชนเพราะฐานข้อมูลยังเป็นกติกาชุดเก่า ทั้งที่หน้าจอปล่อยให้กรอกค่าใหม่ได้แล้ว
+  // จึงต้องบอกด้วยว่าให้รันไฟล์ไหนเพื่อขยับกติกาให้ตรงกับหน้าจอ
+  if (error.code === '23514' || /violates check constraint/i.test(msg)) {
+    if (/card_installments_months_check/.test(msg)) {
+      return 'จำนวนงวดเกินที่ฐานข้อมูลยอมรับ — ฐานข้อมูลยังจำกัดไว้ 60 งวด เปิด Supabase แล้วรัน supabase/card.sql เพื่อขยายเป็น 120 งวด ข้อมูลเดิมไม่หาย'
+    }
+    if (/status_check/.test(msg)) {
+      return 'สถานะที่ส่งไปไม่อยู่ในชุดที่ฐานข้อมูลรู้จัก — รัน supabase/card.sql และ supabase/recurring.sql ให้ครบก่อน ข้อมูลเดิมไม่หาย'
+    }
+    if (/method_check/.test(msg)) {
+      return 'วิธีจ่ายที่ส่งไปไม่อยู่ในชุดที่ฐานข้อมูลรู้จัก — รัน supabase/card.sql ข้อมูลเดิมไม่หาย'
+    }
+    return `ข้อมูลไม่ผ่านกติกาของฐานข้อมูล — ${msg}`
+  }
   // PGRST204 = ส่งคอลัมน์ที่ตารางยังไม่มี แปลว่าโค้ดใหม่ถูก deploy ไปแล้วแต่ยังไม่ได้
   // อัปเดตโครงสร้างฐานข้อมูล — ข้อความดิบเป็นภาษาอังกฤษที่ผู้ใช้เดาทางแก้ไม่ออกเลย
   if (error.code === 'PGRST204' || /Could not find the .* column|schema cache/i.test(msg)) {
