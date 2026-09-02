@@ -48,7 +48,7 @@ export function toThaiError(error) {
   // PGRST204 = ส่งคอลัมน์ที่ตารางยังไม่มี แปลว่าโค้ดใหม่ถูก deploy ไปแล้วแต่ยังไม่ได้
   // อัปเดตโครงสร้างฐานข้อมูล — ข้อความดิบเป็นภาษาอังกฤษที่ผู้ใช้เดาทางแก้ไม่ออกเลย
   if (error.code === 'PGRST204' || /Could not find the .* column|schema cache/i.test(msg)) {
-    return 'ฐานข้อมูลยังไม่ได้อัปเดตโครงสร้าง — เปิด Supabase → SQL Editor แล้วรันไฟล์ supabase/yearly.sql (ข้อมูลเดิมไม่หาย)'
+    return 'ฐานข้อมูลยังไม่ได้อัปเดตโครงสร้าง — เปิด Supabase → SQL Editor แล้วรันไฟล์ supabase/columns.sql (เติมคอลัมน์ที่ขาดทั้งหมด รันซ้ำได้ ข้อมูลเดิมไม่หาย)'
   }
   if (/Invalid login credentials/i.test(msg)) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
   if (/Email not confirmed/i.test(msg)) return 'บัญชีนี้ยังไม่ได้ยืนยัน ติดต่อเจ้าของร้าน'
