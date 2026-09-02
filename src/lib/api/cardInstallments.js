@@ -52,6 +52,7 @@ export async function createInstallment(cardId, data, schedule, log = null) {
       vendor: data.vendor || null,
       category_id: data.categoryId || null,
       note: data.note || null,
+      principal_amount: data.principalAmount ?? data.totalAmount,
       total_amount: data.totalAmount,
       months: data.months,
       monthly_amount: data.monthlyAmount,

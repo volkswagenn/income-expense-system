@@ -75,6 +75,10 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
   if (!progress) return null
 
   const total = Number(installment.totalAmount)
+  // สัญญาเก่าที่สร้างก่อนมีช่องดอกเบี้ยจะไม่มี principalAmount ให้ถือว่าเท่ายอดรวม
+  const principal = Number(installment.principalAmount ?? installment.totalAmount)
+  const interest = Math.round((total - principal) * 100) / 100
+  const hasInterest = interest > 0
   const done = progress.paidCount + progress.billedCount
   const pct = installment.months > 0 ? (done / installment.months) * 100 : 0
   // "งวดถัดไป" คืองวดที่ยังไม่ถูกเรียกเก็บ งวดที่อยู่ในบิลแล้วถือว่าเลยไปแล้ว
@@ -103,12 +107,18 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment }) {
       </div>
 
       <div>
-        <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+        <div className="flex items-center justify-between text-xs text-gray-500 mb-1 gap-3">
           <span>
-            ยอดเต็ม {fmt(total)} · งวดละ {fmt(installment.monthlyAmount)}
-            {Number(installment.interestRate) > 0 ? ` · ${installment.interestRate}%` : ' · 0%'}
+            {hasInterest ? (
+              <>
+                ราคา {fmt(principal)} + ดอกเบี้ย {fmt(interest)} ({installment.interestRate}% ต่อเดือน)
+                {' '}= <strong className="text-gray-700">{fmt(total)}</strong> · งวดละ {fmt(installment.monthlyAmount)}
+              </>
+            ) : (
+              <>ยอดเต็ม {fmt(total)} · งวดละ {fmt(installment.monthlyAmount)} · ผ่อน 0%</>
+            )}
           </span>
-          <span className="tabular-nums">งวด {done} จาก {installment.months}</span>
+          <span className="tabular-nums shrink-0">งวด {done} จาก {installment.months}</span>
         </div>
         <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
           <div className="h-full rounded-full bg-rose-400" style={{ width: `${pct}%` }} />

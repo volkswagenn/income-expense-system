@@ -107,7 +107,29 @@ export function pendingCycles(card, existingCycles, { from = new Date(), maxMont
 }
 
 /**
+ * ยอดผ่อนรวมเมื่อคิดดอกเบี้ยแบบคงที่จากเงินต้น (flat rate)
+ *
+ * เป็นวิธีที่โปรผ่อนสินค้าในไทยใช้กัน ไม่ใช่แบบลดต้นลดดอก
+ *   ดอกเบี้ยรวม = เงินต้น × อัตราต่อเดือน% × จำนวนงวด
+ *   ยอดผ่อนรวม  = เงินต้น + ดอกเบี้ยรวม
+ *
+ * ตัวอย่าง เงินต้น 100 ผ่อน 10 งวด 3% ต่อเดือน → ดอกเบี้ย 30 ยอดรวม 130 งวดละ 13
+ * อัตรา 0 คือผ่อน 0% ยอดรวมเท่าเงินต้นพอดี
+ */
+export function installmentTotal(principal, months, monthlyRatePct = 0) {
+  const p = Number(principal) || 0
+  const n = Math.max(0, Math.round(Number(months) || 0))
+  const r = Number(monthlyRatePct) || 0
+  const interest = Math.round(p * (r / 100) * n * 100) / 100
+  const total = Math.round((p + interest) * 100) / 100
+  return { principal: p, months: n, ratePerMonth: r, interest, total }
+}
+
+/**
  * ตารางงวดผ่อน — งวดแรกตกในรอบเดียวกับที่รูด แล้วไล่ไปเดือนละงวด
+ *
+ * totalAmount ที่ส่งเข้ามาคือ **ยอดที่ต้องผ่อนจริงรวมดอกเบี้ยแล้ว**
+ * ไม่ใช่ราคาสินค้า ผู้เรียกคำนวณด้วย installmentTotal() ก่อน
  *
  * เศษที่หารไม่ลงตัวไปรวมที่งวดสุดท้าย ซึ่งเป็นวิธีที่ธนาคารส่วนใหญ่ใช้
  * และทำให้ผลรวมทุกงวดเท่ากับยอดเต็มพอดีเสมอ ไม่มีเศษหลงเหลือ

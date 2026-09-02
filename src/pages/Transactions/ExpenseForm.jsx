@@ -11,7 +11,7 @@ import TransferAccountPicker from '../../components/shared/TransferAccountPicker
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
-import { nextDueDate, formatThaiDate, installmentSchedule } from '../../lib/cardCycle'
+import { nextDueDate, formatThaiDate, installmentSchedule, installmentTotal } from '../../lib/cardCycle'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -24,11 +24,13 @@ import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
 
 const EMPTY = {
   itemName: '', category: '', amount: '', method: 'cash', transferAccountId: '', pendingAccountId: '',
-  cardId: '', installment: false, installmentMonths: '6',
+  cardId: '', installment: false, installmentMonths: '6', installmentRate: '0',
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
 
 const MONTH_PRESETS = [3, 6, 10]
+
+const fmtBaht = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
 export default function ExpenseForm() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -152,21 +154,38 @@ export default function ExpenseForm() {
     } else if (isInstallment) {
       // ผ่อน: ยังไม่สร้างรายจ่ายและยังไม่ขยับหนี้ บันทึกแค่สัญญากับตารางงวด
       // งวดจะกลายเป็นรายจ่ายทีละงวดตอนปิดรอบ เพราะเงินไหลออกจริงทีละงวด
-      const schedule = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), months, amt)
+      //
+      // ช่องจำนวนเงินคือราคาสินค้า ส่วนยอดที่ผ่อนจริงคือราคาบวกดอกเบี้ยแบบคงที่
+      // ผลรวมของทุกงวดจึงเท่ากับ total ไม่ใช่ราคาสินค้า ซึ่งตรงกับเงินที่ไหลออกจริง
+      const money = installmentTotal(amt, months, Number(form.installmentRate) || 0)
+      const schedule = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), months, money.total)
       const ins = await createInstallment(cardId, {
         name: form.itemName,
         vendor: form.vendor,
         categoryId: form.category || null,
         note: form.note,
-        totalAmount: amt,
+        principalAmount: money.principal,
+        totalAmount: money.total,
         months,
         monthlyAmount: schedule[0].amount,
-        interestRate: 0,
+        interestRate: money.ratePerMonth,
         purchaseDate: date,
       }, schedule, buildLogEntry({
         activityType: 'INSTALLMENT_CREATE',
-        description: `ผ่อน "${form.itemName}" ${amt.toLocaleString()} บาท ${months} งวด งวดละ ${schedule[0].amount.toLocaleString()} บาท`,
-        newValue: { itemName: form.itemName, amount: amt, months, cardId, date },
+        description:
+          `ผ่อน "${form.itemName}" ราคา ${money.principal.toLocaleString()} บาท ${months} งวด ` +
+          (money.interest > 0
+            ? `ดอกเบี้ย ${money.ratePerMonth}% ต่อเดือน รวม ${money.total.toLocaleString()} บาท `
+            : 'ผ่อน 0% ') +
+          `งวดละ ${schedule[0].amount.toLocaleString()} บาท`,
+        newValue: {
+          itemName: form.itemName,
+          principal: money.principal,
+          interest: money.interest,
+          total: money.total,
+          ratePerMonth: money.ratePerMonth,
+          months, cardId, date,
+        },
       }))
       savedRef.current.installment = ins
       await refreshCards()
@@ -273,15 +292,23 @@ export default function ExpenseForm() {
     : null
 
   // ตัวอย่างตารางผ่อน คำนวณสดขณะพิมพ์ ผู้ใช้จะได้เห็นยอดต่องวดก่อนกดบันทึก
+  // ช่องจำนวนเงินคือ "ราคาสินค้า" ส่วนยอดที่ผ่อนจริงคือราคาบวกดอกเบี้ย
   const installmentPreview = (() => {
     if (!form.installment || !selectedCard) return null
-    const amt = Number(form.amount)
+    const principal = Number(form.amount)
     const m = Math.round(Number(form.installmentMonths) || 0)
-    if (!(amt > 0) || !(m >= 1) || m > 60) return null
-    const rows = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), m, amt)
+    const rate = Number(form.installmentRate) || 0
+    if (!(principal > 0) || !(m >= 1) || m > 60 || rate < 0) return null
+    const money = installmentTotal(principal, m, rate)
+    const rows = installmentSchedule(selectedCard, new Date(date + 'T00:00:00'), m, money.total)
     const first = rows[0]
     const last = rows[rows.length - 1]
-    return { months: m, first, last, hasRemainder: rows.length > 1 && last.amount !== first.amount }
+    return {
+      ...money,
+      first,
+      last,
+      hasRemainder: rows.length > 1 && last.amount !== first.amount,
+    }
   })()
 
   const recurringAllItems = useRecurringStore((s) => s.items)
@@ -444,17 +471,67 @@ export default function ExpenseForm() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="label">ดอกเบี้ย</label>
+                  <div className="flex items-end gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      className={`btn text-xs py-1 px-3 ${Number(form.installmentRate) === 0 ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => set('installmentRate', '0')}
+                    >
+                      ผ่อน 0%
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        className="input w-24"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.installmentRate}
+                        onChange={(e) => set('installmentRate', e.target.value)}
+                      />
+                      <span className="text-xs text-rose-800 whitespace-nowrap">% ต่อเดือน</span>
+                    </div>
+                  </div>
+                </div>
+
                 {installmentPreview ? (
-                  <p className="text-xs text-rose-800 bg-white/70 rounded-lg px-3 py-2 leading-relaxed">
-                    งวดละ <strong>{installmentPreview.first.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</strong> บาท{' '}
-                    {installmentPreview.months} งวด
-                    {installmentPreview.hasRemainder && (
-                      <> (งวดสุดท้าย {installmentPreview.last.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท)</>
+                  <div className="text-xs text-rose-800 bg-white/70 rounded-lg px-3 py-2 leading-relaxed space-y-0.5">
+                    {installmentPreview.interest > 0 ? (
+                      <>
+                        <div className="flex justify-between gap-3">
+                          <span>ราคาสินค้า</span>
+                          <span className="tabular-nums">{fmtBaht(installmentPreview.principal)}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span>
+                            ดอกเบี้ย {installmentPreview.ratePerMonth}% × {installmentPreview.months} งวด
+                          </span>
+                          <span className="tabular-nums">+ {fmtBaht(installmentPreview.interest)}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 border-t border-rose-200 pt-0.5 font-semibold">
+                          <span>ยอดผ่อนรวม</span>
+                          <span className="tabular-nums">{fmtBaht(installmentPreview.total)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between gap-3 font-semibold">
+                        <span>ยอดผ่อนรวม (ผ่อน 0%)</span>
+                        <span className="tabular-nums">{fmtBaht(installmentPreview.total)}</span>
+                      </div>
                     )}
-                    <br />
-                    งวดแรกอยู่ในบิลที่ครบกำหนด <strong>{formatThaiDate(installmentPreview.first.dueDate)}</strong>{' '}
-                    งวดสุดท้าย <strong>{formatThaiDate(installmentPreview.last.dueDate)}</strong>
-                  </p>
+                    <p className="pt-1">
+                      งวดละ <strong>{fmtBaht(installmentPreview.first.amount)}</strong> บาท{' '}
+                      {installmentPreview.months} งวด
+                      {installmentPreview.hasRemainder && (
+                        <> (งวดสุดท้าย {fmtBaht(installmentPreview.last.amount)} บาท)</>
+                      )}
+                    </p>
+                    <p>
+                      งวดแรกอยู่ในบิลที่ครบกำหนด <strong>{formatThaiDate(installmentPreview.first.dueDate)}</strong>{' '}
+                      งวดสุดท้าย <strong>{formatThaiDate(installmentPreview.last.dueDate)}</strong>
+                    </p>
+                  </div>
                 ) : (
                   <p className="text-xs text-rose-600">ใส่จำนวนเงินก่อน ระบบจะคำนวณยอดต่องวดให้</p>
                 )}
