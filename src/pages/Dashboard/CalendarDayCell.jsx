@@ -33,7 +33,7 @@ function ReminderRow({ marker, markerClass, label, value, valueSuffix = 'บา�
   )
 }
 
-function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, pendingItems, pendingIncomeItems, taxItems, recurringItems, note, getCategoryName, pos }) {
+function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, pendingItems, pendingIncomeItems, taxItems, recurringItems, cardBills = [], note, getCategoryName, pos }) {
   const d = new Date(dateStr + 'T00:00:00')
   const dateLabel = `${d.getDate()} ${THAI_MONTHS_SHORT[d.getMonth()]} ${d.getFullYear() + 543}`
   const pendingIncomeTotal = pendingIncomeItems.reduce((sum, item) => sum + (item.amount || 0), 0)
@@ -160,6 +160,23 @@ function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, 
         </div>
       )}
 
+      {cardBills.length > 0 && (
+        <div className="mb-2 pt-1.5 border-t border-gray-700">
+          <p className="text-rose-400 font-semibold mb-1">💳 บิลบัตรเครดิต</p>
+          <div className="space-y-1 pl-2">
+            {cardBills.map((b) => (
+              <div key={b.key} className="flex items-start justify-between gap-2">
+                <span className={b.paid ? 'text-emerald-400' : b.overdue ? 'text-rose-300' : 'text-gray-200'}>
+                  {b.paid ? '✅' : b.overdue ? '⚠' : b.projected ? '~' : '⏳'} {b.cardName}
+                  {b.projected && <span className="text-gray-500"> (ประมาณการ)</span>}
+                </span>
+                <span className="text-gray-300 tabular-nums flex-shrink-0">{b.amount.toLocaleString('th-TH')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {hasSummary && (
         <div className="mb-2 pt-1.5 border-t border-gray-700">
           <p className="text-gray-300 font-semibold mb-1">สรุปยอด</p>
@@ -190,7 +207,7 @@ function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, 
 
 export default function CalendarDayCell({
   date, dateStr, isCurrentMonth, isToday, isHighlighted, isInCustomRange,
-  transactions, pendingItems, pendingIncomeItems = [], taxItems, recurringItems = [], note,
+  transactions, pendingItems, pendingIncomeItems = [], taxItems, recurringItems = [], cardBills = [], note,
   onContextMenu, onClick, getCategoryName, todayStr,
   yearlyItems = [], yearlyDueThisMonth = [], onYearlyClick,
 }) {
@@ -206,7 +223,8 @@ export default function CalendarDayCell({
   const recurringPending = recurringItems.filter(({ entry }) => entry.status === 'pending')
   const recurringPaid = recurringItems.filter(({ entry }) => entry.status === 'paid')
 
-  const hasContent = totalIncome > 0 || totalExpense > 0 || pendingItems.length > 0 || pendingIncomeItems.length > 0 || taxItems.length > 0 || recurringItems.length > 0 || note
+  const cardBillsUnpaid = cardBills.filter((b) => !b.paid)
+  const hasContent = totalIncome > 0 || totalExpense > 0 || pendingItems.length > 0 || pendingIncomeItems.length > 0 || taxItems.length > 0 || recurringItems.length > 0 || cardBills.length > 0 || note
   const isOverdue = dateStr < todayStr && (pendingItems.length > 0 || recurringPending.length > 0)
   const hasPendingPayment = pendingItems.length > 0
   const hasNote = !!note
@@ -247,11 +265,12 @@ export default function CalendarDayCell({
     setTooltipPos(null)
   }, [])
 
-  const dotCount = pendingItems.length + pendingIncomeItems.length + taxItems.length + recurringPending.length
+  const dotCount = pendingItems.length + pendingIncomeItems.length + taxItems.length + recurringPending.length + cardBillsUnpaid.length
   const visiblePending = pendingItems.slice(0, 3)
   const visiblePendingIncome = pendingIncomeItems.slice(0, Math.max(0, 3 - pendingItems.length))
   const visibleTax = taxItems.slice(0, Math.max(0, 3 - pendingItems.length - pendingIncomeItems.length))
   const visibleRecurring = recurringPending.slice(0, Math.max(0, 3 - pendingItems.length - pendingIncomeItems.length - taxItems.length))
+  const visibleCardBills = cardBillsUnpaid.slice(0, Math.max(0, 3 - pendingItems.length - pendingIncomeItems.length - taxItems.length - recurringPending.length))
   const extraDots = dotCount > 3 ? dotCount - 3 : 0
 
   return (
@@ -340,6 +359,9 @@ export default function CalendarDayCell({
             {visibleRecurring.map((_, i) => (
               <span key={'r' + i} className={`w-2 h-2 rounded-full flex-shrink-0 ${isOverdue ? 'bg-purple-700' : 'bg-purple-400'}`} />
             ))}
+            {visibleCardBills.map((b, i) => (
+              <span key={'cb' + i} className={`w-2 h-2 rounded-full flex-shrink-0 ${b.overdue ? 'bg-rose-600' : 'bg-rose-400'}`} />
+            ))}
             {extraDots > 0 && (
               <span className="text-gray-400 text-[9px] leading-none">+{extraDots}</span>
             )}
@@ -358,6 +380,7 @@ export default function CalendarDayCell({
           pendingIncomeItems={pendingIncomeItems}
           taxItems={taxItems}
           recurringItems={recurringItems}
+          cardBills={cardBills}
           note={note}
           getCategoryName={getCategoryName}
           pos={tooltipPos}

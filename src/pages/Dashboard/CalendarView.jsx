@@ -6,6 +6,7 @@ import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
 import useNoteStore from '../../store/useNoteStore'
 import useRecurringStore from '../../store/useRecurringStore'
+import useCreditCardStore from '../../store/useCreditCardStore'
 import CalendarDayCell from './CalendarDayCell'
 import CalendarNotePopup from './CalendarNotePopup'
 import YearlyRecurringPopup from './YearlyRecurringPopup'
@@ -26,6 +27,7 @@ const LAYERS = [
   { key: 'pendingIncome', label: 'รอรับเงิน',     dot: 'bg-blue-500' },
   { key: 'tax',           label: 'ใบกำกับภาษี',   dot: 'bg-orange-500' },
   { key: 'recurring',     label: 'รายการประจำ',   dot: 'bg-purple-500' },
+  { key: 'cardBill',      label: 'บิลบัตรเครดิต', dot: 'bg-rose-500' },
   { key: 'note',          label: 'โน้ต',          dot: 'bg-gray-400' },
 ]
 
@@ -63,6 +65,11 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
   const { getCategoryName } = useCategoryStore()
   const { notes } = useNoteStore()
   const { entries: recurringEntries, items: recurringItems, generateEntries } = useRecurringStore()
+  const cards = useCreditCardStore((s) => s.cards)
+  const cardStatements = useCreditCardStore((s) => s.statements)
+  const cardInstallmentEntries = useCreditCardStore((s) => s.entries)
+  const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
+  const getUpcomingBills = useCreditCardStore((s) => s.getUpcomingBills)
   const navigate = useNavigate()
 
   // Sync view when FilterBar changes startDate
@@ -134,6 +141,57 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
     const mon = viewMonth + 1
     return yearlyItems.filter((it) => Number(it.billingMonth) === mon && !pauseInfo(it, localMonthStr()))
   }, [yearlyItems, viewMonth])
+
+  /**
+   * บิลบัตรเครดิตตามวันครบกำหนด
+   *
+   * มีสองแบบและต้องแสดงคนละความหมาย
+   *   ปิดรอบแล้ว  = ใบแจ้งยอดที่มีอยู่จริงในฐานข้อมูล ยอดแน่นอน รวมใบที่จ่ายแล้วด้วย
+   *                 เพื่อให้ย้อนดูเดือนเก่าแล้วยังเห็นว่าเคยมีบิลวันไหน
+   *   ประมาณการ   = รอบที่ยังไม่ปิด คำนวณสดจากรายการที่รูดไว้ ยอดยังขยับได้
+   *
+   * getUpcomingBills มองไปข้างหน้าจากวันนี้เท่านั้น เวลาเลื่อนปฏิทินไปเดือนถัดๆ ไป
+   * จึงต้องขยายช่วงให้ครอบคลุมเดือนที่กำลังดู ไม่งั้นบิลของเดือนนั้นจะหายไปเฉยๆ
+   */
+  const cardBillsByDate = useMemo(() => {
+    const map = {}
+    const push = (date, row) => {
+      if (!date) return
+      if (!map[date]) map[date] = []
+      map[date].push(row)
+    }
+
+    for (const s of cardStatements) {
+      const remaining = Number(s.amount || 0) - Number(s.paidAmount || 0)
+      push(s.dueDate, {
+        key: `s-${s.id}`,
+        cardName: getCardLabel(s.cardId),
+        amount: s.status === 'paid' ? Number(s.amount || 0) : remaining,
+        paid: s.status === 'paid',
+        projected: false,
+        overdue: s.status !== 'paid' && s.dueDate < todayStr,
+      })
+    }
+
+    const monthsAhead = Math.max(
+      2,
+      (viewYear - today.getFullYear()) * 12 + (viewMonth - today.getMonth()) + 1
+    )
+    const closedKeys = new Set(cardStatements.map((s) => `${s.cardId}|${s.cycle}`))
+    for (const r of getUpcomingBills(monthsAhead).rows) {
+      if (r.kind !== 'projected') continue
+      if (closedKeys.has(`${r.cardId}|${r.cycle}`)) continue
+      push(r.dueDate, {
+        key: r.key,
+        cardName: getCardLabel(r.cardId),
+        amount: r.amount,
+        paid: false,
+        projected: true,
+        overdue: false,
+      })
+    }
+    return map
+  }, [cardStatements, cards, transactions, cardInstallmentEntries, viewYear, viewMonth, todayStr])
 
   const recurringByDate = useMemo(() => {
     const map = {}
@@ -272,6 +330,7 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
               pendingIncomeItems={show.pendingIncome ? (pendingIncomeByDate[dateStr] || []) : []}
               taxItems={show.tax ? (taxByDate[dateStr] || []) : []}
               recurringItems={show.recurring ? (recurringByDate[dateStr] || []) : []}
+              cardBills={show.cardBill ? (cardBillsByDate[dateStr] || []) : []}
               note={show.note ? (notes[dateStr] || '') : ''}
               onContextMenu={setNoteDate}
               onClick={() => navigate('/transactions')}
