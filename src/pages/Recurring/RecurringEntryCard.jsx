@@ -9,7 +9,7 @@ function StatusBadge({ status }) {
   return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">⏳ รอจ่าย</span>
 }
 
-export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSkip }) {
+export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSkip, onEdit }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const categories = getCategories('expense')
   const cat = categories.find((c) => c.id === item.category)
@@ -92,6 +92,13 @@ export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSk
                   title="ข้ามเดือนนี้"
                 >
                   ⏭
+                </button>
+                <button
+                  onClick={() => onEdit(item)}
+                  className="btn btn-secondary text-xs py-1 px-2"
+                  title="แก้ไขรายการประจำ"
+                >
+                  ✏️
                 </button>
               </>
             )}

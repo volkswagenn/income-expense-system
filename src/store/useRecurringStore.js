@@ -84,6 +84,37 @@ const useRecurringStore = create((set, get) => ({
 
   markSkipped: async (entryId) => get().updateEntry(entryId, { status: 'skipped' }),
 
+  /**
+   * แก้แม่แบบแล้วให้รอบที่ "ยังไม่จ่าย" ตามไปด้วย
+   *
+   * entry เก็บยอดกับวันครบกำหนดเป็นสำเนาของตัวเอง (เพราะยอดแต่ละเดือนต่างกันได้)
+   * ถ้าไม่ซิงก์ให้ พอแก้ยอดในแม่แบบแล้วเดือนนี้จะยังโชว์ยอดเก่า ดูเหมือนแก้ไม่ติด
+   *
+   * ตั้งใจไม่แตะ 2 อย่าง
+   *   • รอบที่จ่ายแล้ว/ข้ามแล้ว — เป็นประวัติ แก้ย้อนหลังไม่ได้ ไม่งั้นยอดจะไม่ตรงเงินจริง
+   *   • เดือนที่ผ่านมาแล้ว — แก้วันนี้ต้องไม่ไปเปลี่ยนบิลของเดือนก่อน
+   */
+  syncPendingEntries: async (itemId, fromMonth) => {
+    const item = get().items.find((it) => it.id === itemId)
+    if (!item) return 0
+
+    const targets = get().entries.filter(
+      (e) => e.recurringId === itemId && e.status === 'pending' && e.month >= fromMonth
+    )
+
+    let changed = 0
+    for (const e of targets) {
+      const [year, mon] = e.month.split('-').map(Number)
+      const patch = { dueDate: computeDueDate(year, mon, item.billingDay) }
+      // ยอดคงที่เท่านั้นที่ลอกจากแม่แบบได้ ยอดเปลี่ยนแปลงต้องรอกรอกตอนจ่าย
+      if (item.amountType === 'fixed') patch.amount = item.fixedAmount ?? 0
+      if (patch.dueDate === e.dueDate && patch.amount === e.amount) continue
+      await get().updateEntry(e.id, patch)
+      changed++
+    }
+    return changed
+  },
+
   /** ย้อนสถานะเมื่อรายการที่ผูกไว้ถูกลบจากหน้าประวัติ */
   syncEntryFromTransaction: async (transactionId) => {
     const targets = get().entries.filter((e) => e.transactionId === transactionId)

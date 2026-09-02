@@ -12,7 +12,7 @@ const STATUS = {
   pending: { dot: 'bg-amber-400',   text: 'text-amber-600',   label: 'รอจ่าย' },
 }
 
-export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSkip }) {
+export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSkip, onEdit }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const cat = getCategories('expense').find((c) => c.id === item.category)
   const catName = cat ? cat.name : getCategoryName(item.category) || 'หมวดหมู่ถูกลบ'
@@ -57,7 +57,7 @@ export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSki
       </span>
 
       {/* ปุ่ม */}
-      <div className="flex gap-1 flex-shrink-0 w-[104px] justify-end whitespace-nowrap">
+      <div className="flex gap-1 flex-shrink-0 w-[136px] justify-end whitespace-nowrap">
         {isPending && (
           <>
             <button
@@ -76,6 +76,13 @@ export default function RecurringEntryRow({ entry, item, onPay, onUndoPay, onSki
             </button>
           </>
         )}
+        <button
+          onClick={() => onEdit(item)}
+          className="btn btn-secondary text-xs !h-7 px-2"
+          title="แก้ไขรายการประจำ"
+        >
+          ✏️
+        </button>
         {isSkipped && (
           <button onClick={() => onSkip(entry.id)} className="btn btn-secondary text-xs !h-7 px-2" title="เปลี่ยนกลับเป็นรอจ่าย">
             ↩ คืน

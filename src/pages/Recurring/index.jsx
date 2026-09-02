@@ -11,6 +11,7 @@ import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import RecurringEntryCard from './RecurringEntryCard'
 import RecurringEntryRow from './RecurringEntryRow'
 import { isYearly, scheduleLabel } from '../../lib/recurringSchedule'
+import { localMonthStr } from '../../lib/dateUtils'
 import RecurringItemForm from './RecurringItemForm'
 import PayEntryPopup from './PayEntryPopup'
 
@@ -42,7 +43,7 @@ export default function RecurringPage() {
 
   const {
     items, entries, addItem, updateItem, toggleItem, deleteItem,
-    generateEntries, updateEntry, markSkipped, getPendingCountCurrentMonth,
+    generateEntries, updateEntry, markSkipped, getPendingCountCurrentMonth, syncPendingEntries,
     syncEntryFromTransaction,
   } = useRecurringStore()
   const { addTransaction, deleteTransaction } = useTransactionStore()
@@ -99,8 +100,15 @@ export default function RecurringPage() {
   }
 
   const handleUpdateItem = async (data) => {
-    await updateItem(editItem.id, data)
-    addLog(buildLogEntry({ activityType: 'RECURRING_UPDATE', description: `แก้ไขรายการประจำ "${data.name}"` }))
+    const id = editItem.id
+    await updateItem(id, data)
+    // เดือนนี้จริงๆ ไม่ใช่เดือนที่กำลังเปิดดู — ย้อนไปแก้บิลเดือนที่ผ่านมาแล้วไม่ได้
+    const changed = await syncPendingEntries(id, localMonthStr())
+    addLog(buildLogEntry({
+      activityType: 'RECURRING_UPDATE',
+      description: `แก้ไขรายการประจำ "${data.name}"` +
+        (changed > 0 ? ` (ปรับรอบที่ยังไม่จ่าย ${changed} รอบให้ตรงกัน)` : ''),
+    }))
     await generateEntries(month)
     setEditItem(null)
   }
@@ -351,6 +359,7 @@ export default function RecurringPage() {
                 onPay={handlePay}
                 onUndoPay={handleUndoPay}
                 onSkip={handleSkip}
+                onEdit={setEditItem}
               />
             )
           })}

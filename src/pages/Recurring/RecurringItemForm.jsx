@@ -39,6 +39,9 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
   )
   const [error, setError] = useState({})
   const [showNumpad, setShowNumpad] = useState(false)
+  // กันกดซ้ำ — การบันทึกต้องรอเซิร์ฟเวอร์ตอบ ระหว่างนั้นหน้าต่างยังเปิดอยู่
+  // ถ้าไม่ล็อกปุ่มไว้ คนกดซ้ำเพราะคิดว่าไม่ติด จะได้รายการซ้ำสองอัน
+  const [saving, setSaving] = useState(false)
 
   const set = (field, value) => setForm((f) => ({ ...f, [field]: value }))
 
@@ -57,22 +60,29 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
     return e
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return
     const e = validate()
     if (Object.keys(e).length > 0) { setError(e); return }
-    onSave({
-      ...form,
-      name: form.name.trim(),
-      billingDay: Number(form.billingDay),
-      frequency: form.frequency === 'yearly' ? 'yearly' : 'monthly',
-      billingMonth: form.frequency === 'yearly' ? Number(form.billingMonth) : null,
-      fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : undefined,
-      vendor: form.vendor.trim() || undefined,
-      note: form.note.trim() || undefined,
-      defaultMethod: form.defaultMethod || undefined,
-      defaultTransferAccountId:
-        form.defaultMethod === 'transfer' ? (form.defaultTransferAccountId || undefined) : undefined,
-    })
+    setSaving(true)
+    try {
+      await onSave({
+        ...form,
+        name: form.name.trim(),
+        billingDay: Number(form.billingDay),
+        frequency: form.frequency === 'yearly' ? 'yearly' : 'monthly',
+        billingMonth: form.frequency === 'yearly' ? Number(form.billingMonth) : null,
+        fixedAmount: form.amountType === 'fixed' ? parseFloat(form.fixedAmount) : undefined,
+        vendor: form.vendor.trim() || undefined,
+        note: form.note.trim() || undefined,
+        defaultMethod: form.defaultMethod || undefined,
+        defaultTransferAccountId:
+          form.defaultMethod === 'transfer' ? (form.defaultTransferAccountId || undefined) : undefined,
+      })
+    } finally {
+      // ปลดล็อกเสมอ แม้บันทึกล้ม ผู้ใช้จะได้แก้แล้วกดใหม่ได้
+      setSaving(false)
+    }
   }
 
   return (
@@ -294,9 +304,9 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
         </div>
 
         <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex gap-3 flex-shrink-0">
-          <button className="btn btn-secondary flex-1" onClick={onClose}>ยกเลิก</button>
-          <button className="btn btn-primary flex-1" onClick={handleSave}>
-            {item ? 'บันทึก' : '➕ เพิ่มรายการ'}
+          <button className="btn btn-secondary flex-1" onClick={onClose} disabled={saving}>ยกเลิก</button>
+          <button className="btn btn-primary flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? 'กำลังบันทึก…' : item ? 'บันทึก' : '➕ เพิ่มรายการ'}
           </button>
         </div>
       </div>
