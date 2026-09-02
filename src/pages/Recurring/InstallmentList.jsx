@@ -7,8 +7,9 @@ import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import DatePicker from '../../components/shared/DatePicker'
 import BankLogo from '../../components/shared/BankLogo'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
+import PickBillPopup from './PickBillPopup'
 import useWalletStore from '../../store/useWalletStore'
-import { clampedDate, formatIsoThai, toDateString } from '../../lib/cardCycle'
+import { formatIsoThai } from '../../lib/cardCycle'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -198,15 +199,14 @@ export default function InstallmentList() {
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
   const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
-  const getCard = useCreditCardStore((s) => s.getCard)
-  const getUpcomingBills = useCreditCardStore((s) => s.getUpcomingBills)
   const refreshWallet = useWalletStore((s) => s.refresh)
   const { addLog } = useLogStore()
 
   const [showDone, setShowDone] = useState(false)
   const [settleTarget, setSettleTarget] = useState(null)
   const [cancelTarget, setCancelTarget] = useState(null)
-  const [payTarget, setPayTarget] = useState(null) // { statement }
+  const [payTarget, setPayTarget] = useState(null)   // ใบแจ้งยอดที่กำลังจ่าย
+  const [pickBill, setPickBill] = useState(false)   // หน้าต่างเลือกบิล
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -217,22 +217,6 @@ export default function InstallmentList() {
     (sum, s) => sum + (Number(s.amount || 0) - Number(s.paidAmount || 0)), 0
   )
 
-  /**
-   * บิลของรอบที่ยังไม่ปิด
-   *
-   * ต้องแสดงด้วย ไม่งั้นตอนที่ยังไม่มีบิลออกจริงหน้านี้จะว่างเปล่า แล้วผู้ใช้
-   * เข้าใจว่าปุ่มจ่ายหายไปไหน ทั้งที่ความจริงคือบิลยังไม่ถูกตัด
-   * ปุ่มจ่ายจะโผล่เองเมื่อถึงวันตัดบิล จึงบอกวันตัดบิลกำกับไว้ให้รู้ว่ารออะไร
-   */
-  const projectedBills = getUpcomingBills(2).rows
-    .filter((r) => r.kind === 'projected')
-    .map((r) => {
-      const card = getCard(r.cardId)
-      const [cy, cm] = r.cycle.split('-').map(Number)
-      return { ...r, closingDate: card ? toDateString(clampedDate(cy, cm - 1, card.closingDay)) : null }
-    })
-
-  const hasAnyBill = unpaidBills.length > 0 || projectedBills.length > 0
 
   const handlePayBill = async ({ method, accountId, amount, date }) => {
     const statement = payTarget
@@ -313,79 +297,23 @@ export default function InstallmentList() {
 
   return (
     <div className="space-y-4">
-      <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
         <h2 className="section-title">ผ่อนชำระผ่านบัตรเครดิต</h2>
         <p className="text-xs text-gray-500 mt-1">
           รายการที่แบ่งจ่ายเป็นงวด แต่ละงวดถูกเรียกเก็บรวมในบิลบัตรอัตโนมัติ
           จึงจ่ายที่บิลไม่ใช่ที่ตัวรายการผ่อน เริ่มผ่อนได้จากฟอร์มบันทึกรายจ่าย
           เลือกบัตรเครดิตแล้วติ๊ก "แบ่งชำระ"
         </p>
+        </div>
+        {/* ปุ่มถาวร ไม่ต้องรอให้มีบิลถึงจะโผล่ กดแล้วเห็นทุกใบว่าใบไหนจ่ายได้แล้ว */}
+        <button className="btn btn-warning text-sm flex-shrink-0" onClick={() => setPickBill(true)}>
+          💳 จ่ายบิลบัตร
+          {unpaidTotal > 0 && <span className="ml-1 tabular-nums">{fmt(unpaidTotal)}</span>}
+        </button>
       </div>
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
-
-      {/* บิลบัตร — จ่ายได้จากหน้านี้เลย ไม่ต้องข้ามไปหน้ากระเป๋าเงิน */}
-      {hasAnyBill && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 overflow-hidden">
-          <div className="px-4 py-2.5 flex items-center justify-between border-b border-amber-200">
-            <span className="text-sm font-semibold text-amber-900">💳 บิลบัตรเครดิต</span>
-            <span className="text-sm font-bold tabular-nums text-amber-800">
-              {unpaidBills.length > 0 ? `ต้องจ่ายตอนนี้ ${fmt(unpaidTotal)} บาท` : 'ยังไม่มีบิลที่ต้องจ่าย'}
-            </span>
-          </div>
-
-          <div className="divide-y divide-amber-200/70">
-            {unpaidBills.map((s) => {
-              const remaining = Number(s.amount || 0) - Number(s.paidAmount || 0)
-              const overdue = s.dueDate < format(new Date(), 'yyyy-MM-dd')
-              return (
-                <div key={s.id} className="px-4 py-2.5 flex items-center justify-between gap-3 bg-white/60">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{getCardShortLabel(s.cardId)}</p>
-                    <p className={`text-xs ${overdue ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
-                      รอบ {s.cycle} · ครบกำหนด {formatIsoThai(s.dueDate)}{overdue ? ' · เลยกำหนดแล้ว' : ''}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="text-sm font-bold tabular-nums text-gray-900">{fmt(remaining)}</span>
-                    <button className="btn btn-warning text-xs !h-8 px-3" onClick={() => setPayTarget(s)}>
-                      จ่ายบิล
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-
-            {projectedBills.map((r) => (
-              <div key={r.key} className="px-4 py-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-600 truncate">
-                    {getCardShortLabel(r.cardId)}
-                    <span className="ml-1.5 text-[10px] font-normal px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
-                      ยังไม่ตัดบิล
-                    </span>
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    รอบ {r.cycle}
-                    {r.closingDate && ` · ตัดบิล ${formatIsoThai(r.closingDate)}`}
-                    {' · ครบกำหนด '}{formatIsoThai(r.dueDate)}
-                  </p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-semibold tabular-nums text-gray-600">{fmt(r.amount)}</p>
-                  <p className="text-[10px] text-gray-400">ประมาณการ</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {unpaidBills.length === 0 && (
-            <p className="px-4 py-2 text-xs text-amber-800 bg-amber-100/60 border-t border-amber-200">
-              ปุ่มจ่ายบิลจะขึ้นเองเมื่อถึงวันตัดบิล ตอนนี้ยอดยังขยับได้ตามรายการที่รูดเพิ่ม
-            </p>
-          )}
-        </div>
-      )}
 
       {active.length === 0 && done.length === 0 ? (
         <div className="text-center py-10 text-gray-400">
@@ -440,6 +368,13 @@ export default function InstallmentList() {
             </div>
           )}
         </>
+      )}
+
+      {pickBill && (
+        <PickBillPopup
+          onPick={(statement) => { setPickBill(false); setPayTarget(statement) }}
+          onClose={() => setPickBill(false)}
+        />
       )}
 
       {payTarget && (
