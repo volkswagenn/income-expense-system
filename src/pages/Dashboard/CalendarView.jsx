@@ -68,7 +68,8 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
   const cards = useCreditCardStore((s) => s.cards)
   const cardStatements = useCreditCardStore((s) => s.statements)
   const cardInstallmentEntries = useCreditCardStore((s) => s.entries)
-  const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
+  // ปฏิทินที่แคบ ใช้ชื่อสั้น (ชื่อบัตร + เลขท้าย) ไม่งั้นชื่อยาวจนล้นกล่อง
+  const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
   const getUpcomingBills = useCreditCardStore((s) => s.getUpcomingBills)
   const navigate = useNavigate()
 
@@ -165,7 +166,7 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
       const remaining = Number(s.amount || 0) - Number(s.paidAmount || 0)
       push(s.dueDate, {
         key: `s-${s.id}`,
-        cardName: getCardLabel(s.cardId),
+        cardName: getCardShortLabel(s.cardId),
         amount: s.status === 'paid' ? Number(s.amount || 0) : remaining,
         paid: s.status === 'paid',
         projected: false,
@@ -183,7 +184,7 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
       if (closedKeys.has(`${r.cardId}|${r.cycle}`)) continue
       push(r.dueDate, {
         key: r.key,
-        cardName: getCardLabel(r.cardId),
+        cardName: getCardShortLabel(r.cardId),
         amount: r.amount,
         paid: false,
         projected: true,

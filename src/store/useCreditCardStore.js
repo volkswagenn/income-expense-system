@@ -216,11 +216,37 @@ const useCreditCardStore = create((set, get) => ({
     return cards.length === 1 ? cards[0].id : null
   },
 
+  /**
+   * ชื่อเต็มของบัตร เช่น "กสิกรไทย — Credit Card K+ ···6931"
+   *
+   * ผู้ใช้มักกรอกชื่อธนาคารกับชื่อบัตรเหมือนกัน (หรือชื่อหนึ่งมีอีกชื่ออยู่ข้างใน)
+   * ถ้าต่อกันตรงๆ จะได้ "Ture Pay Next — Ture Pay Next" ซึ่งยาวและอ่านแล้วงง
+   * จึงตัดส่วนที่ซ้ำออกก่อนเสมอ
+   */
   getCardLabel: (id) => {
     const c = get().cards.find((x) => x.id === id)
     if (!c) return 'ไม่ระบุบัตร'
-    const base = c.bankName ? `${c.bankName} — ${c.name}` : c.name
+    const bank = (c.bankName || '').trim()
+    const name = (c.name || '').trim()
+    let base
+    if (!bank) base = name
+    else if (!name) base = bank
+    else if (name.includes(bank)) base = name
+    else if (bank.includes(name)) base = bank
+    else base = `${bank} — ${name}`
     return c.last4 ? `${base} ···${c.last4}` : base
+  },
+
+  /**
+   * ชื่อสั้นสำหรับที่แคบ (ปฏิทิน, กล่องข้อมูลเมื่อชี้เมาส์)
+   * เอาแค่ชื่อบัตรกับเลขท้าย ซึ่งเป็นส่วนที่แยกแยะบัตรได้จริง ตัดชื่อธนาคารทิ้ง
+   */
+  getCardShortLabel: (id, maxLen = 22) => {
+    const c = get().cards.find((x) => x.id === id)
+    if (!c) return 'ไม่ระบุบัตร'
+    let name = (c.name || c.bankName || 'บัตร').trim()
+    if (name.length > maxLen) name = name.slice(0, maxLen - 1).trimEnd() + '…'
+    return c.last4 ? `${name} ···${c.last4}` : name
   },
 
   /** หนี้รวมทุกใบ — ใช้บนหน้าแรกและหน้ากระเป๋าเงิน */
