@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useLogStore from '../../store/useLogStore'
@@ -44,9 +45,8 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
           </div>
           <div>
             <label className="label">ค่าธรรมเนียมปิดยอด (ถ้ามี)</label>
-            <input
+            <AmountInput
               className="input"
-              type="number"
               value={fee}
               onChange={(e) => setFee(e.target.value)}
               placeholder="0.00"

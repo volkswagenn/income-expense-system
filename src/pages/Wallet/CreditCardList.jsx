@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { differenceInDays, parseISO } from 'date-fns'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
@@ -184,9 +185,8 @@ function CardFormPopup({ card, onSave, onClose }) {
 
           <div>
             <label className="label">{isEdit ? 'ยอดหนี้คงค้าง' : 'ยอดหนี้ยกมา'} (บาท)</label>
-            <input
+            <AmountInput
               className="input"
-              type="number"
               value={outstanding}
               onChange={(e) => clear(setOutstanding)(e.target.value)}
               placeholder="0.00"
@@ -210,9 +210,8 @@ function CardFormPopup({ card, onSave, onClose }) {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="label">วงเงิน (บาท)</label>
-                  <input
+                  <AmountInput
                     className="input"
-                    type="number"
                     value={creditLimit}
                     onChange={(e) => clear(setCreditLimit)(e.target.value)}
                     placeholder="0.00"
@@ -259,9 +258,8 @@ function CardFormPopup({ card, onSave, onClose }) {
                     {autopayMode === 'fixed' && (
                       <div>
                         <label className="label">จำนวนที่หักคงที่ (บาท)</label>
-                        <input
+                        <AmountInput
                           className="input"
-                          type="number"
                           value={autopayAmount}
                           onChange={(e) => clear(setAutopayAmount)(e.target.value)}
                           placeholder="0.00"

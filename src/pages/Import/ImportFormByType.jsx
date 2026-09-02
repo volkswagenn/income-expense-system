@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useLogStore from '../../store/useLogStore'
@@ -226,13 +227,13 @@ export default function ImportFormByType({ rows, setRows, startDate, endDate, sh
                     {format(new Date(row.date), 'EEE d MMM', { locale: th })}
                   </td>
                   <td className="py-1.5 pr-3">
-                    <input className="input text-right py-1 text-sm" type="number" min="0" value={row.cash ?? ''} onChange={(e) => update(i, 'cash', e.target.value)} placeholder="0" />
+                    <AmountInput className="input text-right py-1 text-sm" value={row.cash ?? ''} onChange={(e) => update(i, 'cash', e.target.value)} placeholder="0" />
                   </td>
                   <td className="py-1.5 pr-3">
-                    <input className="input text-right py-1 text-sm" type="number" min="0" value={row.transfer ?? ''} onChange={(e) => update(i, 'transfer', e.target.value)} placeholder="0" />
+                    <AmountInput className="input text-right py-1 text-sm" value={row.transfer ?? ''} onChange={(e) => update(i, 'transfer', e.target.value)} placeholder="0" />
                   </td>
                   <td className="py-1.5 pr-3">
-                    <input className="input text-right py-1 text-sm" type="number" min="0" value={row.other ?? ''} onChange={(e) => update(i, 'other', e.target.value)} placeholder="0" />
+                    <AmountInput className="input text-right py-1 text-sm" value={row.other ?? ''} onChange={(e) => update(i, 'other', e.target.value)} placeholder="0" />
                   </td>
                   <td className="py-1.5 pr-3 text-right text-emerald-600 font-medium tabular-nums">
                     {rowTotal > 0 ? rowTotal.toLocaleString() : '—'}

@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
+import { useNavigate } from 'react-router-dom'
 import CategorySelect from '../../components/shared/CategorySelect'
+import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import NumpadPopup from '../../components/shared/NumpadPopup'
 import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL, VAT_MODES, VAT_RATE, vatBreakdown, vatMode } from '../../lib/recurringSchedule'
@@ -48,9 +51,11 @@ function toFormValues(item) {
 }
 
 export default function RecurringItemForm({ item, onSave, onClose }) {
+  const navigate = useNavigate()
   const [form, setForm] = useState(() => toFormValues(item))
   const [error, setError] = useState({})
   const [showNumpad, setShowNumpad] = useState(false)
+  const [confirmLeave, setConfirmLeave] = useState(false)
   // กันกดซ้ำ — การบันทึกต้องรอเซิร์ฟเวอร์ตอบ ระหว่างนั้นหน้าต่างยังเปิดอยู่
   // ถ้าไม่ล็อกปุ่มไว้ คนกดซ้ำเพราะคิดว่าไม่ติด จะได้รายการซ้ำสองอัน
   const [saving, setSaving] = useState(false)
@@ -127,7 +132,17 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
 
           {/* Category */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">หมวดหมู่ *</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-gray-700">หมวดหมู่ *</label>
+              {/* ไปหน้าหมวดหมู่ = ออกจากหน้านี้ ฟอร์มที่กรอกค้างไว้จะหาย จึงถามยืนยันก่อนเสมอ */}
+              <button
+                type="button"
+                onClick={() => setConfirmLeave(true)}
+                className="text-xs text-blue-500 hover:text-blue-700 hover:underline"
+              >
+                🗂️ จัดการหมวดหมู่
+              </button>
+            </div>
             <CategorySelect
               className="input w-full"
               value={form.category}
@@ -165,10 +180,7 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
           {form.amountType === 'fixed' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">ยอดเงิน (บาท) *</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
+              <AmountInput
                 className="input w-full text-right"
                 value={form.fixedAmount}
                 onChange={(e) => set('fixedAmount', e.target.value)}
@@ -388,6 +400,20 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
           onClose={() => setShowNumpad(false)}
         />
       )}
+
+      <ConfirmPopup
+        open={confirmLeave}
+        title="ไปหน้าจัดการหมวดหมู่?"
+        message={`ข้อมูลที่กรอกไว้ในฟอร์มนี้จะหายไปทั้งหมด ต้องกรอกใหม่เมื่อกลับมา\n\nถ้ายังไม่พร้อม กด "อยู่หน้านี้ต่อ" แล้วบันทึกรายการให้เสร็จก่อน`}
+        confirmLabel="ไปตั้งค่าหมวดหมู่"
+        cancelLabel="อยู่หน้านี้ต่อ"
+        onCancel={() => setConfirmLeave(false)}
+        onConfirm={() => {
+          setConfirmLeave(false)
+          onClose()
+          navigate('/categories')
+        }}
+      />
     </div>
   )
 }

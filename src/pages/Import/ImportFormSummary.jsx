@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { processSummaryImport } from '../../lib/importProcessor'
@@ -181,10 +182,10 @@ export default function ImportFormSummary({ rows, setRows, startDate, endDate, s
                   {format(new Date(row.date), 'EEE d MMM', { locale: th })}
                 </td>
                 <td className="py-1.5 pr-3">
-                  <input className="input text-right py-1 text-sm" type="number" min="0" value={row.income ?? ''} onChange={(e) => update(i, 'income', e.target.value)} placeholder="0" />
+                  <AmountInput className="input text-right py-1 text-sm" value={row.income ?? ''} onChange={(e) => update(i, 'income', e.target.value)} placeholder="0" />
                 </td>
                 <td className="py-1.5 pr-3">
-                  <input className="input text-right py-1 text-sm" type="number" min="0" value={row.expense ?? ''} onChange={(e) => update(i, 'expense', e.target.value)} placeholder="0" />
+                  <AmountInput className="input text-right py-1 text-sm" value={row.expense ?? ''} onChange={(e) => update(i, 'expense', e.target.value)} placeholder="0" />
                 </td>
                 <td className="py-1.5">
                   <input className="input py-1 text-sm" value={row.note ?? ''} onChange={(e) => update(i, 'note', e.target.value)} placeholder="หมายเหตุ" />

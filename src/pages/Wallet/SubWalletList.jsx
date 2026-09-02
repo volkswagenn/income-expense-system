@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
 import SubWalletCard from './SubWalletCard'
 import { buildLogEntry } from '../../lib/logBuilder'
@@ -112,7 +113,7 @@ export default function SubWalletList() {
           </div>
           <div>
             <label className="label">ยอดเงินเริ่มต้น (บาท)</label>
-            <input className="input" type="number" value={initBal} onChange={(e) => setInitBal(e.target.value)} placeholder="0" />
+            <AmountInput className="input" value={initBal} onChange={(e) => setInitBal(e.target.value)} placeholder="0" />
           </div>
           <div className="flex gap-2 justify-end">
             <button className="btn btn-secondary" onClick={() => setCreating(false)}>ยกเลิก</button>

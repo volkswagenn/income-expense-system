@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import { Link } from 'react-router-dom'
@@ -256,12 +257,12 @@ export default function IncomeForm() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="label">💵 เงินสด (บาท)</label>
-          <input className="input" type="number" min="0" value={form.cash} onChange={(e) => set('cash', e.target.value)} placeholder="0" />
+          <AmountInput className="input" value={form.cash} onChange={(e) => set('cash', e.target.value)} placeholder="0" />
         </div>
         <div className="space-y-2">
           <div>
             <label className="label">🏦 เงินโอน (บาท)</label>
-            <input className="input" type="number" min="0" value={form.transfer} onChange={(e) => set('transfer', e.target.value)} placeholder="0" />
+            <AmountInput className="input" value={form.transfer} onChange={(e) => set('transfer', e.target.value)} placeholder="0" />
           </div>
           {/* ระบุบัญชีปลายทางเมื่อมีการรับเงินโอน */}
           {!isPendingMode && transferAmt > 0 && (
@@ -295,7 +296,7 @@ export default function IncomeForm() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="label">รายรับอื่นๆ (บาท)</label>
-            <input className="input" type="number" min="0" value={form.otherAmount} onChange={(e) => set('otherAmount', e.target.value)} placeholder="0" />
+            <AmountInput className="input" value={form.otherAmount} onChange={(e) => set('otherAmount', e.target.value)} placeholder="0" />
           </div>
           <div>
             <label className="label">ประเภทรายรับอื่นๆ</label>

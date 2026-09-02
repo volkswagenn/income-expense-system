@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format, differenceInDays, parseISO } from 'date-fns'
 import { th } from 'date-fns/locale'
 import usePendingStore from '../../store/usePendingStore'
@@ -252,9 +253,8 @@ export default function PendingTracker() {
         {settingOpen && tab === 'payment' && (
           <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-xl border border-blue-100">
             <span className="text-sm text-gray-700">แจ้งเตือนก่อนครบกำหนด</span>
-            <input
+            <AmountInput
               className="input w-16 text-center py-1 text-sm"
-              type="number" min="0" max="90"
               value={notifyInput}
               onChange={(e) => setNotifyInput(e.target.value)}
             />

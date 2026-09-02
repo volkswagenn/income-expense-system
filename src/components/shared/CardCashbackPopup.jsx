@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from './AmountInput'
 import { format } from 'date-fns'
 import DatePicker from './DatePicker'
 
@@ -63,9 +64,8 @@ export default function CardCashbackPopup({ cardLabel, estimate = 0, onConfirm, 
 
           <div>
             <label className="label">จำนวนเงินที่ได้คืน (บาท)</label>
-            <input
+            <AmountInput
               className="input text-right"
-              type="number"
               value={amount}
               onChange={(e) => { setAmount(e.target.value); setError('') }}
               placeholder="0.00"

@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useLogStore from '../../store/useLogStore'
@@ -181,9 +182,8 @@ export default function ImportFormDaily({ rows, setRows, startDate, endDate, sho
                   {format(new Date(row.date), 'EEE d MMM', { locale: th })}
                 </td>
                 <td className="py-1.5 pr-3">
-                  <input
+                  <AmountInput
                     className="input text-right py-1 text-sm"
-                    type="number" min="0"
                     value={row.total ?? ''}
                     onChange={(e) => update(i, 'total', e.target.value)}
                     placeholder="0"

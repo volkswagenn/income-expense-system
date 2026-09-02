@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
@@ -392,7 +393,7 @@ export default function ExpenseForm() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="label">จำนวนเงิน (บาท)</label>
-            <input className="input" type="number" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" />
+            <AmountInput className="input" value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" />
           </div>
           <div className="space-y-2">
             <div>

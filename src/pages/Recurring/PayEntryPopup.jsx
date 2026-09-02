@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
@@ -71,10 +72,7 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               ยอดเงิน (บาท) {isVariable && <span className="text-red-500">*</span>}
             </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
+            <AmountInput
               className="input w-full text-right text-lg font-bold"
               value={amount}
               onChange={(e) => { setAmount(e.target.value); setError('') }}

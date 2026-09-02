@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import DateTimeField, { toTimestamp, todayDate } from '../../components/shared/DateTimeField'
@@ -98,10 +99,7 @@ export default function PayInstallmentPopup({ installment, entry, card, onConfir
 
           <div>
             <label className="label">จำนวนที่จ่าย</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
+            <AmountInput
               className="input w-full text-right"
               value={amount}
               onChange={(e) => { setAmount(e.target.value); setError('') }}

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from './AmountInput'
 import { format } from 'date-fns'
 import useWalletStore from '../../store/useWalletStore'
 import DatePicker from './DatePicker'
@@ -103,9 +104,8 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
                 </button>
               )}
             </div>
-            <input
+            <AmountInput
               className="input text-right"
-              type="number"
               value={amount}
               onChange={(e) => { setAmount(e.target.value); setError('') }}
             />

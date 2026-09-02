@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from './AmountInput'
 import useTransactionStore from '../../store/useTransactionStore'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
@@ -230,7 +231,7 @@ export default function EditTransactionPopup({ transaction, onClose }) {
               </div>
               <div>
                 <label className="label">จำนวนเงิน (บาท)</label>
-                <input type="number" className="input text-right" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} />
+                <AmountInput className="input text-right" value={form.amount} onChange={(e) => set('amount', e.target.value)} />
               </div>
             </div>
 

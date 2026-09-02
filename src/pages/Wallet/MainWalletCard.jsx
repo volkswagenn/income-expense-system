@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useWalletStore from '../../store/useWalletStore'
@@ -34,7 +35,7 @@ function WalletModal({ title, onClose, onConfirm, label, buttonLabel, buttonClas
         )}
         <div>
           <label className="label">{label}</label>
-          <input className="input" type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus />
+          <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus />
         </div>
         <div className="flex gap-2 justify-end">
           <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>

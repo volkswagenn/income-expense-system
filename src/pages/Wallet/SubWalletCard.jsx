@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import AmountDisplay from '../../components/shared/AmountDisplay'
@@ -141,7 +142,7 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
             )}
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
-              <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
+              <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
             </div>
             <div className="flex gap-2 justify-end">
               <button className="btn btn-secondary" onClick={() => setModal(null)}>ยกเลิก</button>
@@ -167,7 +168,7 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
             )}
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
-              <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
+              <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
             </div>
             <div className="flex gap-2 justify-end">
               <button className="btn btn-secondary" onClick={() => setModal(null)}>ยกเลิก</button>
@@ -190,7 +191,7 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
             </div>
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
-              <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
+              <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
             </div>
             <div className="flex gap-2 justify-end">
               <button className="btn btn-secondary" onClick={() => setModal(null)}>ยกเลิก</button>
@@ -216,7 +217,7 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
             )}
             <div>
               <label className="label">จำนวนเงิน (บาท)</label>
-              <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
+              <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus />
             </div>
             <div className="flex gap-2 justify-end">
               <button className="btn btn-secondary" onClick={() => setModal(null)}>ยกเลิก</button>
