@@ -1,7 +1,8 @@
+-- ไฟล์: supabase/schema.sql
 -- ============================================================================
 -- JodFlow — Supabase schema (online-only)
 -- รันไฟล์นี้เป็นไฟล์แรกใน Supabase SQL Editor
--- ทุกตารางข้อมูลผูกกับ shop_id เสมอ และถูกกั้นด้วย RLS ใน 02_policies.sql
+-- ทุกตารางข้อมูลผูกกับ shop_id เสมอ และถูกกั้นด้วย RLS ใน policies.sql
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -39,7 +40,7 @@ create table if not exists shop_settings (
 );
 
 -- ── ยอดเงิน ────────────────────────────────────────────────────────────────
--- ยอดทุกก้อนต้องถูกแก้ผ่าน RPC ใน 03_functions.sql เท่านั้น (atomic += / -=)
+-- ยอดทุกก้อนต้องถูกแก้ผ่าน RPC ใน functions.sql เท่านั้น (atomic += / -=)
 -- ห้าม client อ่านยอดมาคำนวณแล้วเขียนทับ เพราะหลายคนใช้พร้อมกันจะทับกันเอง
 
 create table if not exists wallet_state (

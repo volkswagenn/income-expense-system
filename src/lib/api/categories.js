@@ -1,6 +1,7 @@
 import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
+import { selectAll } from './_page'
 
 // หมวดหมู่ / ผู้ขาย / รายการด่วน — ข้อมูลอ้างอิงที่ทุกหน้าใช้ร่วมกัน
 // ทั้งสามตารางใช้ soft delete (deleted = true) เพื่อไม่ให้รายการเก่าเสียชื่อที่เคยเลือกไว้
@@ -8,8 +9,8 @@ import { fromRow, fromRows, toRow } from './_map'
 // ── หมวดหมู่ ────────────────────────────────────────────────────────────────
 
 export async function listCategories() {
-  return fromRows('categories', await unwrap(
-    supabase.from('categories').select('*').eq('shop_id', getShopId()).order('created_at')
+  return fromRows('categories', await selectAll(() =>
+    supabase.from('categories').select('*').eq('shop_id', getShopId()).order('created_at').order('id')
   ))
 }
 
@@ -42,8 +43,8 @@ export async function softDeleteCategory(id) {
 // ── ผู้ขาย ──────────────────────────────────────────────────────────────────
 
 export async function listVendors() {
-  return fromRows('vendors', await unwrap(
-    supabase.from('vendors').select('*').eq('shop_id', getShopId()).order('created_at')
+  return fromRows('vendors', await selectAll(() =>
+    supabase.from('vendors').select('*').eq('shop_id', getShopId()).order('created_at').order('id')
   ))
 }
 
@@ -73,8 +74,8 @@ export async function softDeleteVendor(id) {
 // ── รายการด่วน ──────────────────────────────────────────────────────────────
 
 export async function listQuickItems() {
-  return fromRows('quick_items', await unwrap(
-    supabase.from('quick_items').select('*').eq('shop_id', getShopId()).order('created_at')
+  return fromRows('quick_items', await selectAll(() =>
+    supabase.from('quick_items').select('*').eq('shop_id', getShopId()).order('created_at').order('id')
   ))
 }
 

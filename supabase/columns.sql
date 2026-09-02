@@ -1,7 +1,8 @@
+-- ไฟล์: supabase/columns.sql
 -- ============================================================================
--- JodFlow — เติมคอลัมน์ที่ schema เดิมตกหล่น
+-- JodFlow — เติมคอลัมน์ที่ schema เดิมตกหล่น   [columns.sql]
 --
--- ที่มา: 01_schema.sql ถูกออกแบบจากเอกสาร ไม่ได้ไล่เทียบกับฟิลด์ที่หน้าจอเขียนจริง
+-- ที่มา: schema.sql ถูกออกแบบจากเอกสาร ไม่ได้ไล่เทียบกับฟิลด์ที่หน้าจอเขียนจริง
 -- พอไล่โค้ดใน src/pages + src/components ทีละฟอร์มแล้วพบว่ามีฟิลด์ที่แอปใช้อยู่
 -- แต่ไม่มีคอลัมน์รองรับ ถ้าไม่เติมก่อน ข้อมูลจะหายเงียบๆ ตอนบันทึก
 -- (PostgREST ไม่รู้จักคีย์ที่ส่งมา = ปฏิเสธทั้ง request)
@@ -80,9 +81,12 @@ alter table recurring_items add column if not exists frequency text not null def
   check (frequency in ('monthly', 'yearly'));
 alter table recurring_items add column if not exists billing_month int
   check (billing_month between 1 and 12);
+-- ลบแม่แบบที่เคยจ่ายไปแล้วต้องเป็นการ "ซ่อน" ไม่ใช่ลบแถวจริง เพราะ recurring_entries
+-- ผูกด้วย on delete cascade — ลบแถวเดียวจะพารอบที่จ่ายไปแล้วหายตามไปทั้งหมด
+alter table recurring_items add column if not exists deleted boolean not null default false;
 
 -- ── ตรวจผล ─────────────────────────────────────────────────────────────────
--- ควรได้ 30 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
+-- ควรได้ 31 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
 select table_name, column_name
   from information_schema.columns
  where table_schema = 'public'
@@ -91,6 +95,6 @@ select table_name, column_name
   or (table_name = 'pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'pending_incomes'  and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'tax_invoices'     and column_name in ('due_date','document_path','document_type','document_label'))
-  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id','frequency','billing_month'))
+  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted'))
    )
  order by table_name, column_name;

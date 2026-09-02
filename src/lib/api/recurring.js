@@ -1,13 +1,14 @@
 import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
+import { selectAll } from './_page'
 import { occursInMonth } from '../recurringSchedule'
 
 // รายการประจำ (แม่แบบ) + entries รายเดือนที่งอกจากแม่แบบ
 
 export async function listRecurringItems() {
-  return fromRows('recurring_items', await unwrap(
-    supabase.from('recurring_items').select('*').eq('shop_id', getShopId()).order('created_at')
+  return fromRows('recurring_items', await selectAll(() =>
+    supabase.from('recurring_items').select('*').eq('shop_id', getShopId()).order('created_at').order('id')
   ))
 }
 
@@ -25,13 +26,37 @@ export async function updateRecurringItem(id, changes) {
   ))
 }
 
-/** ลบแม่แบบ แต่เก็บ entries ที่จ่ายไปแล้วไว้เป็นประวัติ */
+/**
+ * ลบแม่แบบ แต่เก็บรอบที่จ่ายไปแล้วไว้เป็นประวัติ
+ *
+ * ⚠ ห้าม delete แถวใน recurring_items ถ้ายังมีรอบที่จ่ายแล้ว — foreign key ของ
+ *   recurring_entries เป็น on delete cascade ลบแม่แบบ 1 แถวจะพารอบที่จ่ายไปแล้ว
+ *   หายตามไปทุกเดือนทุกปี (หน้าจอยังโชว์อยู่จนกว่าจะรีเฟรช จึงดูเหมือนข้อมูลหายเอง)
+ *   กรณีนั้นให้ตั้ง deleted = true เป็นการซ่อนแทน ประวัติเดือนเก่าจึงยังมีชื่อรายการอยู่
+ *
+ * @returns แถวที่ถูกซ่อน หรือ null ถ้าลบออกจริง (ไม่มีประวัติให้เก็บ)
+ */
 export async function deleteRecurringItem(id) {
   await unwrap(
     supabase.from('recurring_entries').delete()
       .eq('recurring_id', id).neq('status', 'paid')
   )
+
+  const paid = await unwrap(
+    supabase.from('recurring_entries').select('id')
+      .eq('recurring_id', id).eq('status', 'paid').limit(1)
+  )
+
+  if (paid?.length) {
+    return fromRow('recurring_items', await unwrap(
+      supabase.from('recurring_items')
+        .update({ deleted: true, enabled: false, updated_at: new Date().toISOString() })
+        .eq('id', id).select().single()
+    ))
+  }
+
   await unwrap(supabase.from('recurring_items').delete().eq('id', id))
+  return null
 }
 
 /**
@@ -53,8 +78,8 @@ export async function deletePendingEntriesOutsideMonth(recurringId, billingMonth
 // ── entries รายเดือน ────────────────────────────────────────────────────────
 
 export async function listRecurringEntries() {
-  return fromRows('recurring_entries', await unwrap(
-    supabase.from('recurring_entries').select('*').eq('shop_id', getShopId()).order('due_date')
+  return fromRows('recurring_entries', await selectAll(() =>
+    supabase.from('recurring_entries').select('*').eq('shop_id', getShopId()).order('due_date').order('id')
   ))
 }
 
@@ -67,7 +92,7 @@ export async function generateEntries(month, computeDueDate) {
   const shopId = getShopId()
   const [year, mon] = month.split('-').map(Number)
   // รายปีสร้าง entry เฉพาะเดือนที่ตรงกับเดือนเรียกเก็บ รายเดือนสร้างทุกเดือน
-  const items = (await listRecurringItems()).filter((it) => it.enabled && occursInMonth(it, mon))
+  const items = (await listRecurringItems()).filter((it) => it.enabled && !it.deleted && occursInMonth(it, mon))
   if (items.length === 0) return []
 
   const rows = items.map((item) => ({

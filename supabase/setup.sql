@@ -1,7 +1,8 @@
+-- ไฟล์: supabase/setup.sql
 -- ============================================================================
--- JodFlow — ติดตั้งฐานข้อมูลทั้งหมดในไฟล์เดียว (เวอร์ชัน Supabase Auth)
+-- JodFlow — ติดตั้งฐานข้อมูลทั้งหมดในไฟล์เดียว (เวอร์ชัน Supabase Auth)   [setup.sql]
 --
--- รวม 01_schema + 04_fix_schema + 02_policies + 03_functions + 05_wallet_functions
+-- รวม schema + columns + policies + functions + wallet
 -- ปิดท้ายด้วยส่วน "ล้างระบบ custom auth เก่า" — สำหรับฐานข้อมูลที่เคยติดตั้ง
 -- เวอร์ชัน app_users/app_sessions ไปแล้ว (ดู archive/06_custom_auth.sql)
 -- ฐานข้อมูลใหม่เอี่ยมก็รันไฟล์นี้ได้เหมือนกัน ส่วนล้างจะข้ามตัวเองอัตโนมัติ
@@ -9,18 +10,19 @@
 -- ระบบนี้ใช้ Supabase Auth ตามปกติ — ตัวตนของ request คือ auth.uid() จาก JWT
 --
 -- วิธีใช้: Supabase → SQL Editor → ตรวจว่า Role เป็น postgres → วางทั้งไฟล์ → Run
--- ทุกคำสั่งเป็น if not exists / create or replace รันซ้ำได้ไม่เสียหาย
+-- ทุกคำสั่งเป็น if not exists / create or replace รันซ้ำได้ไม่เสียหาย และไม่มีคำสั่งใด
+-- ลบข้อมูลของร้าน — ปลอดภัยที่จะรันทับฐานข้อมูลที่มีข้อมูลจริงอยู่แล้ว
 -- ท้ายไฟล์มี query ตรวจผลว่าติดตั้งครบไหม
 -- ============================================================================
 
 -- ###########################################################################
--- ##  01_schema.sql
+-- ##  schema.sql
 -- ###########################################################################
 
 -- ============================================================================
 -- JodFlow — Supabase schema (online-only)
 -- รันไฟล์นี้เป็นไฟล์แรกใน Supabase SQL Editor
--- ทุกตารางข้อมูลผูกกับ shop_id เสมอ และถูกกั้นด้วย RLS ใน 02_policies.sql
+-- ทุกตารางข้อมูลผูกกับ shop_id เสมอ และถูกกั้นด้วย RLS ใน policies.sql
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -58,7 +60,7 @@ create table if not exists shop_settings (
 );
 
 -- ── ยอดเงิน ────────────────────────────────────────────────────────────────
--- ยอดทุกก้อนต้องถูกแก้ผ่าน RPC ใน 03_functions.sql เท่านั้น (atomic += / -=)
+-- ยอดทุกก้อนต้องถูกแก้ผ่าน RPC ใน functions.sql เท่านั้น (atomic += / -=)
 -- ห้าม client อ่านยอดมาคำนวณแล้วเขียนทับ เพราะหลายคนใช้พร้อมกันจะทับกันเอง
 
 create table if not exists wallet_state (
@@ -351,13 +353,13 @@ begin
 end $$;
 
 -- ###########################################################################
--- ##  04_fix_schema.sql
+-- ##  columns.sql
 -- ###########################################################################
 
 -- ============================================================================
 -- JodFlow — เติมคอลัมน์ที่ schema เดิมตกหล่น
 --
--- ที่มา: 01_schema.sql ถูกออกแบบจากเอกสาร ไม่ได้ไล่เทียบกับฟิลด์ที่หน้าจอเขียนจริง
+-- ที่มา: schema.sql ถูกออกแบบจากเอกสาร ไม่ได้ไล่เทียบกับฟิลด์ที่หน้าจอเขียนจริง
 -- พอไล่โค้ดใน src/pages + src/components ทีละฟอร์มแล้วพบว่ามีฟิลด์ที่แอปใช้อยู่
 -- แต่ไม่มีคอลัมน์รองรับ ถ้าไม่เติมก่อน ข้อมูลจะหายเงียบๆ ตอนบันทึก
 -- (PostgREST ไม่รู้จักคีย์ที่ส่งมา = ปฏิเสธทั้ง request)
@@ -436,9 +438,12 @@ alter table recurring_items add column if not exists frequency text not null def
   check (frequency in ('monthly', 'yearly'));
 alter table recurring_items add column if not exists billing_month int
   check (billing_month between 1 and 12);
+-- ลบแม่แบบที่เคยจ่ายไปแล้วต้องเป็นการ "ซ่อน" ไม่ใช่ลบแถวจริง เพราะ recurring_entries
+-- ผูกด้วย on delete cascade — ลบแถวเดียวจะพารอบที่จ่ายไปแล้วหายตามไปทั้งหมด
+alter table recurring_items add column if not exists deleted boolean not null default false;
 
 -- ── ตรวจผล ─────────────────────────────────────────────────────────────────
--- ควรได้ 30 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
+-- ควรได้ 31 แถว (คอลัมน์ที่เพิ่งเติมทั้งหมด)
 select table_name, column_name
   from information_schema.columns
  where table_schema = 'public'
@@ -447,12 +452,12 @@ select table_name, column_name
   or (table_name = 'pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'pending_incomes'  and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
   or (table_name = 'tax_invoices'     and column_name in ('due_date','document_path','document_type','document_label'))
-  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id','frequency','billing_month'))
+  or (table_name = 'recurring_items'  and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted'))
    )
  order by table_name, column_name;
 
 -- ###########################################################################
--- ##  02_policies.sql
+-- ##  policies.sql
 -- ###########################################################################
 
 -- ============================================================================
@@ -590,7 +595,7 @@ create policy attachments_delete on storage.objects for delete using (
 );
 
 -- ###########################################################################
--- ##  03_functions.sql
+-- ##  functions.sql
 -- ###########################################################################
 
 -- ============================================================================
@@ -817,18 +822,18 @@ end;
 $$;
 
 -- ###########################################################################
--- ##  05_wallet_functions.sql
+-- ##  wallet.sql
 -- ###########################################################################
 
 -- ============================================================================
 -- JodFlow — RPC สำหรับงานเงินที่ขยับ "สองก้อนพร้อมกัน"
 --
--- 03_functions.sql มี post_transaction / cancel_transaction / adjust_* แล้ว
+-- functions.sql มี post_transaction / cancel_transaction / adjust_* แล้ว
 -- แต่ยังขาดงานที่ต้องย้ายเงินจากที่หนึ่งไปอีกที่หนึ่ง ซึ่งถ้าปล่อยให้ client
 -- ยิง adjust_* สองครั้งแล้วเน็ตหลุดคั่นกลาง = เงินหายจริง (ตัดออกแล้วไม่เข้าปลายทาง)
 -- ทุกฟังก์ชันในไฟล์นี้จึงทำทั้งขาออกและขาเข้าใน transaction เดียว
 --
--- รันไฟล์นี้หลัง 03_functions.sql — เป็น create or replace ทั้งหมด รันซ้ำได้
+-- รันไฟล์นี้หลัง functions.sql — เป็น create or replace ทั้งหมด รันซ้ำได้
 -- ============================================================================
 
 -- ── ย้ายเงินสด ↔ บัญชีเงินโอน ───────────────────────────────────────────────
@@ -1119,11 +1124,19 @@ begin
     return; -- ไม่เคยติดตั้ง custom auth — ไม่มีอะไรต้องล้าง
   end if;
 
-  -- ข้อมูล identity ที่สร้างด้วย app_create_user ไม่มีตัวตนใน auth.users
-  -- ต้องลบก่อน ไม่งั้น add constraint ใหม่จะ validate ไม่ผ่าน
-  -- (ลบ shops จะ cascade ลูกทุกตารางของร้านนั้นให้เอง)
-  delete from shops where created_by is not null
-    and created_by not in (select id from auth.users);
+  -- identity ที่สร้างด้วย app_create_user ไม่มีตัวตนใน auth.users จึงต้องจัดการก่อน
+  -- ไม่งั้น add constraint ใหม่จะ validate ไม่ผ่าน
+  --
+  -- ⚠ ห้าม delete from shops เด็ดขาด — ตารางลูกทุกตัวผูกด้วย on delete cascade
+  --   ลบร้านทิ้ง 1 แถว = รายการ ยอดเงิน หมวดหมู่ รายการประจำ และประวัติของร้านนั้น
+  --   หายถาวรทั้งหมดในคำสั่งเดียว ทั้งที่ปัญหาจริงมีแค่ค่าในคอลัมน์ created_by
+  --   แค่ล้างค่าให้เป็น null ก็พอให้ foreign key ใหม่ผ่านแล้ว ข้อมูลอยู่ครบ
+  update shops set created_by = null
+   where created_by is not null and created_by not in (select id from auth.users);
+
+  -- สมาชิกที่ไม่มีตัวตนใน auth.users ต้องออก ไม่งั้น FK ใหม่ validate ไม่ผ่าน
+  -- ลบเฉพาะ "สิทธิ์เข้าถึง" ไม่แตะข้อมูลของร้าน — ถ้าร้านไหนเหลือ owner 0 คน
+  -- จะมี NOTICE เตือนท้ายบล็อก ให้เพิ่ม owner ใหม่ด้วย access.sql
   delete from shop_members where user_id not in (select id from auth.users);
   delete from profiles where id not in (select id from auth.users);
 
@@ -1163,6 +1176,14 @@ begin
       'alter table %I add constraint %I foreign key (%I) references auth.users(id)',
       r.tbl, r.tbl || '_' || r.col || '_fkey', r.col);
   end loop;
+
+  -- ร้านที่ไม่มี owner เหลืออยู่ = ข้อมูลยังอยู่ครบแต่ไม่มีใครเข้าถึงได้
+  for r in
+    select s.id, s.name from shops s
+     where not exists (select 1 from shop_members m where m.shop_id = s.id and m.role = 'owner')
+  loop
+    raise notice '⚠ ร้าน % (%) ไม่มี owner แล้ว — ข้อมูลยังอยู่ครบ ให้เพิ่ม owner ด้วย supabase/access.sql', r.name, r.id;
+  end loop;
 end $cleanup$;
 
 -- ฟังก์ชัน/ตารางของ custom auth — policy ทุกตัวถูกสร้างใหม่ด้วย auth.uid() ไปแล้ว
@@ -1189,14 +1210,14 @@ select 'ตาราง' as รายการ, count(*)::text || ' / 19' as ผ
      'recurring_items','recurring_entries','transactions','pending_payments',
      'pending_incomes','tax_invoices','calendar_notes','activity_logs')
 union all
-select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 30'
+select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 31'
   from information_schema.columns
  where table_schema = 'public'
    and ((table_name='transactions' and column_name in ('detail','other_income_type','tax_due_date','document_path','document_type','document_label'))
      or (table_name='pending_payments' and column_name in ('description','open_date','missing_due_date','default_method','default_transfer_account_id','document_path','document_type','document_label'))
      or (table_name='pending_incomes' and column_name in ('open_date','description','source','other_income_type','default_transfer_account_id','document_path','document_type','document_label'))
      or (table_name='tax_invoices' and column_name in ('due_date','document_path','document_type','document_label'))
-     or (table_name='recurring_items' and column_name in ('default_method','default_transfer_account_id','frequency','billing_month')))
+     or (table_name='recurring_items' and column_name in ('default_method','default_transfer_account_id','frequency','billing_month','deleted')))
 union all
 select 'ฟังก์ชัน RPC', count(*)::text || ' / 20'
   from information_schema.routines

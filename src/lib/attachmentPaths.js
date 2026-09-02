@@ -1,6 +1,6 @@
 /**
  * โครงพาธของไฟล์แนบ: attachments/<ประเภท>/<ปี>/<เดือน>/<ชื่อไฟล์>
- * ต้องตรงกับที่ policy ของ bucket 'attachments' คาดไว้ (ดู 02_policies.sql)
+ * ต้องตรงกับที่ policy ของ bucket 'attachments' คาดไว้ (ดู policies.sql)
  */
 export function getDatedAttachmentFolder(folderBase, createdAt) {
   const d = new Date(createdAt ?? Date.now())

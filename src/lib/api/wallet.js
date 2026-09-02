@@ -50,7 +50,7 @@ export async function moveBetweenTransferAccounts(fromId, toId, amount) {
   await unwrap(supabase.rpc('move_between_transfer_accounts', { p_from: fromId, p_to: toId, p_amount: amount }))
 }
 
-// ── ย้ายเงินสองก้อนพร้อมกัน (ต้องจบใน transaction เดียว ดู 05_wallet_functions.sql) ──
+// ── ย้ายเงินสองก้อนพร้อมกัน (ต้องจบใน transaction เดียว ดู wallet.sql) ──
 
 /** ย้ายเงินสด ↔ บัญชีเงินโอน — to: 'transfer' = สด→โอน, 'cash' = โอน→สด */
 export async function moveCashTransfer({ accountId, amount, to, log = null }) {

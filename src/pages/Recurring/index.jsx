@@ -88,22 +88,26 @@ export default function RecurringPage() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  const handleAddItem = (data) => {
-    const item = addItem(data)
+  // ทุกตัวต้อง await ให้เซิร์ฟเวอร์ตอบรับก่อนจึงปิดหน้าต่าง — ถ้าไม่รอ เวลาบันทึกล้ม
+  // (เช่นฐานข้อมูลยังไม่มีคอลัมน์ใหม่) หน้าต่างจะปิดเหมือนสำเร็จ แล้วผู้ใช้เข้าใจว่า
+  // บันทึกแล้วทั้งที่ไม่มีอะไรถูกเขียนเลย พอรีเฟรชจึงดูเหมือน "ข้อมูลหาย"
+  const handleAddItem = async (data) => {
+    await addItem(data)
     addLog(buildLogEntry({ activityType: 'RECURRING_CREATE', description: `สร้างรายการประจำ "${data.name}"` }))
-    generateEntries(month)
+    await generateEntries(month)
     setShowForm(false)
   }
 
-  const handleUpdateItem = (data) => {
-    updateItem(editItem.id, data)
+  const handleUpdateItem = async (data) => {
+    await updateItem(editItem.id, data)
     addLog(buildLogEntry({ activityType: 'RECURRING_UPDATE', description: `แก้ไขรายการประจำ "${data.name}"` }))
+    await generateEntries(month)
     setEditItem(null)
   }
 
-  const handleDeleteItem = () => {
+  const handleDeleteItem = async () => {
     const it = items.find((i) => i.id === deleteItemId)
-    deleteItem(deleteItemId)
+    await deleteItem(deleteItemId)
     addLog(buildLogEntry({ activityType: 'RECURRING_DELETE', description: `ลบรายการประจำ "${it?.name}"` }))
     setDeleteItemId(null)
   }
@@ -265,6 +269,10 @@ export default function RecurringPage() {
     }
   }
 
+  // แม่แบบที่ถูกซ่อน (ลบไปแล้วแต่ยังมีประวัติจ่าย) ไม่ต้องโผล่ในลิสต์จัดการ
+  // แต่ยังต้องอยู่ใน items เพื่อให้รอบที่จ่ายแล้วของเดือนเก่าแสดงชื่อรายการได้
+  const activeItems = useMemo(() => items.filter((it) => !it.deleted), [items])
+
   const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth()
 
   return (
@@ -350,19 +358,19 @@ export default function RecurringPage() {
       )}
 
       {/* Template list (collapsible) */}
-      {items.length > 0 && (
+      {activeItems.length > 0 && (
         <div className="border-t border-gray-100 pt-4">
           <button
             className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
             onClick={() => setShowItemList((v) => !v)}
           >
             <span>{showItemList ? '▾' : '▸'}</span>
-            <span>จัดการรายการทั้งหมด ({items.length} รายการ)</span>
+            <span>จัดการรายการทั้งหมด ({activeItems.length} รายการ)</span>
           </button>
 
           {showItemList && (
             <div className="mt-3 space-y-2">
-              {items.map((item) => (
+              {activeItems.map((item) => (
                 <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-white">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -439,7 +447,7 @@ export default function RecurringPage() {
       <ConfirmPopup
         open={!!deleteItemId}
         title="ลบรายการประจำ"
-        message={`ลบ "${items.find((i) => i.id === deleteItemId)?.name}"?\nรายการที่ยังไม่จ่ายจะถูกลบด้วย แต่รายการที่จ่ายแล้วยังคงอยู่`}
+        message={`ลบ "${items.find((i) => i.id === deleteItemId)?.name}"?\nรอบที่ยังไม่จ่ายจะถูกลบ ส่วนรอบที่จ่ายไปแล้วยังอยู่ในประวัติเดือนเก่าตามเดิม`}
         onConfirm={handleDeleteItem}
         onCancel={() => setDeleteItemId(null)}
         confirmLabel="ลบ"

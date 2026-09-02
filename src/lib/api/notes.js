@@ -1,12 +1,13 @@
 import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
+import { selectAll } from './_page'
 
 // โน้ตบนปฏิทิน — 1 วันมีได้ 1 โน้ต (primary key คือ shop_id + date)
 // หน้าจอเก็บเป็น object { '2026-08-08': 'ข้อความ' } จึงแปลงให้ตรงรูปนั้นตั้งแต่ชั้นนี้
 
 export async function listNotes() {
-  const rows = await unwrap(
-    supabase.from('calendar_notes').select('date, text').eq('shop_id', getShopId())
+  const rows = await selectAll(() =>
+    supabase.from('calendar_notes').select('date, text').eq('shop_id', getShopId()).order('date')
   )
   return Object.fromEntries((rows ?? []).map((r) => [r.date, r.text]))
 }

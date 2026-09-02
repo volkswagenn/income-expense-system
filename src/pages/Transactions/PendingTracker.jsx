@@ -136,7 +136,7 @@ export default function PendingTracker() {
    * undefined ไปด้วย ซ้ำร้ายถ้าสเต็ปกลางล้ม สเต็ปที่เหลือยังเดินต่อจนเงินไม่ตรง
    *
    * RPC ตัวนี้ทำครบในทรานแซกชันเดียว: สร้าง transaction, ตัดเงิน, ปิดรายการค้าง,
-   * อัปเดตรายการประจำที่ผูกอยู่ แล้วเขียน log (ดู 05_wallet_functions.sql)
+   * อัปเดตรายการประจำที่ผูกอยู่ แล้วเขียน log (ดู wallet.sql)
    */
   const executePay = async (item, method, paidDate, accountId = null) => {
     if (busy) return

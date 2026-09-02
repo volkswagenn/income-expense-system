@@ -1,6 +1,7 @@
 import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
+import { selectAll } from './_page'
 
 /**
  * ค้างชำระ / รอรับเงิน / รอใบกำกับภาษี
@@ -12,9 +13,9 @@ import { fromRow, fromRows, toRow } from './_map'
 // ── ค้างชำระ ────────────────────────────────────────────────────────────────
 
 export async function listPendingPayments() {
-  return fromRows('pending_payments', await unwrap(
+  return fromRows('pending_payments', await selectAll(() =>
     supabase.from('pending_payments').select('*').eq('shop_id', getShopId())
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).order('id')
   ))
 }
 
@@ -56,9 +57,9 @@ export async function deletePendingPaymentByTxId(transactionId) {
 // ── รอรับเงิน ───────────────────────────────────────────────────────────────
 
 export async function listPendingIncomes() {
-  return fromRows('pending_incomes', await unwrap(
+  return fromRows('pending_incomes', await selectAll(() =>
     supabase.from('pending_incomes').select('*').eq('shop_id', getShopId())
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).order('id')
   ))
 }
 
@@ -91,9 +92,9 @@ export async function receivePendingIncome(id, { method, accountId = null, date 
 // ── รอใบกำกับภาษี ───────────────────────────────────────────────────────────
 
 export async function listTaxInvoices() {
-  return fromRows('tax_invoices', await unwrap(
+  return fromRows('tax_invoices', await selectAll(() =>
     supabase.from('tax_invoices').select('*').eq('shop_id', getShopId())
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).order('id')
   ))
 }
 

@@ -47,9 +47,13 @@ const useRecurringStore = create((set, get) => ({
   },
 
   deleteItem: async (id) => {
-    await recurringApi.deleteRecurringItem(id)
+    const hidden = await recurringApi.deleteRecurringItem(id)
     set((s) => ({
-      items: s.items.filter((it) => it.id !== id),
+      // แม่แบบที่ยังมีประวัติจ่ายแล้วจะถูกซ่อน ไม่ได้ลบทิ้ง — ต้องคงไว้ใน items
+      // ไม่งั้นรอบที่จ่ายแล้วของเดือนเก่าจะหาชื่อรายการไม่เจอแล้วหายจากหน้าจอ
+      items: hidden
+        ? s.items.map((it) => (it.id === id ? { ...it, ...hidden } : it))
+        : s.items.filter((it) => it.id !== id),
       // เก็บ entry ที่จ่ายไปแล้วไว้เป็นประวัติ ลบเฉพาะที่ยังไม่จ่าย
       entries: s.entries.filter((e) => e.recurringId !== id || e.status === 'paid'),
     }))

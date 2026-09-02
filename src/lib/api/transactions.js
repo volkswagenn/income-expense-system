@@ -1,6 +1,7 @@
 import { supabase, unwrap } from '../supabase'
 import { getShopId } from './context'
 import { fromRow, fromRows, toRow } from './_map'
+import { selectAll } from './_page'
 
 /**
  * ธุรกรรม
@@ -21,17 +22,21 @@ function defaultRangeStart(monthsBack = DEFAULT_MONTHS_BACK) {
 }
 
 export async function listTransactions({ from = defaultRangeStart(), to = null } = {}) {
-  let q = supabase
-    .from('transactions')
-    .select('*')
-    .eq('shop_id', getShopId())
-    .gte('date', from)
-    .order('date', { ascending: false })
-    .order('created_at', { ascending: false })
-
-  if (to) q = q.lte('date', to)
-
-  return fromRows('transactions', await unwrap(q))
+  // ต้องดึงครบทุกแถวในช่วง ไม่ใช่แค่ 1,000 แถวแรกที่ PostgREST ยอมคืนต่อ request
+  // ไม่งั้นร้านที่มีรายการเยอะจะเห็นข้อมูลเก่าหายไปเฉยๆ ทั้งที่ยังอยู่ในฐานข้อมูล
+  const build = () => {
+    let q = supabase
+      .from('transactions')
+      .select('*')
+      .eq('shop_id', getShopId())
+      .gte('date', from)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id')
+    if (to) q = q.lte('date', to)
+    return q
+  }
+  return fromRows('transactions', await selectAll(build))
 }
 
 /**
@@ -64,7 +69,7 @@ export async function updateTransaction(id, changes) {
 
 /**
  * ยกเลิกรายการ — คืนเงิน + ลบรายการค้าง/ใบกำกับที่ผูกอยู่ + ย้อนสถานะรอรับเงิน
- * ทั้งหมดจบในคำสั่งเดียวที่ฐานข้อมูล (ดู cancel_transaction ใน 03_functions.sql)
+ * ทั้งหมดจบในคำสั่งเดียวที่ฐานข้อมูล (ดู cancel_transaction ใน functions.sql)
  */
 export async function cancelTransaction(id, { effect = null, log = null } = {}) {
   await unwrap(
