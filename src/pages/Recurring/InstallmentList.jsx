@@ -15,11 +15,18 @@ import { formatIsoThai } from '../../lib/cardCycle'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
+/**
+ * สีของสถานะงวด
+ *
+ * งวดที่จ่ายไปแล้วต้องเป็นสีเขียวทั้งคู่ ไม่งั้นงวดที่ผ่อนมาก่อนเริ่มใช้แอปจะดูเหมือน
+ * ยังไม่จ่าย ทั้งที่จ่ายไปแล้วจริง — แต่ใช้เขียวคนละเฉดเพื่อให้ยังแยกออกว่า
+ * งวดไหนกดจ่ายผ่านแอป (มีเงินออกจากกระเป๋าให้ตรวจสอบได้) กับงวดไหนแค่บันทึกไว้เฉยๆ
+ */
 const STATUS_STYLE = {
-  paid:      { label: 'จ่ายแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  paid:      { label: '✓ จ่ายแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
+  prepaid:   { label: '✓ จ่ายมาก่อนใช้ระบบ', cls: 'bg-teal-50 text-teal-700 border-teal-200' },
   billed:    { label: 'อยู่ในบิล รอจ่าย', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   pending:   { label: 'ยังไม่ถึงรอบ', cls: 'bg-gray-50 text-gray-500 border-gray-200' },
-  prepaid:   { label: 'จ่ายมาก่อนใช้ระบบ', cls: 'bg-slate-50 text-slate-500 border-slate-200' },
   cancelled: { label: 'ยกเลิก', cls: 'bg-gray-50 text-gray-400 border-gray-200 line-through' },
 }
 
