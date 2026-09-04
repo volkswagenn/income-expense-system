@@ -86,6 +86,7 @@ export default function CardDetailView({ cardId }) {
   const advances = useCreditCardStore((s) => s.getAdvances(cardId))
   const usage = useCreditCardStore((s) => s.getCardLimitUsage(cardId))
   const installments = useCreditCardStore((s) => s.getActiveInstallments(cardId))
+  const allEntries = useCreditCardStore((s) => s.entries)
   const rowMarks = useCreditCardStore((s) => s.rowMarks)
   const markRow = useCreditCardStore((s) => s.markRow)
   const unmarkRow = useCreditCardStore((s) => s.unmarkRow)
@@ -158,8 +159,40 @@ export default function CardDetailView({ cardId }) {
         tag: 'กดเงินสด', amount: Number(a.amount || 0) + Number(a.fee || 0),
       })
     }
+    // งวดผ่อนของรอบนี้ที่ยังไม่ถูกเรียกเก็บ — ยังไม่มีรายจ่ายจริงจนกว่าจะปิดรอบ
+    // (ดู close_card_statement ใน supabase/card.sql) แต่ต้องเห็นในบิลนี้ เพราะ
+    // ธนาคารจะเก็บมันรวมมากับบิลใบเดียวกัน
+    const billedIds = new Set(rows.map((r) => r.tx?.installmentEntryId).filter(Boolean))
+    for (const ins of installments) {
+      for (const e of allEntries) {
+        if (e.installmentId !== ins.id) continue
+        if (e.status !== 'pending' || e.cycle !== p.cycle) continue
+        if (billedIds.has(e.id)) continue
+        rows.push({
+          key: `ie-${e.id}`, tx: null, date: to, upcoming: true, installment: ins,
+          name: `${ins.name} — งวดที่ ${e.seq}/${ins.months}`,
+          cat: `ครบกำหนด ${formatIsoThai(e.dueDate)}`,
+          tag: 'งวดผ่อน', amount: Number(e.amount || 0), entry: e,
+        })
+      }
+    }
+
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [transactions, advances, card, cardId, getCategoryName])
+  }, [transactions, advances, card, cardId, getCategoryName, installments, allEntries])
+
+  // สรุปงวดผ่อน: ที่รวมอยู่ในบิลรอบนี้ กับที่เหลือไปรอบถัดๆ ไป
+  const installmentOutlook = useMemo(() => {
+    const ids = new Set(installments.map((i) => i.id))
+    const pending = allEntries.filter((e) => ids.has(e.installmentId) && e.status === 'pending')
+    const cycle = current?.cycle
+    const inThis = pending.filter((e) => e.cycle === cycle)
+    const later = pending.filter((e) => e.cycle !== cycle)
+    const sum = (list) => list.reduce((t, e) => t + Number(e.amount || 0), 0)
+    return {
+      thisCount: inThis.length, thisAmount: sum(inThis),
+      laterCount: later.length, laterAmount: sum(later),
+    }
+  }, [installments, allEntries, current])
 
   const run = async (fn) => {
     if (busy) return
@@ -527,23 +560,27 @@ export default function CardDetailView({ cardId }) {
           </div>
           <div className="px-4 pb-1 text-[11px] text-faint">
             รายการที่รูดหลังวันสรุปยอดจะย้ายไปอยู่บิลรอบถัดไปให้เอง · กดไอคอนท้ายแถวเพื่อแก้ไขรายการ ·
-            ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)
+            ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) ·
+            งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด
           </div>
           <div className="px-4 pb-3 overflow-x-auto">
             {cycleRows.length === 0 ? (
               <p className="text-center text-[12.5px] text-faint py-8">ยังไม่มีรายการในรอบนี้</p>
             ) : cycleRows.map((r) => {
-              const insEntry = r.tx?.installmentEntryId
-                ? installments
-                  .map((i) => ({ i, e: getInstallmentProgress(i.id)?.rows?.find((x) => x.id === r.tx.installmentEntryId) }))
-                  .find((x) => x.e)
-                : null
+              const insEntry = r.upcoming
+                ? { i: r.installment }
+                : r.tx?.installmentEntryId
+                  ? installments
+                    .map((i) => ({ i, e: getInstallmentProgress(i.id)?.rows?.find((x) => x.id === r.tx.installmentEntryId) }))
+                    .find((x) => x.e)
+                  : null
               const prog = insEntry ? getInstallmentProgress(insEntry.i.id) : null
               const marked = rowMarks.includes(r.key)
               return (
                 <div key={r.key} className="grid grid-cols-[22px_64px_minmax(0,1fr)_96px_110px_30px] gap-2.5 items-center py-2 border-t border-[#F2F0EA]">
                   {/* ติ๊กว่าไล่เช็คบรรทัดนี้กับสลิปแล้ว — ไม่ตัดเงิน เพราะธนาคารเก็บบิลทั้งใบ
                       ไม่ได้เก็บทีละบรรทัด (ดูหมายเหตุใน supabase/card.sql ส่วน 11) */}
+                  {r.upcoming ? <span /> : (
                   <button
                     onClick={() => setMarkTarget({ row: r, on: !marked })}
                     disabled={busy}
@@ -554,6 +591,7 @@ export default function CardDetailView({ cardId }) {
                   >
                     {marked && <Icon name="check" size={14} />}
                   </button>
+                  )}
                   <span className="tabular-nums text-[11.5px] text-faint">{formatIsoThai(r.date)}</span>
                   <span className="min-w-0">
                     <span className={`block text-[12.5px] font-medium truncate ${marked ? 'text-muted line-through' : ''}`}>{r.name}</span>
@@ -567,10 +605,15 @@ export default function CardDetailView({ cardId }) {
                       </span>
                     )}
                   </span>
-                  <span className={`text-[10.5px] rounded-full px-2 py-0.5 justify-self-start ${TAG_TONE[r.tag] ?? TAG_TONE['รูดบัตร']}`}>
-                    {r.tag}
+                  <span className="justify-self-start flex flex-col items-start gap-0.5">
+                    <span className={`text-[10.5px] rounded-full px-2 py-0.5 ${TAG_TONE[r.tag] ?? TAG_TONE['รูดบัตร']}`}>
+                      {r.tag}
+                    </span>
+                    {r.upcoming && <span className="text-[10px] text-faint">รอเรียกเก็บ</span>}
                   </span>
-                  <span className={`tabular-nums text-right text-[13px] font-semibold ${r.amount < 0 ? 'text-income' : 'text-ink'}`}>
+                  <span className={`tabular-nums text-right text-[13px] font-semibold ${
+                    r.amount < 0 ? 'text-income' : r.upcoming ? 'text-muted' : 'text-ink'
+                  }`}>
                     {r.amount < 0 ? `−${fmt(-r.amount)}` : fmt(r.amount)}
                   </span>
                   <span className="justify-self-end">
@@ -588,6 +631,22 @@ export default function CardDetailView({ cardId }) {
               )
             })}
           </div>
+          {(installmentOutlook.thisCount > 0 || installmentOutlook.laterCount > 0) && (
+            <div className="mx-4 mb-3 bg-recurring-soft rounded-[9px] px-2.5 py-2 text-[11px] text-[#5A3C90] leading-relaxed">
+              {installmentOutlook.thisCount > 0 && (
+                <div>
+                  งวดผ่อนที่จะรวมมากับบิลรอบนี้ <b className="tabular-nums">{installmentOutlook.thisCount}</b> งวด
+                  รวม <b className="tabular-nums">{fmt(installmentOutlook.thisAmount)}</b> บาท
+                </div>
+              )}
+              {installmentOutlook.laterCount > 0 && (
+                <div>
+                  ที่เหลือหลังรอบนี้อีก <b className="tabular-nums">{installmentOutlook.laterCount}</b> งวด
+                  รวม <b className="tabular-nums">{fmt(installmentOutlook.laterAmount)}</b> บาท (ทยอยเข้าบิลรอบถัดๆ ไป)
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
