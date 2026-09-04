@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react'
-import { createHashRouter, Navigate } from 'react-router-dom'
+import { Suspense } from 'react'
+import { createHashRouter, Navigate, useRouteError } from 'react-router-dom'
+import lazyPage from './lib/lazyPage'
 import App from './App'
 import Dashboard from './pages/Dashboard'
 import TransactionsPage from './pages/Transactions'
@@ -16,12 +17,12 @@ import PendingTasksPage from './pages/PendingTasks'
  *   นำเข้าข้อมูล / สำรองข้อมูล → xlsx
  * ก่อนแยก ทุกหน้าต้องรอไฟล์พวกนี้โหลดจบก่อนถึงจะเห็นหน้าแรก
  */
-const ManagePage = lazy(() => import('./pages/Manage'))
-const ReportsPage = lazy(() => import('./pages/Reports'))
-const HistoryPage = lazy(() => import('./pages/History'))
-const ImportPage = lazy(() => import('./pages/Import'))
-const BackupPage = lazy(() => import('./pages/Backup'))
-const SettingsPage = lazy(() => import('./pages/Settings'))
+const ManagePage = lazyPage(() => import('./pages/Manage'))
+const ReportsPage = lazyPage(() => import('./pages/Reports'))
+const HistoryPage = lazyPage(() => import('./pages/History'))
+const ImportPage = lazyPage(() => import('./pages/Import'))
+const BackupPage = lazyPage(() => import('./pages/Backup'))
+const SettingsPage = lazyPage(() => import('./pages/Settings'))
 
 function PageSpinner() {
   return (
@@ -38,10 +39,46 @@ const lazyRoute = (Component) => (
   </Suspense>
 )
 
+/**
+ * หน้าที่ขึ้นเมื่อเปิดหน้าไหนไม่สำเร็จ — แทนหน้า error ดิบของ react-router
+ * ที่ขึ้นข้อความอังกฤษล้วนอย่าง "Failed to fetch dynamically imported module"
+ * ซึ่งผู้ใช้อ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
+ */
+function RouteError() {
+  const error = useRouteError()
+  const stale = /dynamically imported module|Importing a module script failed|Failed to fetch/i
+    .test(String(error?.message ?? error ?? ''))
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 bg-paper">
+      <div className="card max-w-[420px] w-full px-5 py-6 text-center">
+        <div className="text-[15px] font-semibold mb-1.5">
+          {stale ? 'แอปมีเวอร์ชันใหม่แล้ว' : 'เปิดหน้านี้ไม่สำเร็จ'}
+        </div>
+        <p className="text-[12.5px] text-muted leading-relaxed">
+          {stale
+            ? 'หน้านี้ใช้ไฟล์ของเวอร์ชันเก่าที่ถูกแทนที่ไปแล้ว กดโหลดหน้าใหม่เพื่อใช้เวอร์ชันล่าสุด ข้อมูลที่บันทึกไว้ไม่ได้หายไปไหน'
+            : 'ลองโหลดหน้าใหม่อีกครั้ง ถ้ายังไม่ได้ให้ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'}
+        </p>
+        {!stale && error?.message && (
+          <p className="mt-2.5 text-[11px] text-faint break-words">{String(error.message)}</p>
+        )}
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 h-10 px-5 rounded-ctl bg-ink text-white text-[13px] font-semibold hover:bg-black"
+        >
+          โหลดหน้าใหม่
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export const router = createHashRouter([
   {
     path: '/',
     element: <App />,
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'dashboard', element: <Dashboard /> },
