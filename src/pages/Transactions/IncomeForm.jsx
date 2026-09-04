@@ -4,7 +4,7 @@ import { format } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
-import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
+import AccountPickerPopup from '../../components/shared/AccountPickerPopup'
 import CategorySelect from '../../components/shared/CategorySelect'
 import Icon from '../../components/shared/Icon'
 import StepHeading from '../../components/shared/StepHeading'
@@ -72,7 +72,8 @@ export default function IncomeForm({ onPreviewChange }) {
   // pending income state
   const [isPendingMode, setIsPendingMode] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
-  const [pickAcct, setPickAcct] = useState(null) // null | 'transfer' | 'other'
+  // เลือกบัญชีผ่านป๊อปอัปเหมือนฝั่งรายจ่าย — null | 'transfer' | 'other'
+  const [pickAcct, setPickAcct] = useState(null)
 
   // ส่งสถานะขึ้นไปให้แผงขวา "ก่อนกดบันทึก" — แผงจะบอกว่าเงินจะเข้ากระเป๋าไหน เพิ่มขึ้นเท่าไร
   useEffect(() => {
@@ -332,7 +333,7 @@ export default function IncomeForm({ onPreviewChange }) {
             extra={
               <button
                 type="button"
-                onClick={() => setPickAcct((v) => (v === 'transfer' ? null : 'transfer'))}
+                onClick={() => setPickAcct('transfer')}
                 className="flex-none h-8 px-2.5 rounded-[9px] border border-hairline bg-white text-[11.5px] font-semibold text-muted flex items-center gap-[5px] hover:bg-[#F2FAD9] hover:border-ink hover:text-ink"
               >
                 เปลี่ยนบัญชี
@@ -340,15 +341,6 @@ export default function IncomeForm({ onPreviewChange }) {
               </button>
             }
           />
-          {pickAcct === 'transfer' && (
-            <div className="px-2 pb-1">
-              <TransferAccountPicker
-                value={form.transferAccountId}
-                onChange={(v) => { set('transferAccountId', v); setPickAcct(null) }}
-                label="เข้าบัญชี"
-              />
-            </div>
-          )}
 
           {/* รายรับอื่นๆ มีสองบรรทัด เพราะต้องระบุประเภทและปลายทางเพิ่ม */}
           <div
@@ -400,21 +392,14 @@ export default function IncomeForm({ onPreviewChange }) {
               {form.otherMethod === 'transfer' && (
                 <button
                   type="button"
-                  onClick={() => setPickAcct((v) => (v === 'other' ? null : 'other'))}
-                  className="flex-none h-[34px] px-2.5 rounded-[10px] border border-hairline bg-white text-[11.5px] font-semibold text-muted hover:bg-paper"
+                  onClick={() => setPickAcct('other')}
+                  className="flex-none h-[34px] px-2.5 rounded-[10px] border border-hairline bg-white text-[11.5px] font-semibold text-muted flex items-center gap-1 hover:bg-[#F2FAD9] hover:border-ink hover:text-ink"
                 >
-                  เลือกบัญชี
+                  {form.otherAccountId ? 'เปลี่ยนบัญชี' : 'เลือกบัญชี'}
+                  <Icon name="expand_more" size={15} />
                 </button>
               )}
             </div>
-
-            {pickAcct === 'other' && (
-              <TransferAccountPicker
-                value={form.otherAccountId}
-                onChange={(v) => { set('otherAccountId', v); setPickAcct(null) }}
-                label="เข้าบัญชี"
-              />
-            )}
 
             {otherNeedsType && (
               <span className="text-[11px] text-[#8A6A15] leading-snug">
@@ -623,6 +608,20 @@ export default function IncomeForm({ onPreviewChange }) {
           folderBase={isTaxUpload ? 'taxinvoices' : 'receipts'}
           onConfirm={handleUploadDone}
           onCancel={() => setUploadOpen(false)}
+        />
+      )}
+
+      {/* เลือกบัญชีปลายทาง — ป๊อปอัปตัวเดียวใช้ทั้งช่องเงินโอนและช่องรายรับอื่นๆ */}
+      {pickAcct && (
+        <AccountPickerPopup
+          title="เงินเข้าบัญชีไหน"
+          sub={pickAcct === 'other' ? 'ของช่องรายรับอื่นๆ' : 'ของช่องเงินโอน'}
+          value={pickAcct === 'other' ? form.otherAccountId : form.transferAccountId}
+          onPick={(id) => {
+            set(pickAcct === 'other' ? 'otherAccountId' : 'transferAccountId', id)
+            setPickAcct(null)
+          }}
+          onClose={() => setPickAcct(null)}
         />
       )}
     </div>
