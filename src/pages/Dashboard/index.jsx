@@ -1,65 +1,47 @@
-import { lazy, Suspense, useState } from 'react'
-import { format, startOfMonth, endOfMonth } from 'date-fns'
-import FilterBar from './FilterBar'
+import { useState } from 'react'
 import FinancialStatus from './FinancialStatus'
-import CardBillOutlook from './CardBillOutlook'
 import CalendarView from './CalendarView'
-import SectionCard from '../../components/shared/SectionCard'
+import DayPanel from './DayPanel'
+import UpcomingStrip from './UpcomingStrip'
+import { localDateStr } from '../../lib/dateUtils'
 
-// กราฟสองตัวนี้ลาก recharts (383 KB) มาด้วย ซึ่งไม่จำเป็นต้องมีตอนวาดหน้าแรก
-// แยกออกไปโหลดทีหลัง ตัวเลขและปฏิทินจึงขึ้นให้เห็นก่อนโดยไม่ต้องรอ
-const ChartFiltered = lazy(() => import('./ChartFiltered'))
-const TrendChart6M = lazy(() => import('./TrendChart6M'))
-
-function ChartSkeleton() {
-  return <div className="h-52 rounded-panel bg-[#F1F0EC] animate-pulse" />
-}
-
+/**
+ * ภาพรวม — ตัวเลขสรุป · ปฏิทิน + รายละเอียดของวันที่เลือก · แถบครบกำหนดถัดไป
+ *
+ * ปฏิทินกับแผงรายละเอียดอยู่ระดับสายตาเดียวกัน กดวันไหนแผงขวาเปลี่ยนตาม
+ * (ของเดิมกดวันแล้วเด้งไปหน้าบันทึกรายการ ดูของวันเก่าไม่ได้เลย)
+ *
+ * จอกว้าง (เนื้อหา ≥ 1300px) ไม่ได้แค่ยืดออก แต่จัดคอลัมน์ใหม่
+ *   ซ้าย 304px  = การ์ดตัวเลข แล้วต่อด้วยแถบครบกำหนดถัดไป
+ *   ขวา        = ปฏิทิน + แผงวันที่เลือก ได้ความสูงเต็มจอ
+ * จอแคบเรียงลงมาเป็น ตัวเลข → ปฏิทิน+แผง → ครบกำหนดถัดไป
+ */
 export default function Dashboard() {
-  const [filter, setFilter] = useState('month')
-  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
-  const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [selectedDate, setSelectedDate] = useState(() => localDateStr())
+  const [openDayDate, setOpenDayDate] = useState(null)
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
-        <FilterBar
-          filter={filter} setFilter={setFilter}
-          startDate={startDate} endDate={endDate}
-          setStartDate={setStartDate} setEndDate={setEndDate}
-        />
+    <div
+      className="grid gap-3.5 min-h-0
+        grid-cols-1 [grid-template-areas:'kpi''main''up']
+        wide:grid-cols-[304px_minmax(0,1fr)] wide:grid-rows-[auto_1fr] wide:[grid-template-areas:'kpi_main''up_main']"
+    >
+      <div className="[grid-area:kpi] min-w-0">
+        <FinancialStatus />
       </div>
 
-      <SectionCard title="สถานะการเงินปัจจุบัน">
-        <FinancialStatus />
-      </SectionCard>
+      <div className="[grid-area:main] grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_328px] wide:grid-cols-[minmax(0,1fr)_380px] gap-3.5 items-start min-h-0">
+        <CalendarView
+          selectedDate={selectedDate}
+          onSelectDate={setSelectedDate}
+          openDayDate={openDayDate}
+          onCloseDay={() => setOpenDayDate(null)}
+        />
+        <DayPanel date={selectedDate} onOpenDetail={setOpenDayDate} />
+      </div>
 
-      {/* หัวข้อนี้ซ่อนตัวเองเมื่อยังไม่มีบัตร — คนที่ไม่ใช้บัตรจะไม่เห็นเลย */}
-      <CardBillOutlook months={2} />
-
-      {/* Calendar + Sidebar */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
-        <div className="xl:col-span-2">
-          <CalendarView
-            filter={filter} setFilter={setFilter}
-            startDate={startDate} endDate={endDate}
-            setStartDate={setStartDate} setEndDate={setEndDate}
-          />
-        </div>
-
-        <div className="space-y-5">
-          <SectionCard title="รายรับ-รายจ่ายตามช่วงเวลา">
-            <Suspense fallback={<ChartSkeleton />}>
-              <ChartFiltered startDate={startDate} endDate={endDate} />
-            </Suspense>
-          </SectionCard>
-          <SectionCard title="แนวโน้ม 6 เดือนย้อนหลัง">
-            <Suspense fallback={<ChartSkeleton />}>
-              <TrendChart6M />
-            </Suspense>
-          </SectionCard>
-        </div>
+      <div className="[grid-area:up] min-w-0">
+        <UpcomingStrip />
       </div>
     </div>
   )

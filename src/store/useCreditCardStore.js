@@ -15,7 +15,7 @@ import useTransactionStore from './useTransactionStore'
  * บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน จึงไม่ถูกรวมเข้า total() ของกระเป๋าเงิน
  * ยอดรวมหน้าแรกยังตอบคำถามว่า "มีเงินเท่าไร" ไม่ใช่ "รวยเท่าไร"
  */
-export const INITIAL = { cards: [], statements: [], installments: [], entries: [], advances: [], closing: false }
+export const INITIAL = { cards: [], statements: [], installments: [], entries: [], advances: [], rowMarks: [], closing: false }
 
 const useCreditCardStore = create((set, get) => ({
   ...INITIAL,
@@ -27,17 +27,32 @@ const useCreditCardStore = create((set, get) => ({
     installments: data?.installments ?? [],
     entries: data?.entries ?? [],
     advances: data?.advances ?? [],
+    rowMarks: data?.rowMarks ?? [],
   }),
 
   refresh: async () => {
-    const [cards, statements, inst, advances] = await Promise.all([
+    const [cards, statements, inst, advances, rowMarks] = await Promise.all([
       cardApi.listCreditCards(),
       stmtApi.listCardStatements(),
       instApi.listInstallments(),
       cardApi.listCardAdvances(),
+      cardApi.listCardRowMarks(),
     ])
-    set({ cards, statements, installments: inst.installments, entries: inst.entries, advances })
-    return { cards, statements, advances, ...inst }
+    set({ cards, statements, installments: inst.installments, entries: inst.entries, advances, rowMarks })
+    return { cards, statements, advances, rowMarks, ...inst }
+  },
+
+  // ── เครื่องหมายถูกรายแถวในบิล — ไม่แตะยอดเงิน เป็นแค่ตัวช่วยไล่เช็คบิลกับสลิป ──
+  isRowMarked: (rowKey) => get().rowMarks.includes(rowKey),
+
+  markRow: async ({ cardId, cycle, rowKey }) => {
+    await cardApi.markCardRow({ cardId, cycle, rowKey })
+    set((s) => (s.rowMarks.includes(rowKey) ? s : { rowMarks: [...s.rowMarks, rowKey] }))
+  },
+
+  unmarkRow: async (rowKey) => {
+    await cardApi.unmarkCardRow(rowKey)
+    set((s) => ({ rowMarks: s.rowMarks.filter((k) => k !== rowKey) }))
   },
 
   // ── จัดการบัตร ────────────────────────────────────────────────────────────

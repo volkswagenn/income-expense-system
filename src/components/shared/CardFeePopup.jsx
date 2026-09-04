@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from './Popup'
 import { format } from 'date-fns'
 import AmountInput from './AmountInput'
 import DatePicker from './DatePicker'
@@ -27,14 +28,15 @@ export default function CardFeePopup({ cardLabel, defaultAmount = 0, onConfirm, 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between">
-          <h3 className="font-semibold text-base">🧾 บันทึกค่าธรรมเนียมรายปี</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4">
+    <Popup
+      title="บันทึกค่าธรรมเนียมรายปี"
+      icon="receipt_long"
+      width={420}
+      onClose={onCancel}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel="บันทึก"
+    >
           <p className="text-xs text-gray-500">{cardLabel}</p>
 
           <div>
@@ -68,15 +70,6 @@ export default function CardFeePopup({ cardLabel, defaultAmount = 0, onConfirm, 
             บันทึกเป็นรายจ่ายบนบัตรหมวด "ค่าธรรมเนียมบัตร" หนี้บัตรเพิ่มทันที
             ถ้าธนาคารยกเว้นให้ภายหลัง ให้บันทึกเป็นเงินคืนเข้าบัตรแทน
           </p>
-        </div>
-
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? '⏳ กำลังบันทึก…' : 'บันทึก'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Popup>
   )
 }

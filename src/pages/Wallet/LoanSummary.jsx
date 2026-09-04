@@ -1,3 +1,4 @@
+import Popup from '../../components/shared/Popup'
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -39,40 +40,37 @@ function ReturnModal({ loan, onClose }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-4 overflow-hidden">
-          <div className="px-5 py-4 border-b flex items-center justify-between">
-            <h3 className="font-semibold">คืนเงินกระเป๋า "{loan.subName}"</h3>
-            <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
+      <Popup
+      title={<>คืนเงินกระเป๋า "{loan.subName}"</>}
+        icon="swap_horiz"
+        width={460}
+        onClose={onClose}
+      >
+          <div className="bg-purple-50 rounded-xl p-3 text-sm">
+            <p className="text-gray-500">ยอดที่ยืม</p>
+            <p className="text-xl font-bold text-purple-700">{loan.amount.toLocaleString()} บาท</p>
           </div>
-          <div className="p-5 space-y-4">
-            <div className="bg-purple-50 rounded-xl p-3 text-sm">
-              <p className="text-gray-500">ยอดที่ยืม</p>
-              <p className="text-xl font-bold text-purple-700">{loan.amount.toLocaleString()} บาท</p>
-            </div>
-            <div>
-              <label className="label">หักจากกระเป๋า</label>
-              <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="cash">💵 กระเป๋าเงินสด</option>
-                <option value="transfer">🏦 กระเป๋าเงินโอน</option>
-              </select>
-            </div>
-            {needsAccount && (
-              <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
-            )}
-            <div className="flex gap-2 justify-end">
-              <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-              <button
-                className="btn bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
-                onClick={handleReturnClick}
-                disabled={needsAccount && !resolvedAccountId}
-              >
-                คืนเงิน
-              </button>
-            </div>
+          <div>
+            <label className="label">หักจากกระเป๋า</label>
+            <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
+              <option value="cash">💵 กระเป๋าเงินสด</option>
+              <option value="transfer">🏦 กระเป๋าเงินโอน</option>
+            </select>
           </div>
-        </div>
-      </div>
+          {needsAccount && (
+            <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+          )}
+          <div className="flex gap-2 justify-end">
+            <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
+            <button
+              className="btn bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+              onClick={handleReturnClick}
+              disabled={needsAccount && !resolvedAccountId}
+            >
+              คืนเงิน
+            </button>
+          </div>
+      </Popup>
 
       <ConfirmPopup
         open={regularConfirm}

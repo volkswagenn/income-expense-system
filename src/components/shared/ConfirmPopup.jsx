@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Popup from './Popup'
 
 /**
  * กล่องยืนยันที่ใช้ร่วมกันทั้งแอป
@@ -29,26 +30,27 @@ export default function ConfirmPopup({
     }
   }
 
+  // ข้อความหลายบรรทัดถูกแยกเป็นย่อหน้าละบรรทัดตามแบบ ไม่ใช่ก้อนเดียวที่ตัดบรรทัดเอง
+  // เพราะแต่ละบรรทัดคือผลลัพธ์คนละอย่างที่จะเกิดขึ้น ต้องอ่านทีละข้อได้
+  const lines = String(message ?? '').split('\n').filter((l) => l.trim() !== '')
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-        <div className={`px-6 py-4 border-b ${danger ? 'bg-red-50 border-red-100' : 'bg-amber-50 border-amber-100'}`}>
-          <h3 className={`font-semibold text-base ${danger ? 'text-red-700' : 'text-amber-700'}`}>
-            {title}
-          </h3>
-        </div>
-        <div className="px-6 py-4 text-sm text-gray-700 leading-relaxed whitespace-pre-line">{message}</div>
-        <div className="px-6 pb-5 flex gap-3 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
-          <button
-            className={`btn ${danger ? 'btn-danger' : 'btn-warning'}`}
-            onClick={confirm}
-            disabled={busy}
-          >
-            {busy ? 'กำลังทำรายการ…' : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Popup
+      title={title}
+      sub={danger ? 'ยืนยันก่อนทำรายการนี้' : 'ตรวจสอบก่อนยืนยัน'}
+      icon={danger ? 'delete_sweep' : 'error'}
+      headTone={danger ? 'danger' : 'note'}
+      width={420}
+      onClose={onCancel}
+      onConfirm={confirm}
+      busy={busy}
+      danger={danger}
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
+    >
+      {lines.map((l, i) => (
+        <p key={i} className="flex-none text-[12.5px] text-muted leading-[1.75]">{l}</p>
+      ))}
+    </Popup>
   )
 }

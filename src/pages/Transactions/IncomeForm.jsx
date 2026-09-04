@@ -1,12 +1,12 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
-import { th } from 'date-fns/locale'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import CategorySelect from '../../components/shared/CategorySelect'
+import Icon from '../../components/shared/Icon'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import usePendingStore from '../../store/usePendingStore'
@@ -14,46 +14,52 @@ import useWalletStore from '../../store/useWalletStore'
 import { walletTarget } from '../../lib/api/transactions'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
+import useFormDefaults, { setFormDefaults } from '../../hooks/useFormDefaults'
 
-const EMPTY = { cash: '', transfer: '', otherAmount: '', otherType: '', otherMethod: '', note: '', detail: '', docType: 'none', transferAccountId: '', otherAccountId: '', category: '' }
+const EMPTY = { cash: '', transfer: '', otherAmount: '', otherType: '', otherMethod: 'cash', note: '', detail: '', docType: 'none', transferAccountId: '', otherAccountId: '', category: '' }
 
-function RecentTransactions() {
-  const { transactions } = useTransactionStore()
-  const recent = [...transactions]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 8)
-
-  if (recent.length === 0) return null
-
+/** ช่องกรอกยอดขนาดคงที่ท้ายแถวช่องทางรับเงิน — ตัวเลขชิดขวาให้เทียบกันได้ทุกแถว */
+function AmountField({ value, onChange }) {
   return (
-    <div className="border-t border-gray-100 pt-4 space-y-2">
-      <p className="text-sm font-semibold text-gray-700">การทำรายการล่าสุด</p>
-      <div className="space-y-1.5">
-        {recent.map((tx) => {
-          const isIncome = tx.type === 'income'
-          return (
-            <div key={tx.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${isIncome ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                  {isIncome ? 'รับ' : 'จ่าย'}
-                </span>
-                <span className="text-sm text-gray-700 truncate">{tx.itemName || '—'}</span>
-                <span className="text-xs text-gray-400 whitespace-nowrap">
-                  {format(new Date(tx.date), 'd MMM', { locale: th })}
-                </span>
-              </div>
-              <span className={`text-sm font-semibold tabular-nums ml-2 flex-shrink-0 ${isIncome ? 'text-emerald-600' : 'text-red-600'}`}>
-                {isIncome ? '+' : '-'}{tx.amount.toLocaleString()}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+    <span className="flex-none w-[146px] h-10 border border-hairline rounded-[11px] bg-white flex items-center px-[11px]">
+      <AmountInput
+        className="flex-1 min-w-0 border-none outline-none bg-transparent text-[15px] font-semibold text-right tabular-nums p-0 h-auto"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="0"
+      />
+      <span className="flex-none text-[11.5px] text-faint ml-[7px]">บาท</span>
+    </span>
+  )
+}
+
+/**
+ * หนึ่งแถวของช่องทางรับเงิน — ไอคอน + ชื่อ + คำอธิบาย + ช่องยอด
+ * แถวที่มียอดจะขึ้นขอบเข้ม เห็นได้ทันทีว่ากำลังจะบันทึกกี่รายการ
+ */
+function IncomeRow({ on, icon, iconBg, iconFg, label, sub, value, onChange, extra }) {
+  return (
+    <div
+      className={`flex items-center gap-[11px] rounded-[13px] border px-[11px] py-[9px] transition ${
+        on ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-[#F2FAD9]/40' : 'border-hairline bg-white'
+      }`}
+    >
+      <span className="w-8 h-8 flex-none rounded-[10px] flex items-center justify-center" style={{ background: iconBg }}>
+        <Icon name={icon} size={18} style={{ color: iconFg }} />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[12.5px] font-semibold">{label}</span>
+        <span className="block text-[11px] text-faint truncate">{sub}</span>
+      </span>
+      {extra}
+      <AmountField value={value} onChange={onChange} />
     </div>
   )
 }
 
-export default function IncomeForm() {
+export default function IncomeForm({ onPreviewChange }) {
+  const navigate = useNavigate()
+  const formDefaults = useFormDefaults()
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm, clearDraft, hasDraft] = useFormDraft('income', EMPTY)
   const [saved, setSaved] = useState(false)
@@ -64,6 +70,22 @@ export default function IncomeForm() {
   const [attachments, setAttachments] = useState([])
   // pending income state
   const [isPendingMode, setIsPendingMode] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [pickAcct, setPickAcct] = useState(null) // null | 'transfer' | 'other'
+
+  // ส่งสถานะขึ้นไปให้แผงขวา "ก่อนกดบันทึก" — แผงจะบอกว่าเงินจะเข้ากระเป๋าไหน เพิ่มขึ้นเท่าไร
+  useEffect(() => {
+    onPreviewChange?.({
+      kind: 'income',
+      cash: Number(form.cash) || 0,
+      transfer: Number(form.transfer) || 0,
+      other: Number(form.otherAmount) || 0,
+      otherMethod: form.otherMethod,
+      transferAccountId: form.transferAccountId,
+      otherAccountId: form.otherAccountId,
+      isPending: isPendingMode,
+    })
+  }, [onPreviewChange, form.cash, form.transfer, form.otherAmount, form.otherMethod, form.transferAccountId, form.otherAccountId, isPendingMode])
 
   const { addTransaction } = useTransactionStore()
   const { addLog } = useLogStore()
@@ -85,6 +107,7 @@ export default function IncomeForm() {
   const otherAmt = Number(form.otherAmount) || 0
 
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
+  const getAccountLabel = useWalletStore((s) => s.getTransferAccountLabel)
 
   const docFields = attachments.length > 0 ? {
     attachments,
@@ -95,7 +118,8 @@ export default function IncomeForm() {
 
   const finishSaved = (msg, ms) => {
     savedPartsRef.current = new Set()
-    clearDraft()
+    // ล้างฟอร์มตามค่า "บันทึกแล้วเปิดฟอร์มใหม่" ที่ตั้งไว้ในหน้าตั้งค่า
+    if (formDefaults.reopenAfterSave) clearDraft()
     setSavedMsg(msg)
     setSaved(true)
     setUploadStatus(null)
@@ -247,170 +271,328 @@ export default function IncomeForm() {
     }
   }
 
+  const total = cashAmt + transferAmt + otherAmt
+  const filledCount = [cashAmt, transferAmt, otherAmt].filter((n) => n > 0).length
+  const accountLabel = getAccountLabel(resolveAccount(form.transferAccountId)) || 'ยังไม่ได้เลือกบัญชี'
+  const otherAccountLabel = getAccountLabel(resolveAccount(form.otherAccountId)) || 'ยังไม่ได้เลือกบัญชี'
+  const otherNeedsType = otherAmt > 0 && !form.otherType.trim()
+
+  // สรุปสั้นๆ ว่าในส่วนที่พับไว้มีอะไรกรอกไปแล้วบ้าง จะได้ไม่ต้องกางดูทุกครั้ง
+  const moreSummary = [
+    form.note && 'หมายเหตุ',
+    form.detail && 'รายละเอียด',
+    attachments.length > 0 && `ไฟล์แนบ ${attachments.length}`,
+  ].filter(Boolean).join(' · ') || 'ไม่ได้กรอก 3 ช่อง — ไม่กรอกก็บันทึกได้'
+
   return (
-    <div className="space-y-5">
-      <DraftBanner hasDraft={hasDraft} onClear={clearDraft} />
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col">
+      <div className="px-5 pt-4 space-y-4">
+        <DraftBanner hasDraft={hasDraft} onClear={clearDraft} />
         <DateNavigator date={date} onChange={setDate} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="label">💵 เงินสด (บาท)</label>
-          <AmountInput className="input" value={form.cash} onChange={(e) => set('cash', e.target.value)} placeholder="0" />
-        </div>
-        <div className="space-y-2">
-          <div>
-            <label className="label">🏦 เงินโอน (บาท)</label>
-            <AmountInput className="input" value={form.transfer} onChange={(e) => set('transfer', e.target.value)} placeholder="0" />
-          </div>
-          {/* ระบุบัญชีปลายทางเมื่อมีการรับเงินโอน */}
-          {!isPendingMode && transferAmt > 0 && (
-            <TransferAccountPicker
-              value={form.transferAccountId}
-              onChange={(v) => set('transferAccountId', v)}
-              label="เข้าบัญชี"
-            />
-          )}
-        </div>
-      </div>
+      {/* ช่องทางรับเงิน — กรอกได้หลายช่องพร้อมกัน แต่ละช่องกลายเป็นหนึ่งรายการ
+          ช่องที่มียอดจะขึ้นขอบเข้ม จะได้เห็นทันทีว่ากำลังจะบันทึกกี่รายการ */}
+      <div className="px-5 pt-4">
+        <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-2">
+          รับเงินเข้าช่องทางไหน
+          <span className="text-[11px] font-normal text-faint">กรอกได้หลายช่องพร้อมกัน แต่ละช่องถูกบันทึกเป็นหนึ่งรายการ</span>
+        </label>
 
-      {/* หมวดหมู่รายรับ */}
-      <div className="max-w-sm">
-        <div className="flex items-center justify-between mb-1">
-          <label className="label mb-0">หมวดหมู่รายรับ</label>
-          <Link to="/categories" className="text-xs text-emerald-600 hover:text-emerald-700 hover:underline">
-            🗂️ จัดการหมวดหมู่
-          </Link>
-        </div>
-        <CategorySelect
-          type="income"
-          value={form.category}
-          onChange={(v) => set('category', v)}
-          placeholder="ไม่ระบุหมวดหมู่"
-        />
-      </div>
+        <div className="flex flex-col gap-2">
+          <IncomeRow
+            on={cashAmt > 0}
+            icon="payments"
+            iconBg="#DCEFE6"
+            iconFg="#12795B"
+            label="เงินสด"
+            sub="เข้ากระเป๋าเงินสดในร้าน"
+            value={form.cash}
+            onChange={(v) => set('cash', v)}
+          />
 
-      {/* รายรับอื่นๆ */}
-      <div className="space-y-2">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="label">รายรับอื่นๆ (บาท)</label>
-            <AmountInput className="input" value={form.otherAmount} onChange={(e) => set('otherAmount', e.target.value)} placeholder="0" />
-          </div>
-          <div>
-            <label className="label">ประเภทรายรับอื่นๆ</label>
-            <input className="input" value={form.otherType} onChange={(e) => set('otherType', e.target.value)} placeholder="เช่น บัตรเครดิต, ดอกเบี้ย" />
-          </div>
-        </div>
-
-        {/* Wallet selector — แสดงตลอดเมื่อไม่อยู่ใน pending mode */}
-        {!isPendingMode && (
-          <div className="px-1">
-            <label className="label text-xs mb-1">เข้ากระเป๋า</label>
-            <div className="flex flex-wrap gap-4">
-              {[
-                { value: 'cash', label: '💵 เงินสด' },
-                { value: 'transfer', label: '🏦 เงินโอน' },
-              ].map(({ value, label }) => (
-                <label key={value} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <input
-                    type="radio"
-                    name="otherMethod"
-                    value={value}
-                    checked={form.otherMethod === value}
-                    onChange={() => set('otherMethod', value)}
-                    className="accent-emerald-600"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-            {form.otherMethod === 'transfer' && otherAmt > 0 && (
-              <div className="mt-2 max-w-sm">
-                <TransferAccountPicker
-                  value={form.otherAccountId}
-                  onChange={(v) => set('otherAccountId', v)}
-                  label="เข้าบัญชี"
-                />
-              </div>
-            )}
-          </div>
-        )}
-        {isPendingMode && (
-          <div className="px-1 space-y-2">
-            <p className="text-xs text-amber-600">รวมเป็นรายการรอรับเงินเดียวกัน</p>
-            <div className="max-w-sm">
+          <IncomeRow
+            on={transferAmt > 0}
+            icon="account_balance"
+            iconBg="#E7EAFA"
+            iconFg="#3A55C4"
+            label="เงินโอน"
+            sub={isPendingMode ? `ตั้งไว้ว่าจะเข้า ${accountLabel}` : accountLabel}
+            value={form.transfer}
+            onChange={(v) => set('transfer', v)}
+            extra={
+              <button
+                type="button"
+                onClick={() => setPickAcct((v) => (v === 'transfer' ? null : 'transfer'))}
+                className="flex-none h-8 px-2.5 rounded-[9px] border border-hairline bg-white text-[11.5px] font-semibold text-muted flex items-center gap-[5px] hover:bg-[#F2FAD9] hover:border-ink hover:text-ink"
+              >
+                เปลี่ยนบัญชี
+                <Icon name="expand_more" size={16} />
+              </button>
+            }
+          />
+          {pickAcct === 'transfer' && (
+            <div className="px-2 pb-1">
               <TransferAccountPicker
                 value={form.transferAccountId}
-                onChange={(v) => set('transferAccountId', v)}
-                label="ตั้งบัญชีที่จะรับเงิน (ไม่บังคับ)"
+                onChange={(v) => { set('transferAccountId', v); setPickAcct(null) }}
+                label="เข้าบัญชี"
               />
             </div>
-            <p className="text-xs text-amber-600">ตั้งไว้แล้ว เวลากดรับเงินโอนจะเข้าบัญชีนั้นให้เลย</p>
+          )}
+
+          {/* รายรับอื่นๆ มีสองบรรทัด เพราะต้องระบุประเภทและปลายทางเพิ่ม */}
+          <div
+            className={`rounded-[13px] border px-[11px] py-[9px] flex flex-col gap-[9px] transition ${
+              otherAmt > 0 ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-[#F2FAD9]/40' : 'border-hairline bg-white'
+            }`}
+          >
+            <div className="flex items-center gap-[11px]">
+              <span className="w-8 h-8 flex-none rounded-[10px] flex items-center justify-center" style={{ background: '#FBF7EC' }}>
+                <Icon name="savings" size={18} style={{ color: '#A8760B' }} />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[12.5px] font-semibold">รายรับอื่นๆ</span>
+                <span className="block text-[11px] text-faint truncate">
+                  {form.otherMethod === 'transfer' ? otherAccountLabel : 'เช่น บัตรเครดิต ดอกเบี้ย เงินคืน'}
+                </span>
+              </span>
+              <AmountField value={form.otherAmount} onChange={(v) => set('otherAmount', v)} />
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-[#EFEDE7] pt-[9px] flex-wrap">
+              <span className="flex-none text-[11.5px] text-muted">ประเภท</span>
+              <input
+                className="flex-1 min-w-[140px] h-[34px] px-[11px] border border-hairline rounded-[10px] bg-white text-[12.5px] outline-none focus:border-ink"
+                value={form.otherType}
+                onChange={(e) => set('otherType', e.target.value)}
+                placeholder="เช่น บัตรเครดิต ดอกเบี้ย เงินคืน"
+              />
+              <span className="flex-none text-[11.5px] text-muted ml-0.5">เข้ากระเป๋า</span>
+              {[
+                { value: 'cash', label: 'เงินสด', icon: 'payments' },
+                { value: 'transfer', label: 'เงินโอน', icon: 'account_balance' },
+              ].map((o) => {
+                const on = form.otherMethod === o.value
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => set('otherMethod', o.value)}
+                    className={`flex-none h-[34px] px-[11px] rounded-[10px] border text-[12px] font-semibold flex items-center gap-[5px] transition ${
+                      on ? 'border-ink bg-[#F2FAD9] text-ink' : 'border-hairline bg-white text-muted hover:bg-paper'
+                    }`}
+                  >
+                    <Icon name={o.icon} size={16} />
+                    {o.label}
+                  </button>
+                )
+              })}
+              {form.otherMethod === 'transfer' && (
+                <button
+                  type="button"
+                  onClick={() => setPickAcct((v) => (v === 'other' ? null : 'other'))}
+                  className="flex-none h-[34px] px-2.5 rounded-[10px] border border-hairline bg-white text-[11.5px] font-semibold text-muted hover:bg-paper"
+                >
+                  เลือกบัญชี
+                </button>
+              )}
+            </div>
+
+            {pickAcct === 'other' && (
+              <TransferAccountPicker
+                value={form.otherAccountId}
+                onChange={(v) => { set('otherAccountId', v); setPickAcct(null) }}
+                label="เข้าบัญชี"
+              />
+            )}
+
+            {otherNeedsType && (
+              <span className="text-[11px] text-[#8A6A15] leading-snug">
+                ใส่ยอดในช่องนี้แล้วต้องระบุประเภทด้วย ระบบจะใช้ชื่อนี้ในรายงาน
+              </span>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* ยอดรวมของทุกช่อง — ตอบคำถามเดียวว่ากดบันทึกแล้วจะเกิดอะไรขึ้นรวมเท่าไร */}
+        <div className="flex items-center gap-2.5 bg-paper rounded-ctl px-[13px] py-2.5 mt-[9px]">
+          <span className="flex-1 min-w-0 text-[12px] text-muted truncate">
+            รวมรายรับที่จะบันทึก · {filledCount === 0 ? 'ยังไม่ได้กรอกช่องไหน' : `กรอกแล้ว ${filledCount} ช่อง`}
+          </span>
+          <span className={`tabular-nums flex-none text-[17px] font-bold ${total > 0 ? 'text-income' : 'text-faint'}`}>
+            {total.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+          <span className="flex-none text-[11.5px] text-faint">บาท</span>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* หมวดหมู่ + ประเภทเอกสาร */}
+      <div className="px-5 pt-4 grid grid-cols-1 md:grid-cols-2 gap-3.5">
         <div>
-          <label className="label">ประเภทเอกสาร</label>
-          <select className="input" value={form.docType} onChange={(e) => { set('docType', e.target.value); setUploadStatus(null) }}>
+          <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-1.5">
+            หมวดหมู่รายรับ
+            <span className="text-[11px] font-normal text-faint">ใช้จัดกลุ่มในรายงาน</span>
+          </label>
+          <CategorySelect
+            type="income"
+            value={form.category}
+            onChange={(v) => set('category', v)}
+            placeholder="ไม่ระบุหมวดหมู่"
+          />
+        </div>
+        <div>
+          <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-1.5">
+            ประเภทเอกสาร
+            <span className="text-[11px] font-normal text-faint">ออกให้ลูกค้าหรือไม่</span>
+          </label>
+          <select
+            className="input h-11"
+            value={form.docType}
+            onChange={(e) => { set('docType', e.target.value); setUploadStatus(null) }}
+          >
             <option value="none">ไม่ต้องการ</option>
             <option value="receipt">ใบเสร็จ</option>
             <option value="taxinvoice">มีใบกำกับภาษี</option>
             <option value="waiting_tax">รอใบกำกับภาษี</option>
           </select>
-          <div className="mt-2 flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              className="btn btn-secondary text-sm py-1.5"
-              onClick={() => setUploadOpen(true)}
-            >
-              {isTaxUpload ? '📎 อัปโหลดใบกำกับภาษี' : '📎 อัปโหลดใบเสร็จ'}
-            </button>
-            {uploadStatus && (
-              <span className="text-emerald-600 text-xs">{uploadStatus}</span>
-            )}
+        </div>
+      </div>
+
+      {/* เปิดบิลรอรับเงิน — ติ๊กแล้วทุกช่องรวมเป็นบิลใบเดียว ยังไม่เข้ากระเป๋า */}
+      <div className="px-5 pt-4">
+        <button
+          type="button"
+          onClick={() => setIsPendingMode((v) => !v)}
+          className={`w-full flex items-center gap-[11px] h-[52px] px-[13px] rounded-[13px] border text-left transition ${
+            isPendingMode ? 'border-ink bg-pending-soft' : 'border-hairline bg-white hover:border-ink'
+          }`}
+        >
+          <Icon name={isPendingMode ? 'check_circle' : 'schedule'} size={20} className="flex-none text-ink" />
+          <span className="flex-1 min-w-0">
+            <span className="block text-[12.5px] font-semibold">เปิดบิลรอรับเงิน · ยังไม่ได้รับเงินตอนนี้</span>
+            <span className="block text-[11px] text-faint truncate">
+              รวมทุกช่องเป็นบิลรอรับเงินใบเดียว ยังไม่เพิ่มเงินเข้ากระเป๋า แล้วไปกดรับเงินที่หน้ารอดำเนินการ
+            </span>
+          </span>
+        </button>
+      </div>
+
+      {/* ช่องที่ไม่ได้กรอกทุกครั้ง พับเก็บไว้ใต้ปุ่มเดียว เหมือนฝั่งรายจ่าย */}
+      <div className="px-5 pt-3.5">
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          className={`w-full flex items-center gap-[9px] h-11 px-3.5 border border-dashed border-[#D8D4C9] bg-[#FAF9F6] hover:bg-paper ${
+            moreOpen ? 'rounded-t-ctl border-b-0' : 'rounded-ctl'
+          }`}
+        >
+          <Icon name="tune" size={18} className="text-muted" />
+          <span className="text-[13px] font-semibold">รายละเอียดเพิ่มเติม</span>
+          <span className="text-[11.5px] text-faint hidden sm:inline">หมายเหตุ · รายละเอียด · ไฟล์แนบ</span>
+          <span className="ml-auto text-[11.5px] text-faint">{moreOpen ? 'ปิดรายละเอียด' : moreSummary}</span>
+          <Icon name="expand_more" size={20} className={`text-muted transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {moreOpen && (
+          <div className="border border-hairline border-t-0 rounded-b-ctl p-3.5 grid grid-cols-1 md:grid-cols-2 gap-3 bg-white">
+            <div>
+              <label className="block text-[12px] text-muted mb-1.5">หมายเหตุ</label>
+              <input
+                className="input h-10"
+                value={form.note}
+                onChange={(e) => set('note', e.target.value)}
+                placeholder="พิมพ์สั้นๆ ได้"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] text-muted mb-1.5">รายละเอียด</label>
+              <input
+                className="input h-10"
+                value={form.detail}
+                onChange={(e) => set('detail', e.target.value)}
+                placeholder="รายละเอียดเพิ่มเติม"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="flex items-baseline gap-[7px] text-[12px] text-muted mb-1.5">
+                ไฟล์แนบ · ใบเสร็จ / ใบกำกับภาษี
+                <span className="text-[11px] text-[#B3AFA6]">JPG PNG PDF ไม่เกิน 10 MB ต่อไฟล์</span>
+              </label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setUploadOpen(true)}
+                  className="h-10 px-[13px] rounded-[11px] bg-ink text-white text-[12.5px] font-semibold flex items-center gap-[7px] hover:bg-black"
+                >
+                  <Icon name="upload_file" size={17} />
+                  {isTaxUpload ? 'แนบใบกำกับภาษี' : 'แนบใบเสร็จ'}
+                </button>
+                {uploadStatus && <span className="text-income text-xs">{uploadStatus}</span>}
+                {attachments.length > 0 && (
+                  <span className="text-[11px] text-faint">
+                    แนบแล้ว {attachments.length} ไฟล์ · เปิดดูย้อนหลังได้จากหน้าประวัติและรายงาน
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-        <div>
-          <label className="label">หมายเหตุ</label>
-          <input className="input" value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="หมายเหตุ (ถ้ามี)" />
-        </div>
-      </div>
-
-      <div>
-        <label className="label">รายละเอียด</label>
-        <textarea className="input resize-none" rows={2} value={form.detail} onChange={(e) => set('detail', e.target.value)} placeholder="รายละเอียดเพิ่มเติม" />
-      </div>
-
-      {/* Action bar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {isPendingMode ? (
-          <button className="btn btn-warning px-6" onClick={handleSave} disabled={saving}>
-            {saving ? 'กำลังบันทึก…' : `📋 สร้างรายการรอรับเงิน (${(cashAmt + transferAmt + otherAmt).toLocaleString()} บาท)`}
-          </button>
-        ) : (
-          <button className="btn btn-success px-6" onClick={handleSave} disabled={saving}>
-            {saving ? 'กำลังบันทึก…' : '💾 บันทึกรายรับ'}
-          </button>
         )}
+      </div>
+
+      {/* แถบบันทึกติดท้ายฟอร์มเสมอ — ชุดเดียวกับหน้ารายจ่าย ปุ่มจึงอยู่ที่เดิมทั้งสองแท็บ */}
+      <div className="mt-4 border-t border-[#F2F0EA] px-[18px] py-[13px] flex items-center gap-2.5 flex-wrap">
+        <button
+          className={`h-[50px] w-full justify-center rounded-[14px] lg:h-[42px] lg:w-auto lg:justify-start lg:rounded-ctl px-[22px] text-white text-sm font-semibold flex items-center gap-2 hover:brightness-110 disabled:opacity-50 ${
+            isPendingMode ? 'bg-pending' : 'bg-income'
+          }`}
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving
+            ? 'กำลังบันทึก…'
+            : `${isPendingMode ? 'เปิดบิลรอรับเงิน' : 'บันทึกรายรับ'} ${total.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          <kbd className="hidden lg:inline text-[10.5px] font-semibold rounded-[5px] px-1.5 py-0.5 bg-white/20 text-white">⌘ ↵</kbd>
+        </button>
 
         <button
           type="button"
-          className={`btn text-sm ${isPendingMode ? 'btn-secondary' : 'btn-warning'}`}
-          onClick={() => setIsPendingMode((v) => !v)}
-          disabled={saving}
+          onClick={() => setFormDefaults({ reopenAfterSave: !formDefaults.reopenAfterSave })}
+          className="flex items-center gap-2 text-[12.5px] text-muted"
         >
-          {isPendingMode ? 'ยกเลิกโหมดรอรับเงิน' : 'เปิดบิลรอรับเงิน'}
+          <span
+            className={`w-[18px] h-[18px] flex-none rounded-[5px] border flex items-center justify-center ${
+              formDefaults.reopenAfterSave ? 'bg-lime border-lime' : 'bg-white border-hairline'
+            }`}
+          >
+            {formDefaults.reopenAfterSave && <Icon name="check" size={14} className="text-ink" />}
+          </span>
+          เปิดฟอร์มใหม่ทันที
         </button>
 
-        {saved && <span className="text-emerald-600 text-sm font-medium">{savedMsg}</span>}
-        {errMsg && <span className="text-red-500 text-sm">{errMsg}</span>}
-      </div>
+        <button
+          type="button"
+          onClick={() => setUploadOpen(true)}
+          className="h-[38px] px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold flex items-center gap-1.5 hover:bg-paper"
+        >
+          <Icon name="upload_file" size={17} />
+          แนบใบเสร็จ
+          {attachments.length > 0 && <span className="tabular-nums font-bold text-income">{attachments.length}</span>}
+        </button>
 
-      <RecentTransactions />
+        <button
+          type="button"
+          onClick={() => navigate('/transactions?tab=recurring')}
+          className="h-[38px] px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold flex items-center gap-1.5 hover:bg-paper"
+          title="ไปหน้ารายการประจำเพื่อตั้งรายการนี้ให้เข้าทุกเดือน"
+        >
+          <Icon name="history" size={17} />
+          ตั้งเป็นรายการประจำ
+        </button>
+
+        {saved && <span className="text-income text-sm font-medium">{savedMsg}</span>}
+        {errMsg && <span className="text-expense text-sm">{errMsg}</span>}
+      </div>
 
       {uploadOpen && (
         <FileUploadPopup

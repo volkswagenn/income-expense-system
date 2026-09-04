@@ -14,7 +14,8 @@ import { resetStores } from '../store/hydrate'
  *   'error'    — โหลดข้อมูลร้านไม่สำเร็จ (เน็ตหลุด/DB ล่ม) → มีปุ่มลองใหม่
  *   'ready'    — ใช้งานได้
  */
-const AuthContext = createContext(null)
+// export ไว้ให้ไฟล์พรีวิว UI ประกอบหน้าจอโดยไม่ต้องล็อกอินจริง — โค้ดแอปยังใช้ผ่าน useAuth() เท่านั้น
+export const AuthContext = createContext(null)
 
 export function useAuth() {
   const ctx = useContext(AuthContext)

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from '../../components/shared/Popup'
 import { Link } from 'react-router-dom'
 import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
@@ -6,6 +7,8 @@ import { moveBetweenTransferAccounts } from '../../lib/walletEngine'
 import { formatAccount } from '../../components/shared/TransferAccountPicker'
 import AmountDisplay from '../../components/shared/AmountDisplay'
 import BankLogo from '../../components/shared/BankLogo'
+import Icon from '../../components/shared/Icon'
+import AccountMenuPopup from './AccountMenuPopup'
 import { kindLabel } from '../Manage/AccountManage'
 
 /**
@@ -28,47 +31,44 @@ function MovePopup({ accounts, onConfirm, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50">
-          <h3 className="font-semibold text-base">↔️ ย้ายเงินระหว่างบัญชี</h3>
+    <Popup
+      title="ย้ายเงินระหว่างบัญชี"
+      icon="swap_horiz"
+      width={420}
+      onClose={onClose}
+      onConfirm={submit}
+      confirmLabel="ย้ายเงิน"
+    >
+        <div>
+          <label className="label">จากบัญชี</label>
+          <select className="input" value={fromId} onChange={(e) => { setFromId(e.target.value); setError('') }}>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{formatAccount(a)} — {a.balance.toLocaleString()}</option>
+            ))}
+          </select>
         </div>
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="label">จากบัญชี</label>
-            <select className="input" value={fromId} onChange={(e) => { setFromId(e.target.value); setError('') }}>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{formatAccount(a)} — {a.balance.toLocaleString()}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">ไปบัญชี</label>
-            <select className="input" value={toId} onChange={(e) => { setToId(e.target.value); setError('') }}>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{formatAccount(a)} — {a.balance.toLocaleString()}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">จำนวนเงิน (บาท)</label>
-            <AmountInput className="input" value={amount}
-              onChange={(e) => { setAmount(e.target.value); setError('') }} placeholder="0.00" autoFocus />
-          </div>
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+        <div>
+          <label className="label">ไปบัญชี</label>
+          <select className="input" value={toId} onChange={(e) => { setToId(e.target.value); setError('') }}>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{formatAccount(a)} — {a.balance.toLocaleString()}</option>
+            ))}
+          </select>
         </div>
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit}>ย้ายเงิน</button>
+        <div>
+          <label className="label">จำนวนเงิน (บาท)</label>
+          <AmountInput className="input" value={amount}
+            onChange={(e) => { setAmount(e.target.value); setError('') }} placeholder="0.00" autoFocus />
         </div>
-      </div>
-    </div>
+        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+    </Popup>
   )
 }
 
 export default function TransferAccountList() {
   const accounts = useWalletStore((s) => s.transferAccounts)
   const [moveOpen, setMoveOpen] = useState(false)
+  const [menuAccount, setMenuAccount] = useState(null)
 
   const handleMove = async (fromId, toId, amount) => {
     await moveBetweenTransferAccounts(fromId, toId, amount)
@@ -119,6 +119,13 @@ export default function TransferAccountList() {
               <div className="text-right shrink-0">
                 <AmountDisplay amount={a.balance} size="md" />
               </div>
+              <button
+                onClick={() => setMenuAccount(a)}
+                title="ดูความเคลื่อนไหวและแก้ไขบัญชี"
+                className="shrink-0 w-9 h-9 rounded-ctl border border-hairline bg-white flex items-center justify-center text-muted hover:text-ink hover:bg-paper"
+              >
+                <Icon name="more_vert" size={18} />
+              </button>
             </div>
           ))}
         </div>
@@ -126,6 +133,9 @@ export default function TransferAccountList() {
 
       {moveOpen && (
         <MovePopup accounts={accounts} onConfirm={handleMove} onClose={() => setMoveOpen(false)} />
+      )}
+      {menuAccount && (
+        <AccountMenuPopup account={menuAccount} onClose={() => setMenuAccount(null)} />
       )}
     </div>
   )

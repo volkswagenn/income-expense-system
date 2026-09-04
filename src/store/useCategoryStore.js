@@ -68,12 +68,12 @@ const useCategoryStore = create((set, get) => ({
 
   // ── หมวดหมู่ ──────────────────────────────────────────────────────────────
 
-  addCategory: async (name, type, parentId = null) => {
+  addCategory: async (name, type, parentId = null, icon = null) => {
     // อนุญาตแค่ 2 ชั้น — ถ้าพยายามสร้างใต้หมวดหมู่ย่อย ให้ไปอยู่ใต้หมวดหมู่หลักของมันแทน
     const parent = parentId ? get().categories.find((c) => c.id === parentId) : null
     const resolvedParentId = parent ? (parent.parentId ?? parent.id) : null
 
-    const item = await categoriesApi.createCategory({ name, type, parentId: resolvedParentId })
+    const item = await categoriesApi.createCategory({ name, type, parentId: resolvedParentId, icon })
     set((s) => ({ categories: [...s.categories, item] }))
     return item
   },
@@ -82,6 +82,25 @@ const useCategoryStore = create((set, get) => ({
     const item = await categoriesApi.renameCategory(id, name)
     set((s) => ({ categories: s.categories.map((c) => (c.id === id ? { ...c, ...item } : c)) }))
     return item
+  },
+
+  /**
+   * ตั้ง/เอาไอคอนของหมวดหมู่ออก (ส่ง null คือเอาออก)
+   *
+   * อัปเดตหน้าจอก่อนแล้วค่อยยิงไปเซิร์ฟเวอร์ เพราะการเลือกไอคอนเป็นการกดเล่นดูผล
+   * ถ้าต้องรอเน็ตทุกครั้งจะรู้สึกหนืดมาก ถ้าเซิร์ฟเวอร์ปฏิเสธค่อยย้อนกลับ
+   */
+  setCategoryIcon: async (id, icon) => {
+    const before = get().categories.find((c) => c.id === id)?.icon ?? null
+    set((s) => ({ categories: s.categories.map((c) => (c.id === id ? { ...c, icon } : c)) }))
+    try {
+      const item = await categoriesApi.updateCategory(id, { icon })
+      set((s) => ({ categories: s.categories.map((c) => (c.id === id ? { ...c, ...item } : c)) }))
+      return item
+    } catch (err) {
+      set((s) => ({ categories: s.categories.map((c) => (c.id === id ? { ...c, icon: before } : c)) }))
+      throw err
+    }
   },
 
   // ลบหมวดหมู่หลักจะลบหมวดหมู่ย่อยข้างในตามไปด้วย
@@ -141,10 +160,24 @@ const useCategoryStore = create((set, get) => ({
 
   // ── ผู้ขาย ────────────────────────────────────────────────────────────────
 
-  addVendor: async (name) => {
-    const item = await categoriesApi.createVendor(name)
+  addVendor: async (name, icon = null) => {
+    const item = await categoriesApi.createVendor(name, icon)
     set((s) => ({ vendors: [...s.vendors, item] }))
     return item
+  },
+
+  /** ตั้ง/เอาไอคอนของผู้ขายออก — อัปเดตหน้าจอก่อน ย้อนกลับถ้าเซิร์ฟเวอร์ปฏิเสธ */
+  setVendorIcon: async (id, icon) => {
+    const before = get().vendors.find((v) => v.id === id)?.icon ?? null
+    set((s) => ({ vendors: s.vendors.map((v) => (v.id === id ? { ...v, icon } : v)) }))
+    try {
+      const item = await categoriesApi.updateVendor(id, { icon })
+      set((s) => ({ vendors: s.vendors.map((v) => (v.id === id ? { ...v, ...item } : v)) }))
+      return item
+    } catch (err) {
+      set((s) => ({ vendors: s.vendors.map((v) => (v.id === id ? { ...v, icon: before } : v)) }))
+      throw err
+    }
   },
 
   updateVendor: async (id, name) => {

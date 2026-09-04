@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from '../../components/shared/Popup'
 import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
@@ -49,90 +50,80 @@ export default function PayInstallmentPopup({ installment, entry, card, onConfir
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[90vh] flex flex-col">
-        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-shrink-0">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-base text-gray-900">จ่ายค่างวด</h3>
-            <p className="text-sm text-gray-500 truncate">{installment?.name}</p>
-          </div>
-          <button type="button" className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4 overflow-y-auto flex-1">
-          <div className="rounded-xl bg-rose-50 border border-rose-100 px-4 py-3">
-            <p className="text-xs text-rose-700">
-              งวดที่ {entry?.seq} จาก {installment?.months} · ครบกำหนด {formatIsoThai(entry?.dueDate)}
-            </p>
-            <p className="text-2xl font-bold tabular-nums text-rose-700 mt-0.5">{fmt(entry?.amount)}</p>
-          </div>
-
-          <div>
-            <label className="label">จ่ายจาก</label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { value: 'cash', label: '💵 เงินสด' },
-                { value: 'transfer', label: '🏦 เงินโอน' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => { setMethod(opt.value); setError('') }}
-                  className={`py-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                    method === opt.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {needsAccount && (
-            <>
-              <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
-              {autopayAccount && accountId === autopayAccount && (
-                <p className="text-xs text-gray-400 -mt-2">บัญชีที่ผูกหักอัตโนมัติไว้กับบัตรใบนี้</p>
-              )}
-            </>
-          )}
-
-          <div>
-            <label className="label">จำนวนที่จ่าย</label>
-            <AmountInput
-              className="input w-full text-right"
-              value={amount}
-              onChange={(e) => { setAmount(e.target.value); setError('') }}
-            />
-          </div>
-
-          <DateTimeField
-            label="วันที่จ่าย"
-            date={date}
-            time={time}
-            onChange={(v) => { setDate(v.date); setTime(v.time); setError('') }}
-          />
-
-          {willBeNegative && (
-            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              ยอดใน{needsAccount ? 'บัญชี' : 'เงินสด'}เหลือ {fmt(balance)} จ่ายแล้วจะติดลบ
-            </p>
-          )}
-
-          <p className="text-xs text-gray-400">
-            เงินออกจากกระเป๋าที่เลือกและบันทึกเป็นรายจ่ายให้ทันที งวดนี้จะไม่ถูกเรียกเก็บเข้าบิลบัตรอีก
+    <Popup
+      title="จ่ายค่างวด"
+      sub={installment?.name}
+      icon="credit_card"
+      width={420}
+      onClose={onCancel}
+      onConfirm={confirm}
+      busy={busy}
+      confirmLabel={`จ่าย ${fmt(parsed || 0)} บาท`}
+    >
+        <div className="rounded-xl bg-rose-50 border border-rose-100 px-4 py-3">
+          <p className="text-xs text-rose-700">
+            งวดที่ {entry?.seq} จาก {installment?.months} · ครบกำหนด {formatIsoThai(entry?.dueDate)}
           </p>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          <p className="text-2xl font-bold tabular-nums text-rose-700 mt-0.5">{fmt(entry?.amount)}</p>
         </div>
 
-        <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex gap-3 flex-shrink-0">
-          <button className="btn btn-secondary flex-1" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary flex-1" onClick={confirm} disabled={busy}>
-            {busy ? 'กำลังบันทึก…' : `จ่าย ${fmt(parsed || 0)} บาท`}
-          </button>
+        <div>
+          <label className="label">จ่ายจาก</label>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { value: 'cash', label: '💵 เงินสด' },
+              { value: 'transfer', label: '🏦 เงินโอน' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { setMethod(opt.value); setError('') }}
+                className={`py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                  method === opt.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-    </div>
+
+        {needsAccount && (
+          <>
+            <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+            {autopayAccount && accountId === autopayAccount && (
+              <p className="text-xs text-gray-400 -mt-2">บัญชีที่ผูกหักอัตโนมัติไว้กับบัตรใบนี้</p>
+            )}
+          </>
+        )}
+
+        <div>
+          <label className="label">จำนวนที่จ่าย</label>
+          <AmountInput
+            className="input w-full text-right"
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setError('') }}
+          />
+        </div>
+
+        <DateTimeField
+          label="วันที่จ่าย"
+          date={date}
+          time={time}
+          onChange={(v) => { setDate(v.date); setTime(v.time); setError('') }}
+        />
+
+        {willBeNegative && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            ยอดใน{needsAccount ? 'บัญชี' : 'เงินสด'}เหลือ {fmt(balance)} จ่ายแล้วจะติดลบ
+          </p>
+        )}
+
+        <p className="text-xs text-gray-400">
+          เงินออกจากกระเป๋าที่เลือกและบันทึกเป็นรายจ่ายให้ทันที งวดนี้จะไม่ถูกเรียกเก็บเข้าบิลบัตรอีก
+        </p>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+    </Popup>
   )
 }

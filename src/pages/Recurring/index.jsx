@@ -12,6 +12,8 @@ import { methodLabel } from '../../lib/walletEngine'
 import { walletTarget } from '../../lib/api/transactions'
 import { cancelTransaction } from '../../lib/transactionActions'
 import useWalletStore from '../../store/useWalletStore'
+import AppIcon from '../../components/shared/AppIcon'
+import UiIcon from '../../components/shared/UiIcon'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import RecurringEntryCard from './RecurringEntryCard'
 import RecurringEntryRow from './RecurringEntryRow'
@@ -197,7 +199,10 @@ export default function RecurringPage() {
           note: item.note,
           recurringEntryId: entry.id,
           // พกวิธีจ่าย/บัญชีที่ตั้งไว้ไปด้วย เพื่อให้ตอนกดชำระใช้ได้ทันที
-          ...(item.defaultMethod && item.defaultMethod !== 'pending' ? { defaultMethod: item.defaultMethod } : {}),
+          // ยกเว้น 'card' — หน้าค้างชำระจ่ายได้แค่เงินสด/เงินโอน และไม่มีที่เก็บว่ารูดใบไหน
+          // ถ้าส่งไปจะกลายเป็นวิธีจ่ายที่กดต่อไม่ได้จริง
+          ...(item.defaultMethod && !['pending', 'card'].includes(item.defaultMethod)
+            ? { defaultMethod: item.defaultMethod } : {}),
           ...(item.defaultTransferAccountId ? { defaultTransferAccountId: item.defaultTransferAccountId } : {}),
         })
         pendingPaymentId = p.id
@@ -441,7 +446,17 @@ export default function RecurringPage() {
               ☰ ย่อ
             </button>
           </div>
-          <button className="btn btn-primary text-sm" onClick={() => setShowForm(true)}>+ เพิ่มรายการ</button>
+          {/* คำใบ้บอกกติกาสองข้อที่คนถามบ่อยที่สุด: รายการโผล่มาเองเมื่อไหร่ และจ่ายตรงนี้ไม่ซ้ำกับแท็บรายจ่าย */}
+          <span className="flex-1 min-w-0 text-[11.5px] text-faint leading-snug hidden md:block">
+            ระบบสร้างรายการประจำให้อัตโนมัติทุกวันที่ 1 เวลา 08:00 · กดจ่ายที่นี่แล้วจะไม่ต้องบันทึกซ้ำในแท็บรายจ่าย
+          </span>
+          <button
+            className="flex-none h-9 px-3.5 rounded-[11px] bg-ink text-white text-[12.5px] font-semibold flex items-center gap-[7px] hover:bg-black"
+            onClick={() => setShowForm(true)}
+          >
+            <UiIcon name="plus" tone="w" size={13} />
+            เพิ่มรายการประจำ
+          </button>
         </div>
       </div>
 
@@ -523,11 +538,31 @@ export default function RecurringPage() {
             <span>{showItemList ? '▾' : '▸'}</span>
             <span>จัดการรายการทั้งหมด ({activeItems.length} รายการ)</span>
           </button>
+      {/* ตัวเลขสรุปของเดือน — จ่ายแล้ว / รอจ่าย / รวมทั้งเดือน ตามแบบ */}
+      <div className="grid grid-cols-3 gap-2.5 mb-3">
+        <div className="rounded-[14px] border border-[#D9EBA0] bg-[#F4FBEE] px-3.5 py-[11px]">
+          <div className="text-[11px] text-[#5C7A0F]">จ่ายแล้วเดือนนี้</div>
+          <div className="tabular-nums text-[19px] font-bold text-[#0F6A50] mt-0.5">{summary.paidTotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</div>
+          <div className="text-[11px] text-faint">{summary.paidCount} รายการ</div>
+        </div>
+        <div className="rounded-[14px] border border-pending-line bg-pending-soft px-3.5 py-[11px]">
+          <div className="text-[11px] text-[#8A6A15]">รอจ่าย</div>
+          <div className="tabular-nums text-[19px] font-bold text-pending mt-0.5">{summary.pendingTotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</div>
+          <div className="text-[11px] text-faint">{summary.pendingCount} รายการ</div>
+        </div>
+        <div className="rounded-[14px] border border-hairline bg-white px-3.5 py-[11px]">
+          <div className="text-[11px] text-muted">รวมทั้งเดือน</div>
+          <div className="tabular-nums text-[19px] font-bold mt-0.5">{(summary.paidTotal + summary.pendingTotal).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</div>
+          <div className="text-[11px] text-faint">{summary.paidCount + summary.pendingCount} รายการ</div>
+        </div>
+      </div>
+
 
           {showItemList && (
             <div className="mt-3 space-y-2">
               {activeItems.map((item) => (
                 <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-white">
+                  <AppIcon value={item.icon} size={19} color="#6D4AA8" fallback="event_repeat" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${item.enabled ? 'bg-emerald-400' : 'bg-gray-300'}`} />

@@ -122,10 +122,24 @@ const useWalletStore = create((set, get) => ({
 
   // ── กระเป๋าตังค์ย่อย ──────────────────────────────────────────────────────
 
-  createSubWallet: async (name, initialBalance = 0) => {
-    const wallet = await walletApi.createSubWallet({ name, initialBalance })
+  createSubWallet: async (name, initialBalance = 0, icon = null) => {
+    const wallet = await walletApi.createSubWallet({ name, initialBalance, icon })
     set((s) => ({ subWallets: [...s.subWallets, wallet] }))
     return wallet
+  },
+
+  /** ตั้ง/เอาไอคอนของกระเป๋าย่อยออก — อัปเดตหน้าจอก่อน ย้อนกลับถ้าเซิร์ฟเวอร์ปฏิเสธ */
+  setSubWalletIcon: async (id, icon) => {
+    const before = get().subWallets.find((w) => w.id === id)?.icon ?? null
+    set((s) => ({ subWallets: s.subWallets.map((w) => (w.id === id ? { ...w, icon } : w)) }))
+    try {
+      const wallet = await walletApi.updateSubWalletInfo(id, { icon })
+      set((s) => ({ subWallets: s.subWallets.map((w) => (w.id === id ? { ...w, ...wallet } : w)) }))
+      return wallet
+    } catch (err) {
+      set((s) => ({ subWallets: s.subWallets.map((w) => (w.id === id ? { ...w, icon: before } : w)) }))
+      throw err
+    }
   },
 
   deleteSubWallet: async (id) => {

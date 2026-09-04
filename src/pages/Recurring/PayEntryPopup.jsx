@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from '../../components/shared/Popup'
 import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
@@ -20,7 +21,7 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
   // ใช้วิธีจ่าย/บัญชีที่ตั้งไว้ตอนสร้างรายการประจำเป็นค่าเริ่มต้น
   const [method, setMethod] = useState(item.defaultMethod ?? '')
   const [accountId, setAccountId] = useState(item.defaultTransferAccountId ?? '')
-  const [cardId, setCardId] = useState('')
+  const [cardId, setCardId] = useState(item.defaultCardId ?? '')
   const [paidDate, setPaidDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [paidTime, setPaidTime] = useState('')   // ว่าง = เที่ยงตรงของวันที่เลือก
   const [error, setError] = useState('')
@@ -56,17 +57,40 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-base text-gray-900">บันทึกการจ่าย</h3>
-            <p className="text-sm text-gray-500">{item.name}</p>
-          </div>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
+    <Popup
+      title="บันทึกการจ่าย"
+      sub={item.name}
+      icon="history"
+      width={460}
+      onClose={onClose}
+      footer={
+        <div className="flex-none flex items-center gap-2 px-[17px] py-3 border-t border-[#EFEDE7] bg-[#FAF9F6]">
+          <button
+            onClick={onClose}
+            className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold hover:bg-paper"
+          >
+            ยกเลิก
+          </button>
+          {/* รายการยอดไม่คงที่มีปุ่มบันทึกยอดแยก — เอาไว้จดยอดบิลก่อนโดยยังไม่จ่าย */}
+          {isVariable && (
+            <button
+              onClick={handleSaveAmount}
+              disabled={!canSaveAmount}
+              className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold hover:bg-paper disabled:opacity-50"
+            >
+              บันทึกยอด
+            </button>
+          )}
+          <button
+            onClick={handleConfirm}
+            disabled={!canSubmit}
+            className="ml-auto h-[38px] px-[18px] rounded-[11px] bg-ink text-white text-[13px] font-semibold hover:brightness-125 disabled:opacity-50"
+          >
+            จ่ายแล้ว
+          </button>
         </div>
-
-        <div className="p-5 space-y-4">
+      }
+    >
           {/* Amount */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -133,28 +157,6 @@ export default function PayEntryPopup({ entry, item, onConfirm, onSaveAmount, on
           />
 
           {error && <p className="text-sm text-red-500">{error}</p>}
-        </div>
-
-        <div className="px-5 pb-5 grid grid-cols-3 gap-2">
-          <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-          {isVariable && (
-            <button
-              className="btn btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={handleSaveAmount}
-              disabled={!canSaveAmount}
-            >
-              บันทึกยอด
-            </button>
-          )}
-          <button
-            className={`btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed ${!isVariable ? 'col-span-2' : ''}`}
-            onClick={handleConfirm}
-            disabled={!canSubmit}
-          >
-            ✓ จ่ายแล้ว
-          </button>
-        </div>
-      </div>
-    </div>
+    </Popup>
   )
 }

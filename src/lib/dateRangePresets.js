@@ -46,6 +46,20 @@ export const DATE_PRESETS = [
     },
   },
   {
+    // ไตรมาสตามปฏิทิน ม.ค.–มี.ค. / เม.ย.–มิ.ย. / ก.ค.–ก.ย. / ต.ค.–ธ.ค.
+    // คิดเองแทนใช้ startOfQuarter ของ date-fns เพื่อไม่ต้องเพิ่ม import สองตัวเพื่อฟังก์ชันเดียว
+    key: 'quarter',
+    label: 'ไตรมาสนี้',
+    range: () => {
+      const n = new Date()
+      const q = Math.floor(n.getMonth() / 3)
+      return [
+        localDateStr(new Date(n.getFullYear(), q * 3, 1)),
+        localDateStr(new Date(n.getFullYear(), q * 3 + 3, 0)),
+      ]
+    },
+  },
+  {
     key: 'year',
     label: 'ปีนี้',
     range: () => [localDateStr(startOfYear(new Date())), localDateStr(endOfYear(new Date()))],

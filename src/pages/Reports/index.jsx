@@ -1,48 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
 import ReportSelector, { REPORT_TYPES } from './ReportSelector'
 import ReportTable from './ReportTable'
-import ReportChart from './ReportChart'
 import ExportBar from './ExportBar'
-import SectionCard from '../../components/shared/SectionCard'
 import DateRangePicker from '../../components/shared/DateRangePicker'
-import AmountDisplay from '../../components/shared/AmountDisplay'
 import useTransactionStore from '../../store/useTransactionStore'
 import { presetRange } from '../../lib/dateRangePresets'
+import { THAI_MONTH_SHORT } from '../../lib/dateUtils'
 
-function StatTile({ label, amount, tone = 'gray', sub }) {
-  const tones = {
-    gray: 'bg-gray-50 border-gray-200 text-gray-900',
-    green: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-    red: 'bg-red-50 border-red-200 text-red-600',
-    blue: 'bg-blue-50 border-blue-200 text-blue-700',
-    orange: 'bg-orange-50 border-orange-200 text-orange-700',
-  }
+const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** ช่วงเวลาที่กดบ่อย — กดครั้งเดียวจบ ไม่ต้องเปิดปฏิทินก่อนทุกครั้ง */
+const QUICK_RANGES = [
+  { key: 'month', label: 'เดือนนี้' },
+  { key: 'lastMonth', label: 'เดือนก่อน' },
+  { key: 'quarter', label: 'ไตรมาสนี้' },
+  { key: 'year', label: 'ปีนี้' },
+]
+
+/** การ์ดตัวเลขสี่ใบบนสุด — สีตามความหมาย ใบ "คงเหลือ" เป็นพื้นเข้มเพราะเป็นคำตอบหลัก */
+function Kpi({ label, value, sub, box, labelFg, valueFg }) {
   return (
-    <div className={`rounded-xl border p-3.5 ${tones[tone]}`}>
-      <p className="text-xs text-gray-500">{label}</p>
-      <div className="mt-1">
-        <AmountDisplay amount={amount} size="lg" />
-      </div>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    <div className={`rounded-panel px-4 py-3.5 ${box}`}>
+      <p className={`text-[11.5px] ${labelFg}`}>{label}</p>
+      <p className={`tabular-nums text-[23px] font-semibold mt-[3px] ${valueFg}`}>{value}</p>
+      {sub && <p className="text-[11px] text-faint mt-px">{sub}</p>}
     </div>
   )
 }
 
-const METHOD_FILTERS = [
-  { value: 'all', label: 'ทั้งหมด' },
-  { value: 'cash', label: '💵 เงินสด' },
-  { value: 'transfer', label: '🏦 เงินโอน' },
-  { value: 'card', label: '💳 บัตรเครดิต' },
-  { value: 'installment', label: '📆 เฉพาะงวดผ่อน' },
-]
-
 export default function ReportsPage() {
-  const [type, setType] = useState('daily_income')
+  const [type, setType] = useState('daily')
   const [preset, setPreset] = useState('month')
   const [[startDate, endDate], setRange] = useState(() => presetRange('month'))
-  const [showChart, setShowChart] = useState(true)
-  const [groupBy, setGroupBy] = useState('day')
-  const [methodFilter, setMethodFilter] = useState('all')
 
   const { transactions, ensureRange } = useTransactionStore()
 
@@ -52,16 +41,10 @@ export default function ReportsPage() {
     ensureRange(startDate).catch((err) => console.warn('โหลดรายการย้อนหลังไม่สำเร็จ:', err))
   }, [startDate, ensureRange])
 
-  const filtered = useMemo(() => {
-    let rows = transactions.filter((t) => t.date >= startDate && t.date <= endDate)
-    if (methodFilter === 'installment') {
-      // งวดผ่อนคือรายจ่ายที่ถูกสร้างตอนปิดรอบ จำได้จาก installment_entry_id
-      rows = rows.filter((t) => !!t.installmentEntryId)
-    } else if (methodFilter !== 'all') {
-      rows = rows.filter((t) => t.method === methodFilter)
-    }
-    return rows
-  }, [transactions, startDate, endDate, methodFilter])
+  const filtered = useMemo(
+    () => transactions.filter((t) => t.date >= startDate && t.date <= endDate),
+    [transactions, startDate, endDate],
+  )
 
   const stats = useMemo(() => {
     let income = 0, expense = 0
@@ -69,134 +52,137 @@ export default function ReportsPage() {
       if (t.type === 'income') income += Number(t.amount) || 0
       else if (t.type === 'expense') expense += Number(t.amount) || 0
     })
-    const days = new Set(filtered.map((t) => t.date)).size
-    return { income, expense, net: income - expense, days }
+    return { income, expense, net: income - expense, days: new Set(filtered.map((t) => t.date)).size }
+  }, [filtered])
+
+  // แท่งกราฟรายวัน — คิดสัดส่วนจากยอดสูงสุดในช่วง เพื่อให้แท่งสูงสุดเต็มกรอบพอดี
+  const bars = useMemo(() => {
+    const byDate = {}
+    filtered.forEach((t) => {
+      const k = t.date
+      if (!byDate[k]) byDate[k] = { inc: 0, exp: 0 }
+      if (t.type === 'income') byDate[k].inc += Number(t.amount) || 0
+      else byDate[k].exp += Number(t.amount) || 0
+    })
+    const keys = Object.keys(byDate).sort().slice(-31)
+    const max = Math.max(1, ...keys.map((k) => Math.max(byDate[k].inc, byDate[k].exp)))
+    return keys.map((k) => {
+      const d = new Date(k + 'T00:00:00')
+      return {
+        key: k,
+        label: keys.length > 16 ? String(d.getDate()) : `${d.getDate()} ${THAI_MONTH_SHORT[d.getMonth()]}`,
+        inH: `${(byDate[k].inc / max) * 100}%`,
+        outH: `${(byDate[k].exp / max) * 100}%`,
+      }
+    })
   }, [filtered])
 
   const activeReport = REPORT_TYPES.find((r) => r.key === type)
-  const isEmpty = filtered.length === 0
 
   return (
-    <div className="space-y-5">
-      {/* หัวเรื่อง + ช่วงวันที่ */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="grid grid-cols-1 lg:grid-cols-[236px_minmax(0,1fr)] gap-3.5 items-start">
+      {/* แถบซ้าย: ช่วงเวลา + ประเภทรายงาน — สองอย่างที่สลับบ่อยที่สุด */}
+      <aside className="card p-3.5 flex flex-col gap-3 lg:sticky lg:top-[74px]">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">รายงาน</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            เลือกประเภทรายงานและช่วงเวลา แล้วดูผลหรือส่งออกเป็นไฟล์
-          </p>
-        </div>
-        <DateRangePicker
-          startDate={startDate}
-          endDate={endDate}
-          preset={preset}
-          onChange={(s, e, p) => { setRange([s, e]); setPreset(p) }}
-        />
-      </div>
-
-      {/* 1. เลือกประเภทรายงาน */}
-      <SectionCard title="1 · เลือกประเภทรายงาน">
-        <ReportSelector type={type} setType={setType} />
-
-        <div className="mt-4 pt-4 border-t border-gray-100">
-          <label className="label">กรองตามวิธีชำระเงิน</label>
-          <div className="flex gap-1.5 flex-wrap">
-            {METHOD_FILTERS.map((m) => (
-              <button
-                key={m.value}
-                className={`btn text-xs py-1.5 px-3 ${methodFilter === m.value ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setMethodFilter(m.value)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {methodFilter !== 'all' && (
-            <p className="text-xs text-gray-500 mt-1.5">
-              {methodFilter === 'installment'
-                ? 'แสดงเฉพาะงวดผ่อนที่ถูกเรียกเก็บแล้ว ใช้ดูว่าเดือนนี้ภาระผ่อนกินไปเท่าไร'
-                : `แสดงเฉพาะรายการที่ชำระด้วย${METHOD_FILTERS.find((m) => m.value === methodFilter)?.label ?? ''}`}
-            </p>
-          )}
-        </div>
-      </SectionCard>
-
-      {/* 2. สรุปยอดในช่วงที่เลือก */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatTile label="รายรับรวม" amount={stats.income} tone="green" />
-        <StatTile label="รายจ่ายรวม" amount={stats.expense} tone="red" />
-        <StatTile
-          label="คงเหลือ (รับ − จ่าย)"
-          amount={stats.net}
-          tone={stats.net >= 0 ? 'blue' : 'orange'}
-        />
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3.5">
-          <p className="text-xs text-gray-500">จำนวนรายการ</p>
-          <p className="text-2xl font-bold text-gray-900 tabular-nums mt-1">
-            {filtered.length.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">{stats.days} วันที่มีรายการ</p>
-        </div>
-      </div>
-
-      {/* 3. ผลลัพธ์ */}
-      <SectionCard
-        title={
-          <span className="flex items-center gap-2">
-            <span>{activeReport?.icon}</span>
-            <span>{activeReport?.label}</span>
-            <span className="text-xs font-normal text-gray-400">({filtered.length} รายการ)</span>
-          </span>
-        }
-        action={
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            <div className="flex bg-gray-100 rounded-lg p-0.5">
-              {[{ key: 'day', label: 'รายวัน' }, { key: 'month', label: 'รายเดือน' }].map((g) => (
+          <div className="text-[11px] tracking-[0.1em] uppercase text-faint px-1 pb-1.5">ช่วงเวลา</div>
+          <div className="flex flex-col gap-1">
+            {QUICK_RANGES.map((r) => {
+              const on = preset === r.key
+              return (
                 <button
-                  key={g.key}
-                  className={`text-xs px-2.5 py-1 rounded-md transition-all ${
-                    groupBy === g.key ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'
+                  key={r.key}
+                  onClick={() => { const [s, e] = presetRange(r.key); setRange([s, e]); setPreset(r.key) }}
+                  className={`h-[34px] px-[11px] rounded-[9px] text-[12.5px] flex items-center transition ${
+                    on ? 'bg-ink text-white font-semibold' : 'text-ink hover:bg-paper'
                   }`}
-                  onClick={() => setGroupBy(g.key)}
                 >
-                  {g.label}
+                  {r.label}
                 </button>
+              )
+            })}
+          </div>
+          <div className="mt-1">
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              preset={preset}
+              onChange={(s, e, p) => { setRange([s, e]); setPreset(p) }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[11px] tracking-[0.1em] uppercase text-faint px-1 pb-1.5">ประเภทรายงาน</div>
+          <ReportSelector type={type} setType={setType} />
+        </div>
+      </aside>
+
+      <div className="flex flex-col gap-3 min-w-0">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 flex-none">
+          <Kpi label="รายรับรวม" value={fmt(stats.income)} box="bg-income-soft" labelFg="text-muted" valueFg="text-income" />
+          <Kpi label="รายจ่ายรวม" value={fmt(stats.expense)} box="bg-expense-soft" labelFg="text-muted" valueFg="text-expense" />
+          <Kpi label="คงเหลือ" value={fmt(stats.net)} box="bg-ink" labelFg="text-[#9AA0A8]" valueFg="text-lime" />
+          <Kpi
+            label="จำนวนรายการ"
+            value={filtered.length.toLocaleString('th-TH')}
+            sub={`${stats.days} วันที่มีรายการ`}
+            box="bg-white border border-hairline"
+            labelFg="text-muted"
+            valueFg="text-ink"
+          />
+        </div>
+
+        {/* กราฟแท่งคู่รายวัน — วาดเองด้วย div ไม่ต้องลาก recharts (383 KB) เข้ามาทั้งก้อน */}
+        <div className="card px-[18px] py-4 flex-none">
+          <div className="flex items-center gap-2.5 mb-2.5">
+            <span className="text-sm font-semibold">รายรับ-รายจ่ายรายวัน</span>
+            <span className="ml-auto flex gap-3.5 text-[11.5px] text-muted">
+              <span className="flex items-center gap-[5px]"><span className="w-[9px] h-[9px] rounded-[3px] bg-income" />รายรับ</span>
+              <span className="flex items-center gap-[5px]"><span className="w-[9px] h-[9px] rounded-[3px] bg-expense" />รายจ่าย</span>
+            </span>
+          </div>
+          {bars.length === 0 ? (
+            <p className="text-center text-[13px] text-faint py-10">ไม่มีข้อมูลในช่วงที่เลือก</p>
+          ) : (
+            <div className="flex items-end gap-1.5 h-[150px]">
+              {bars.map((b) => (
+                <div key={b.key} className="flex-1 flex flex-col justify-end gap-[3px] h-full min-w-0">
+                  <div className="flex gap-[2px] items-end h-full">
+                    <div className="flex-1 bg-income rounded-t-[3px]" style={{ height: b.inH }} />
+                    <div className="flex-1 bg-expense rounded-t-[3px]" style={{ height: b.outH }} />
+                  </div>
+                  <span className="tabular-nums text-[9.5px] text-faint text-center truncate">{b.label}</span>
+                </div>
               ))}
             </div>
-            <ExportBar type={type} transactions={filtered} startDate={startDate} endDate={endDate} />
-          </div>
-        }
-      >
-        {isEmpty ? (
-          <div className="text-center py-12 text-gray-400">
-            <p className="text-4xl mb-3">📭</p>
-            <p className="text-sm">ไม่มีข้อมูลในช่วงที่เลือก</p>
-            <p className="text-xs mt-1">ลองขยายช่วงวันที่ด้านบน หรือเลือก "ทั้งหมด"</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <ReportTable type={type} transactions={filtered} groupBy={groupBy} />
-          </div>
-        )}
-      </SectionCard>
-
-      {/* 4. กราฟ */}
-      {!isEmpty && (
-        <SectionCard
-          title="กราฟ"
-          action={
-            <button className="btn btn-secondary text-sm" onClick={() => setShowChart((s) => !s)}>
-              {showChart ? 'ซ่อนกราฟ' : 'แสดงกราฟ'}
-            </button>
-          }
-        >
-          {showChart ? (
-            <ReportChart transactions={filtered} startDate={startDate} endDate={endDate} />
-          ) : (
-            <p className="text-sm text-gray-400 text-center py-4">กดปุ่ม "แสดงกราฟ" เพื่อดูกราฟ</p>
           )}
-        </SectionCard>
-      )}
+        </div>
+
+        <div className="card flex flex-col overflow-hidden min-h-0">
+          <div className="flex items-center gap-2.5 px-[18px] pt-3.5 pb-2.5 flex-wrap">
+            <span className="text-sm font-semibold">ตารางผลลัพธ์</span>
+            <span className="text-[11.5px] text-faint">{activeReport?.label}</span>
+            <div className="ml-auto">
+              <ExportBar type={type} transactions={filtered} startDate={startDate} endDate={endDate} />
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <div className="min-w-[640px] px-[18px]">
+              <div className="grid grid-cols-[110px_minmax(0,1fr)_130px_130px_130px] gap-2.5 pb-2 text-[11px] tracking-[0.08em] uppercase text-faint border-b border-[#EFEDE7]">
+                <span>{type === 'daily' || type === 'tax' || type === 'installment' ? 'วันที่' : 'จำนวน'}</span>
+                <span>รายการ</span>
+                <span className="text-right">รายรับ</span>
+                <span className="text-right">รายจ่าย</span>
+                <span className="text-right">สุทธิ</span>
+              </div>
+              <div className="pb-3">
+                <ReportTable type={type} transactions={filtered} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

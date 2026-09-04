@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
@@ -7,6 +6,7 @@ import { formatCard } from '../../components/shared/CreditCardPicker'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import BankLogo from '../../components/shared/BankLogo'
 import CardFormPopup, { autopayLabel, MONTHS_TH } from './CardFormPopup'
+import { useRegisterManageAdd } from './manageHeader'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -24,6 +24,8 @@ export default function CardManage() {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useRegisterManageAdd(() => { setEditing(null); setFormOpen(true) })
 
   const run = async (fn) => {
     if (busy) return
@@ -90,20 +92,8 @@ export default function CardManage() {
   })
 
   return (
+    // ชื่อหัวข้อกับปุ่มเพิ่มอยู่บนหัวการ์ดของหน้าจัดการข้อมูล (ดู manageHeader.js)
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <h2 className="font-semibold text-gray-900">💳 บัตรเครดิต</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            ตั้งค่าบัตรที่นี่ — จ่ายบิล กดเงินสด บันทึกเงินคืน ทำที่{' '}
-            <Link to="/wallet" className="text-blue-600 hover:underline">หน้ากระเป๋าเงิน</Link>
-          </p>
-        </div>
-        <button className="btn btn-primary text-xs" onClick={() => { setEditing(null); setFormOpen(true) }}>
-          + เพิ่มบัตร
-        </button>
-      </div>
-
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
       {cards.length === 0 ? (
@@ -117,7 +107,9 @@ export default function CardManage() {
           {cards.map((card) => {
             const debt = Number(card.outstanding) || 0
             return (
-              <div key={card.id} className="rounded-xl border border-gray-200 p-3.5 flex items-center gap-3">
+              // จอแคบวางยอดกับปุ่มลงมาแถวล่าง ไม่งั้นชื่อบัตรถูกบีบจนอ่านไม่ออก
+              <div key={card.id} className="rounded-xl border border-gray-200 p-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                 <BankLogo bankName={card.bankName} size="lg" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{formatCard(card)}</p>
@@ -134,15 +126,18 @@ export default function CardManage() {
                     {Number(card.cashbackRate) > 0 && ` · เงินคืน ${card.cashbackRate}%`}
                   </p>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs text-gray-400">{debt < 0 ? 'เครดิตคงเหลือ' : 'ยอดหนี้'}</p>
-                  <p className={`font-bold tabular-nums text-sm ${debt > 0 ? 'text-rose-600' : debt < 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
-                    {fmt(Math.abs(debt))}
-                  </p>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => { setEditing(card); setFormOpen(true) }}>แก้ไข</button>
-                  <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => setConfirmDelete(card)}>ลบ</button>
+                <div className="flex items-center gap-3 justify-between sm:justify-end">
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-gray-400">{debt < 0 ? 'เครดิตคงเหลือ' : 'ยอดหนี้'}</p>
+                    <p className={`font-bold tabular-nums text-sm ${debt > 0 ? 'text-rose-600' : debt < 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
+                      {fmt(Math.abs(debt))}
+                    </p>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => { setEditing(card); setFormOpen(true) }}>แก้ไข</button>
+                    <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => setConfirmDelete(card)}>ลบ</button>
+                  </div>
                 </div>
               </div>
             )

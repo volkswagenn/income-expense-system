@@ -19,6 +19,7 @@ export const CATEGORY_THEME = {
     countText: 'text-red-400',
     button: 'bg-red-500 hover:bg-red-600 text-white',
     emptyIcon: '📤',
+    iconTone: '#D0483C',
   },
   income: {
     key: 'income',
@@ -36,6 +37,7 @@ export const CATEGORY_THEME = {
     countText: 'text-emerald-400',
     button: 'bg-emerald-500 hover:bg-emerald-600 text-white',
     emptyIcon: '📥',
+    iconTone: '#12795B',
   },
 }
 

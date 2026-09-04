@@ -1,5 +1,5 @@
+import Popup from '../../components/shared/Popup'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
 import useLogStore from '../../store/useLogStore'
@@ -10,6 +10,7 @@ import AmountDisplay from '../../components/shared/AmountDisplay'
 import BankSelect from '../../components/shared/BankSelect'
 import BankLogo from '../../components/shared/BankLogo'
 import { BANKS } from '../../lib/banks'
+import { useRegisterManageAdd } from './manageHeader'
 
 const BANK_NAMES = BANKS.map((b) => b.name)
 
@@ -54,100 +55,92 @@ function AccountFormPopup({ account, onSave, onClose, busy }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between">
-          <h3 className="font-semibold text-base">🏦 {isEdit ? 'แก้ไขบัญชี' : 'เพิ่มบัญชีธนาคาร'}</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="label">ธนาคาร</label>
-            {useCustom ? (
-              <div className="flex gap-2">
-                <input
-                  className="input flex-1"
-                  value={customBank}
-                  onChange={(e) => { setCustomBank(e.target.value); setError('') }}
-                  placeholder="พิมพ์ชื่อธนาคาร..."
-                  autoFocus
-                />
-                <button className="btn btn-secondary text-xs px-2" onClick={() => setUseCustom(false)}>เลือกจากรายการ</button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <div className="flex-1 min-w-0">
-                  <BankSelect value={bankName} onChange={(v) => { setBankName(v); setError('') }} />
-                </div>
-                <button className="btn btn-secondary text-xs px-2 shrink-0" onClick={() => setUseCustom(true)}>อื่นๆ</button>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="label">ชื่อบัญชี / ชื่อเรียก</label>
-            <input
-              className="input"
-              value={name}
-              onChange={(e) => { setName(e.target.value); setError('') }}
-              placeholder="เช่น บัญชีร้าน, บัญชีสำรอง"
-            />
-          </div>
-
-          <div>
-            <label className="label">ประเภทบัญชี</label>
-            <div className="grid grid-cols-4 gap-1.5">
-              {ACCOUNT_KINDS.map((k) => (
-                <button
-                  key={k.value}
-                  type="button"
-                  className={`btn text-xs py-1.5 px-1 ${kind === k.value ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setKind(k.value)}
-                >
-                  {k.label}
-                </button>
-              ))}
+    <Popup
+      title={isEdit ? 'แก้ไขบัญชี' : 'เพิ่มบัญชีธนาคาร'}
+      icon="account_balance"
+      width={460}
+      onClose={onClose}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel={isEdit ? 'บันทึก' : 'เพิ่มบัญชี'}
+    >
+        <div>
+          <label className="label">ธนาคาร</label>
+          {useCustom ? (
+            <div className="flex gap-2">
+              <input
+                className="input flex-1"
+                value={customBank}
+                onChange={(e) => { setCustomBank(e.target.value); setError('') }}
+                placeholder="พิมพ์ชื่อธนาคาร..."
+                autoFocus
+              />
+              <button className="btn btn-secondary text-xs px-2" onClick={() => setUseCustom(false)}>เลือกจากรายการ</button>
             </div>
-          </div>
-
-          <div>
-            <label className="label">เลขบัญชี (ไม่บังคับ)</label>
-            <input
-              className="input"
-              value={accountNo}
-              onChange={(e) => setAccountNo(e.target.value)}
-              placeholder="ใส่แค่ 4 ตัวท้ายก็พอ เช่น x1234"
-            />
-            <p className="text-xs text-gray-400 mt-1">ไว้แยกบัญชีธนาคารเดียวกันหลายบัญชี ไม่ต้องใส่เลขเต็ม</p>
-          </div>
-
-          <div>
-            <label className="label">{isEdit ? 'ยอดเงินคงเหลือ' : 'ยอดเงินเริ่มต้น'} (บาท)</label>
-            <AmountInput
-              className="input"
-              value={initialBalance}
-              onChange={(e) => { setInitialBalance(e.target.value); setError('') }}
-              placeholder="0.00"
-            />
-            {isEdit && (
-              <p className="text-xs text-amber-600 mt-1">
-                ⚠️ การแก้ยอดตรงนี้เป็นการปรับยอดคงเหลือโดยตรง ไม่สร้างรายการรับ-จ่าย
-              </p>
-            )}
-          </div>
-
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+          ) : (
+            <div className="flex gap-2">
+              <div className="flex-1 min-w-0">
+                <BankSelect value={bankName} onChange={(v) => { setBankName(v); setError('') }} />
+              </div>
+              <button className="btn btn-secondary text-xs px-2 shrink-0" onClick={() => setUseCustom(true)}>อื่นๆ</button>
+            </div>
+          )}
         </div>
 
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? '⏳' : isEdit ? 'บันทึก' : 'เพิ่มบัญชี'}
-          </button>
+        <div>
+          <label className="label">ชื่อบัญชี / ชื่อเรียก</label>
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => { setName(e.target.value); setError('') }}
+            placeholder="เช่น บัญชีร้าน, บัญชีสำรอง"
+          />
         </div>
-      </div>
-    </div>
+
+        <div>
+          <label className="label">ประเภทบัญชี</label>
+          <div className="grid grid-cols-4 gap-1.5">
+            {ACCOUNT_KINDS.map((k) => (
+              <button
+                key={k.value}
+                type="button"
+                className={`btn text-xs py-1.5 px-1 ${kind === k.value ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setKind(k.value)}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="label">เลขบัญชี (ไม่บังคับ)</label>
+          <input
+            className="input"
+            value={accountNo}
+            onChange={(e) => setAccountNo(e.target.value)}
+            placeholder="ใส่แค่ 4 ตัวท้ายก็พอ เช่น x1234"
+          />
+          <p className="text-xs text-gray-400 mt-1">ไว้แยกบัญชีธนาคารเดียวกันหลายบัญชี ไม่ต้องใส่เลขเต็ม</p>
+        </div>
+
+        <div>
+          <label className="label">{isEdit ? 'ยอดเงินคงเหลือ' : 'ยอดเงินเริ่มต้น'} (บาท)</label>
+          <AmountInput
+            className="input"
+            value={initialBalance}
+            onChange={(e) => { setInitialBalance(e.target.value); setError('') }}
+            placeholder="0.00"
+          />
+          {isEdit && (
+            <p className="text-xs text-amber-600 mt-1">
+              ⚠️ การแก้ยอดตรงนี้เป็นการปรับยอดคงเหลือโดยตรง ไม่สร้างรายการรับ-จ่าย
+            </p>
+          )}
+        </div>
+
+        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+    </Popup>
   )
 }
 
@@ -161,6 +154,8 @@ export default function AccountManage() {
   const [deleting, setDeleting] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  useRegisterManageAdd(() => { setEditing(null); setFormOpen(true) })
 
   const run = async (fn) => {
     if (busy) return
@@ -194,6 +189,11 @@ export default function AccountManage() {
         activityType: 'TRANSFER_ACCOUNT_CREATE',
         description: `สร้างบัญชีเงินโอน "${formatAccount(account)}" ยอดเริ่มต้น ${Number(account.balance).toLocaleString()} บาท`,
         newValue: account,
+        // ยอดเริ่มต้นคือเงินก้อนแรกของบัญชี ต้องนับเป็นความเคลื่อนไหวด้วย
+        // ไม่งั้นใบแจ้งยอดจะมียอดคงเหลือโผล่มาโดยไม่มีที่มา
+        walletEffect: Number(account.balance)
+          ? { target: 'transfer', delta: Number(account.balance), transferAccountId: account.id }
+          : null,
       }))
       setFormOpen(false)
     }
@@ -211,20 +211,8 @@ export default function AccountManage() {
   })
 
   return (
+    // ชื่อหัวข้อกับปุ่มเพิ่มอยู่บนหัวการ์ดของหน้าจัดการข้อมูล (ดู manageHeader.js)
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <h2 className="font-semibold text-gray-900">🏦 บัญชีธนาคาร</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            ยอดรวมทุกบัญชีคือ "กระเป๋าเงินโอน" — ดูยอดและย้ายเงินได้ที่{' '}
-            <Link to="/wallet" className="text-blue-600 hover:underline">หน้ากระเป๋าเงิน</Link>
-          </p>
-        </div>
-        <button className="btn btn-primary text-xs" onClick={() => { setEditing(null); setFormOpen(true) }}>
-          + เพิ่มบัญชี
-        </button>
-      </div>
-
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
       {accounts.length === 0 ? (
@@ -236,22 +224,25 @@ export default function AccountManage() {
       ) : (
         <div className="space-y-2">
           {accounts.map((a) => (
-            <div key={a.id} className="rounded-xl border border-gray-200 p-3.5 flex items-center gap-3">
-              <BankLogo bankName={a.bankName} size="lg" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{a.name}</p>
-                <p className="text-xs text-gray-500 truncate">
-                  {a.bankName}
-                  {a.kind && ` · ${kindLabel(a.kind)}`}
-                  {a.accountNo && ` · ${a.accountNo}`}
-                </p>
+            // จอแคบวางยอดกับปุ่มลงมาแถวล่าง ไม่งั้นชื่อบัญชีถูกบีบเหลือ "บัญ…" อ่านไม่ออก
+            <div key={a.id} className="rounded-xl border border-gray-200 p-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <BankLogo bankName={a.bankName} size="lg" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{a.name}</p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {a.bankName}
+                    {a.kind && ` · ${kindLabel(a.kind)}`}
+                    {a.accountNo && ` · ${a.accountNo}`}
+                  </p>
+                </div>
               </div>
-              <div className="text-right shrink-0">
+              <div className="flex items-center gap-3 justify-between sm:justify-end">
                 <AmountDisplay amount={a.balance} size="md" />
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => setEditing(a)}>แก้ไข</button>
-                <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => setDeleting(a)}>ลบ</button>
+                <div className="flex gap-1 shrink-0">
+                  <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => setEditing(a)}>แก้ไข</button>
+                  <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => setDeleting(a)}>ลบ</button>
+                </div>
               </div>
             </div>
           ))}

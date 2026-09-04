@@ -98,3 +98,32 @@ export async function listAllLogsForExport() {
   }
   return all
 }
+
+/**
+ * log ทุกใบที่มีผลกับยอดเงิน ตั้งแต่วันที่กำหนดเป็นต้นไป — ใช้ทำใบแจ้งยอดรายบัญชี
+ *
+ * กรอง `wallet_effect is not null` ที่ฝั่งเซิร์ฟเวอร์ เพราะ log ส่วนใหญ่เป็นการแก้ชื่อ
+ * หรือแก้หมวดหมู่ซึ่งไม่ได้ขยับเงินเลย ดึงมาทั้งหมดจะเปลืองเน็ตโดยเปล่าประโยชน์
+ * เรียงจากเก่าไปใหม่เพื่อให้ไล่ยอดสะสมได้ตรงลำดับเวลา
+ */
+export async function listWalletLogsSince(fromIso) {
+  const all = []
+  for (let page = 0; ; page++) {
+    const from = page * EXPORT_PAGE_SIZE
+    const rows = await unwrap(
+      supabase
+        .from('activity_logs')
+        .select('*')
+        .eq('shop_id', getShopId())
+        .eq('status', 'success')
+        .not('wallet_effect', 'is', null)
+        .gte('timestamp', fromIso)
+        .order('timestamp', { ascending: true })
+        .range(from, from + EXPORT_PAGE_SIZE)
+    )
+    const hasMore = (rows?.length ?? 0) > EXPORT_PAGE_SIZE
+    all.push(...fromRows('activity_logs', rows.slice(0, EXPORT_PAGE_SIZE)))
+    if (!hasMore) break
+  }
+  return all
+}

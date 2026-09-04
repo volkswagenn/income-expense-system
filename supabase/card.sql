@@ -1231,3 +1231,54 @@ end;
 $$;
 
 notify pgrst, 'reload schema';
+
+
+-- ###########################################################################
+-- ##  11. เครื่องหมายถูกรายแถวในบิลบัตร  (เพิ่มภายหลัง — รันทับได้)
+-- ###########################################################################
+-- ใช้ตอนไล่เช็คบิลกับสลิปทีละบรรทัด ติ๊กไว้ว่าบรรทัดไหนตรวจแล้ว
+--
+-- ตั้งใจ "ไม่" ตัดเงินตอนติ๊ก เพราะธนาคารเรียกเก็บบิลทั้งใบ ไม่ได้เก็บทีละบรรทัด
+-- ถ้าติ๊กแล้วตัดเงินด้วย พอจ่ายบิลทั้งใบทีหลังเงินจะถูกตัดซ้ำสองรอบ
+-- การจ่ายจริงยังทำที่ pay_card_statement เหมือนเดิม (เต็มจำนวน / ขั้นต่ำ / กำหนดเอง)
+--
+-- row_key มาจากฝั่งหน้าจอ: 't-<transaction_id>' หรือ 'a-<card_advance_id>'
+-- เก็บเป็น text เพราะบรรทัดในบิลมาจากสองตาราง จะทำ FK ไปตารางเดียวไม่ได้
+
+create table if not exists card_row_marks (
+  id         uuid primary key default gen_random_uuid(),
+  shop_id    uuid not null references shops(id) on delete cascade,
+  card_id    uuid not null references credit_cards(id) on delete cascade,
+  cycle      text,
+  row_key    text not null,
+  marked_by  uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  unique (shop_id, row_key)
+);
+
+create index if not exists card_row_marks_card_idx on card_row_marks (card_id, cycle);
+
+do $$
+begin
+  execute 'alter table card_row_marks enable row level security';
+
+  execute 'drop policy if exists card_row_marks_select on card_row_marks';
+  execute 'create policy card_row_marks_select on card_row_marks for select using (is_member(shop_id))';
+
+  execute 'drop policy if exists card_row_marks_insert on card_row_marks';
+  execute 'create policy card_row_marks_insert on card_row_marks for insert with check (can_edit(shop_id))';
+
+  execute 'drop policy if exists card_row_marks_update on card_row_marks';
+  execute 'create policy card_row_marks_update on card_row_marks for update using (can_edit(shop_id)) with check (can_edit(shop_id))';
+
+  execute 'drop policy if exists card_row_marks_delete on card_row_marks';
+  execute 'create policy card_row_marks_delete on card_row_marks for delete using (can_edit(shop_id))';
+
+  execute 'alter table card_row_marks replica identity full';
+  begin
+    execute 'alter publication supabase_realtime add table card_row_marks';
+  exception when duplicate_object then null;
+  end;
+end $$;
+
+notify pgrst, 'reload schema';

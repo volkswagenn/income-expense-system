@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Popup from './Popup'
 
 /**
  * แป้นตัวเลขแบบ popup — กดปุ่มบนจอหรือพิมพ์จากคีย์บอร์ดก็ได้
@@ -56,76 +57,67 @@ export default function NumpadPopup({
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+    <Popup
+      title={title}
+      sub={hint}
+      icon="calculate"
+      width={420}
+      onClose={onClose}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[280px] overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm text-gray-900">{title}</h3>
-            {hint && <p className="text-xs text-gray-400">{hint}</p>}
-          </div>
-          <button type="button" className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
+        {/* จอแสดงค่า */}
+        <div className={`h-14 rounded-xl border-2 flex items-center justify-center text-3xl font-bold tabular-nums ${
+          error ? 'border-red-300 bg-red-50 text-red-600' :
+          valid ? 'border-ink bg-white text-ink' : 'border-gray-200 bg-gray-50 text-gray-400'
+        }`}>
+          {value === '' ? <span className="text-base font-normal text-gray-300">{min}–{max}</span> : value}
         </div>
+        {error && <p className="text-xs text-red-500 -mt-1">{error}</p>}
 
-        <div className="p-4 space-y-3">
-          {/* จอแสดงค่า */}
-          <div className={`h-14 rounded-xl border-2 flex items-center justify-center text-3xl font-bold tabular-nums ${
-            error ? 'border-red-300 bg-red-50 text-red-600' :
-            valid ? 'border-ink bg-white text-ink' : 'border-gray-200 bg-gray-50 text-gray-400'
-          }`}>
-            {value === '' ? <span className="text-base font-normal text-gray-300">{min}–{max}</span> : value}
-          </div>
-          {error && <p className="text-xs text-red-500 -mt-1">{error}</p>}
-
-          {/* แป้นตัวเลข */}
-          <div className="grid grid-cols-3 gap-2">
-            {keys.map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => push(k)}
-                className="h-12 rounded-xl border border-hairline bg-white text-lg font-semibold text-ink hover:bg-[#F6F5F1] active:bg-[#ECEBE6]"
-              >
-                {k}
-              </button>
-            ))}
+        {/* แป้นตัวเลข */}
+        <div className="grid grid-cols-3 gap-2">
+          {keys.map((k) => (
             <button
+              key={k}
               type="button"
-              onClick={clear}
-              className="h-12 rounded-xl border border-hairline bg-white text-sm font-medium text-gray-500 hover:bg-[#F6F5F1]"
-              title="ล้าง (Delete)"
-            >
-              C
-            </button>
-            <button
-              type="button"
-              onClick={() => push('0')}
+              onClick={() => push(k)}
               className="h-12 rounded-xl border border-hairline bg-white text-lg font-semibold text-ink hover:bg-[#F6F5F1] active:bg-[#ECEBE6]"
             >
-              0
+              {k}
             </button>
-            <button
-              type="button"
-              onClick={backspace}
-              className="h-12 rounded-xl border border-hairline bg-white text-lg text-gray-500 hover:bg-[#F6F5F1]"
-              title="ลบตัวท้าย (Backspace)"
-            >
-              ⌫
-            </button>
-          </div>
-
+          ))}
           <button
             type="button"
-            onClick={save}
-            className="btn btn-primary w-full"
+            onClick={clear}
+            className="h-12 rounded-xl border border-hairline bg-white text-sm font-medium text-gray-500 hover:bg-[#F6F5F1]"
+            title="ล้าง (Delete)"
           >
-            บันทึก (Enter)
+            C
           </button>
-          <p className="text-[11px] text-gray-400 text-center">พิมพ์จากคีย์บอร์ดได้ · Enter บันทึก · Esc ปิด</p>
+          <button
+            type="button"
+            onClick={() => push('0')}
+            className="h-12 rounded-xl border border-hairline bg-white text-lg font-semibold text-ink hover:bg-[#F6F5F1] active:bg-[#ECEBE6]"
+          >
+            0
+          </button>
+          <button
+            type="button"
+            onClick={backspace}
+            className="h-12 rounded-xl border border-hairline bg-white text-lg text-gray-500 hover:bg-[#F6F5F1]"
+            title="ลบตัวท้าย (Backspace)"
+          >
+            ⌫
+          </button>
         </div>
-      </div>
-    </div>
+
+        <button
+          type="button"
+          onClick={save}
+          className="btn btn-primary w-full"
+        >
+          บันทึก (Enter)
+        </button>
+        <p className="text-[11px] text-gray-400 text-center">พิมพ์จากคีย์บอร์ดได้ · Enter บันทึก · Esc ปิด</p>
+    </Popup>
   )
 }

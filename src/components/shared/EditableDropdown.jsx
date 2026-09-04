@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
+import { IconPickerButton } from './IconPicker'
 
 export default function EditableDropdown({
   value, onChange, items, onAdd, onUpdate, onDelete,
-  placeholder = 'พิมพ์หรือเลือก...', label
+  placeholder = 'พิมพ์หรือเลือก...', label,
+  // ส่ง onSetIcon มาเมื่อรายการชุดนั้นเก็บไอคอนได้ ไม่ส่ง = ไม่แสดงช่องไอคอนเลย
+  onSetIcon, iconTone = '#16181D', emptyIcon = 'storefront',
 }) {
   const [open, setOpen] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -70,8 +73,22 @@ export default function EditableDropdown({
                 </div>
               ) : (
                 <>
+                  {/* ไอคอนแสดงเสมอเมื่อรายการนั้นตั้งไอคอนได้ — กดที่ไอคอนเพื่อเปลี่ยน
+                      ไม่ไปปนกับปุ่ม "แก้ไข" ที่เป็นการเปลี่ยนชื่อ คนละเรื่องกัน */}
+                  {onSetIcon && (
+                    <span className="pl-1.5 flex-none">
+                      <IconPickerButton
+                        bare
+                        size={26}
+                        value={item.icon}
+                        tone={iconTone}
+                        emptyIcon={emptyIcon}
+                        onChange={(v) => onSetIcon(item.id, v)}
+                      />
+                    </span>
+                  )}
                   <button
-                    className="flex-1 text-left px-3 py-2 text-sm"
+                    className={`flex-1 text-left py-2 text-sm ${onSetIcon ? 'px-2' : 'px-3'}`}
                     onClick={() => handleSelect(item)}
                   >{item.name}</button>
                   <div className="hidden group-hover:flex gap-1 pr-2">

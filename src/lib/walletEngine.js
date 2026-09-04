@@ -17,6 +17,20 @@ function transferAccountOf(accountId) {
   return useWalletStore.getState().resolveTransferAccountId(accountId)
 }
 
+/**
+ * ขาของการเคลื่อนไหวเงิน — ใช้กับงานที่ขยับเงินสองก้อนพร้อมกัน
+ *
+ * `walletEffect` เดิมบันทึกได้ขาเดียว (เช่น ย้ายเงินจากบัญชี ก → ข เก็บแค่ delta 0 ที่บัญชี ก)
+ * ซึ่งพอเอามาไล่ทำใบแจ้งยอดรายบัญชีแล้วยอดไม่ตรง เพราะฝั่งที่เงินเข้าไม่ถูกบันทึกไว้เลย
+ * จึงเพิ่ม `legs` เก็บทุกขาไว้ข้างใน โดยยังคง delta ขาหลักไว้ที่เดิม
+ * หน้าประวัติที่อ่าน `walletEffect.delta` อยู่แล้วจึงไม่ต้องแก้
+ *
+ * target: 'cash' | 'transfer' | `sub:<id>` | 'card'
+ */
+export function walletLeg(target, delta, transferAccountId = null) {
+  return { target, delta, transferAccountId }
+}
+
 export function methodLabel(method) {
   if (method === 'cash') return 'เงินสด'
   if (method === 'card') return 'บัตรเครดิต'
@@ -103,7 +117,10 @@ export async function transferBetweenWallets(from, to, amount, logData = {}, acc
       activityType: from === 'cash' ? 'TRANSFER_TO_WALLET' : 'WITHDRAW_FROM_TRANSFER',
       description: logData.description
         ?? `ย้ายเงิน ${amount.toLocaleString()} บาท จาก${methodLabel(from)} → ${methodLabel(to)} [${label}]`,
-      walletEffect: { target: from, delta: -amount, transferAccountId: id },
+      walletEffect: {
+        target: from, delta: -amount, transferAccountId: id,
+        legs: [walletLeg(from, -amount, id), walletLeg(to, +amount, id)],
+      },
     }),
   })
   return true
@@ -118,7 +135,11 @@ export async function moveBetweenTransferAccounts(fromId, toId, amount) {
   await writeLog(buildLogEntry({
     activityType: 'TRANSFER_ACCOUNT_MOVE',
     description: `ย้ายเงิน ${amount.toLocaleString()} บาท จาก "${fromLabel}" → "${toLabel}"`,
-    walletEffect: { target: 'transfer', delta: 0, transferAccountId: fromId },
+    // ยอดรวมกระเป๋าเงินโอนไม่ขยับ (delta 0) แต่รายบัญชีขยับคนละทาง จึงต้องมี legs
+    walletEffect: {
+      target: 'transfer', delta: 0, transferAccountId: fromId,
+      legs: [walletLeg('transfer', -amount, fromId), walletLeg('transfer', +amount, toId)],
+    },
     newValue: { fromId, toId, amount },
   }))
 }
@@ -140,7 +161,13 @@ export async function depositToSubWallet(subId, amount, fromMethod, logData = {}
     log: buildLogEntry({
       activityType: 'SUB_DEPOSIT',
       description: logData.description ?? `ฝากเงินเข้ากระเป๋า ${amount.toLocaleString()} บาท`,
-      walletEffect: { target: `sub:${subId}`, delta: +amount },
+      walletEffect: {
+        target: `sub:${subId}`, delta: +amount,
+        legs: [
+          walletLeg(`sub:${subId}`, +amount),
+          walletLeg(fromMethod === 'cash' ? 'cash' : 'transfer', -amount, resolvedAccountId),
+        ],
+      },
       newValue: { fromMethod, transferAccountId: resolvedAccountId },
     }),
   })
@@ -164,7 +191,13 @@ export async function withdrawFromSubWallet(subId, amount, toMethod, logData = {
     log: buildLogEntry({
       activityType: 'SUB_WITHDRAW',
       description: logData.description ?? `ถอนเงินจากกระเป๋า ${amount.toLocaleString()} บาท`,
-      walletEffect: { target: `sub:${subId}`, delta: -amount },
+      walletEffect: {
+        target: `sub:${subId}`, delta: -amount,
+        legs: [
+          walletLeg(`sub:${subId}`, -amount),
+          walletLeg(toMethod === 'cash' ? 'cash' : 'transfer', +amount, resolvedAccountId),
+        ],
+      },
       newValue: { toMethod, transferAccountId: resolvedAccountId },
     }),
   })
@@ -179,7 +212,10 @@ export async function transferBetweenSubWallets(fromId, toId, amount) {
     log: buildLogEntry({
       activityType: 'SUB_TRANSFER',
       description: `โอนเงิน ${amount.toLocaleString()} บาท ระหว่างกระเป๋าตังค์`,
-      walletEffect: { target: `sub:${fromId}`, delta: -amount },
+      walletEffect: {
+        target: `sub:${fromId}`, delta: -amount,
+        legs: [walletLeg(`sub:${fromId}`, -amount), walletLeg(`sub:${toId}`, +amount)],
+      },
       newValue: { toId },
     }),
   })
@@ -201,7 +237,13 @@ export async function borrowFromSubWallet(subId, amount, toMethod, subName, acco
     log: buildLogEntry({
       activityType: 'SUB_BORROW',
       description: `ยืมเงิน ${amount.toLocaleString()} บาท จากกระเป๋า "${subName}" → ${methodLabel(toMethod)}`,
-      walletEffect: { target: `sub:${subId}`, delta: -amount },
+      walletEffect: {
+        target: `sub:${subId}`, delta: -amount,
+        legs: [
+          walletLeg(`sub:${subId}`, -amount),
+          walletLeg(toMethod === 'cash' ? 'cash' : 'transfer', +amount, resolvedAccountId),
+        ],
+      },
       newValue: { transferAccountId: resolvedAccountId },
     }),
   })
@@ -223,7 +265,13 @@ export async function returnLoan(loanId, returnMethod, accountId = null) {
   await writeLog(buildLogEntry({
     activityType: 'SUB_RETURN',
     description: `คืนเงิน ${loan.amount.toLocaleString()} บาท จาก${methodLabel(returnMethod)} → กระเป๋า "${loan.subName}"`,
-    walletEffect: { target: returnMethod, delta: -loan.amount, transferAccountId: resolvedAccountId },
+    walletEffect: {
+      target: returnMethod, delta: -loan.amount, transferAccountId: resolvedAccountId,
+      legs: [
+        walletLeg(returnMethod === 'cash' ? 'cash' : 'transfer', -loan.amount, resolvedAccountId),
+        walletLeg(`sub:${loan.subWalletId}`, +loan.amount),
+      ],
+    },
     newValue: { loanId, transferAccountId: resolvedAccountId },
   }))
   return true

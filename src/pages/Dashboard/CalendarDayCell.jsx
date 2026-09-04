@@ -1,210 +1,111 @@
-import { useState, useRef, useCallback } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 const THAI_MONTHS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
 
+/**
+ * ยอดในช่องวัน — แสดงจำนวนเต็มเสมอ ไม่ย่อเป็น k/M
+ * ตัวเลขย่อทำให้อ่านผิดง่าย (14k คือ 13,640 หรือ 14,400 ก็ได้) ซึ่งเป็นตัวเลขเงิน
+ * จึงต้องเห็นเต็มจำนวน ตัดเศษสตางค์ออกเพื่อให้พอดีความกว้างช่อง
+ */
 function fmtAmt(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1).replace('.0', '') + 'M'
-  return n.toLocaleString('th-TH')
+  return Math.round(Math.abs(Number(n) || 0)).toLocaleString('th-TH')
 }
 
-function TooltipRow({ label, value }) {
+/** สีของป้ายบอกงานที่ครบกำหนดวันนั้น — ชุดเดียวกับชั้นข้อมูลบนหัวปฏิทิน */
+const MARK_STYLE = {
+  recurring: { bg: 'bg-recurring-soft', fg: 'text-[#5A3C90]' },
+  pending: { bg: 'bg-pending-soft', fg: 'text-[#8A6A15]' },
+  card: { bg: 'bg-expense-soft', fg: 'text-[#A93A2E]' },
+  income: { bg: 'bg-income-soft', fg: 'text-[#0F6A50]' },
+  tax: { bg: 'bg-[#FBEFE4]', fg: 'text-[#B4571E]' },
+}
+
+const DOT_COLOR = {
+  pending: '#A8760B',
+  pendingIncome: '#3A55C4',
+  tax: '#B4571E',
+  recurring: '#6D4AA8',
+  cardBill: '#B3335C',
+}
+
+// ── กล่องรายละเอียดตอนเอาเมาส์ค้าง ────────────────────────────────────────────
+
+function TipRow({ label, value, tone = 'text-gray-300' }) {
   return (
     <div className="flex justify-between gap-3">
-      <span className="text-gray-300 truncate">{label}</span>
-      <span className="font-semibold tabular-nums text-white flex-shrink-0">{value.toLocaleString('th-TH')}</span>
-    </div>
-  )
-}
-
-function ReminderRow({ marker, markerClass, label, value, valueSuffix = 'บาท' }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-gray-200 min-w-0 flex items-start gap-1.5">
-        <span className={`leading-4 ${markerClass}`}>{marker}</span>
-        <span className="truncate">{label}</span>
+      <span className={`truncate ${tone}`}>{label}</span>
+      <span className="font-semibold tabular-nums text-white flex-shrink-0">
+        {Number(value).toLocaleString('th-TH')}
       </span>
-      {value != null && (
-        <span className="font-semibold tabular-nums text-gray-100 flex-shrink-0">
-          {value.toLocaleString('th-TH')} {valueSuffix}
-        </span>
-      )}
     </div>
   )
 }
 
-function CalendarTooltip({ dateStr, income, expense, totalIncome, totalExpense, pendingItems, pendingIncomeItems, taxItems, recurringItems, cardBills = [], note, getCategoryName, pos }) {
+function Tooltip({ dateStr, income, expense, pendingItems, pendingIncomeItems, taxItems, recurringItems, cardBills, note, getCategoryName, pos }) {
   const d = new Date(dateStr + 'T00:00:00')
   const dateLabel = `${d.getDate()} ${THAI_MONTHS_SHORT[d.getMonth()]} ${d.getFullYear() + 543}`
-  const pendingIncomeTotal = pendingIncomeItems.reduce((sum, item) => sum + (item.amount || 0), 0)
-  const pendingPaymentTotal = pendingItems.reduce((sum, item) => sum + (item.amount || 0), 0)
-
-  // สรุปยอด: รายจ่ายประจำนับจาก entry ที่ไม่ถูกข้าม, รายจ่ายทั่วไปตัดรายการที่จ่ายจากรายการประจำออก (กันนับซ้ำ)
-  const recurringTotal = recurringItems.reduce((sum, { entry }) => sum + (entry.status === 'skipped' ? 0 : (entry.amount || 0)), 0)
-  const normalExpenseTotal = expense.reduce((sum, t) => sum + (t.recurringEntryId ? 0 : t.amount), 0)
-  const paidTotal = recurringTotal + normalExpenseTotal
-  const hasSummary = recurringTotal > 0 || normalExpenseTotal > 0 || totalIncome > 0
-
-  const incomeGroups = {}
-  income.forEach((t) => {
-    const k = t.method === 'cash' ? 'เงินสด' : t.method === 'transfer' ? 'เงินโอน' : (t.otherIncomeType || 'อื่นๆ')
-    incomeGroups[k] = (incomeGroups[k] || 0) + t.amount
-  })
+  const totalIncome = income.reduce((s, t) => s + Number(t.amount || 0), 0)
+  const recurringTotal = recurringItems.reduce((s, { entry }) => s + (entry.status === 'skipped' ? 0 : Number(entry.amount || 0)), 0)
+  const normalExpense = expense.reduce((s, t) => s + (t.recurringEntryId ? 0 : Number(t.amount || 0)), 0)
 
   const expenseGroups = {}
   expense.forEach((t) => {
     const k = getCategoryName(t.category)
-    expenseGroups[k] = (expenseGroups[k] || 0) + t.amount
+    expenseGroups[k] = (expenseGroups[k] || 0) + Number(t.amount || 0)
   })
 
   const style = {
-    position: 'fixed',
     left: pos.left,
-    top: pos.above ? pos.top : pos.bottom,
-    transform: pos.above ? 'translate(-50%, calc(-100% - 8px))' : 'translate(-50%, 8px)',
-    zIndex: 9999,
-    width: '210px',
-    maxHeight: '400px',
-    overflowY: 'auto',
-    pointerEvents: 'none',
+    top: pos.above ? pos.top - 8 : pos.bottom + 8,
+    transform: pos.above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
   }
 
-  return (
-    <div style={style} className="bg-gray-900 rounded-xl shadow-2xl p-3 text-xs">
-      <p className="text-gray-300 font-semibold mb-2 pb-1.5 border-b border-gray-700">{dateLabel}</p>
+  return createPortal(
+    <div
+      className="fixed z-[60] w-[230px] rounded-xl bg-ink text-white shadow-pop px-3 py-2.5 text-[11px] space-y-1.5 pointer-events-none"
+      style={style}
+    >
+      <p className="font-semibold text-[12px] text-white">{dateLabel}</p>
 
-      {totalIncome > 0 && (
-        <div className="mb-2">
-          <p className="text-emerald-400 font-semibold mb-1">รายรับ {fmtAmt(totalIncome)} บาท</p>
-          <div className="space-y-1 pl-2">
-            {Object.entries(incomeGroups).map(([k, v]) => (
-              <TooltipRow key={k} label={k} value={v} />
-            ))}
-          </div>
+      {totalIncome > 0 && <TipRow label="รายรับ" value={totalIncome} tone="text-[#9FD9C0]" />}
+      {Object.entries(expenseGroups).slice(0, 4).map(([k, v]) => <TipRow key={k} label={k} value={v} />)}
+      {recurringTotal > 0 && <TipRow label="รายจ่ายประจำ" value={recurringTotal} tone="text-[#C7B6E8]" />}
+
+      {(normalExpense > 0 || recurringTotal > 0) && (
+        <div className="flex justify-between gap-3 border-t border-white/15 pt-1.5">
+          <span className="text-gray-300">รวมจ่าย</span>
+          <span className="font-bold tabular-nums text-[#F2A0A0]">
+            {(normalExpense + recurringTotal).toLocaleString('th-TH')}
+          </span>
         </div>
       )}
 
-      {totalExpense > 0 && (
-        <div className="mb-2">
-          <p className="text-red-400 font-semibold mb-1">รายจ่าย {fmtAmt(totalExpense)} บาท</p>
-          <div className="space-y-1 pl-2">
-            {Object.entries(expenseGroups).map(([k, v]) => (
-              <TooltipRow key={k} label={k} value={v} />
-            ))}
-          </div>
-        </div>
+      {pendingItems.length > 0 && (
+        <p className="text-[#E8C877]">ค้างชำระ {pendingItems.length} รายการ · {pendingItems.reduce((s, p) => s + Number(p.amount || 0), 0).toLocaleString('th-TH')}</p>
       )}
-
       {pendingIncomeItems.length > 0 && (
-        <div className="mb-2 pt-1.5 border-t border-gray-700">
-          <p className="text-blue-400 font-semibold mb-1">
-            รอรับเงิน {fmtAmt(pendingIncomeTotal)} บาท
-          </p>
-          <div className="space-y-1.5 pl-2">
-            {pendingIncomeItems.map((p) => (
-              <ReminderRow
-                key={p.id}
-                marker="●"
-                markerClass="text-blue-300"
-                label={p.description || 'บิลรอรับเงิน'}
-                value={p.amount}
-              />
-            ))}
-          </div>
-        </div>
+        <p className="text-[#A9BEF0]">รอรับเงิน {pendingIncomeItems.length} รายการ</p>
       )}
-
-      {(pendingItems.length > 0 || taxItems.length > 0) && (
-        <div className="mb-2 pt-1.5 border-t border-gray-700">
-          <p className="text-orange-400 font-semibold mb-1">
-            รอจ่ายเงิน / แจ้งเตือน{pendingPaymentTotal > 0 ? ` ${fmtAmt(pendingPaymentTotal)} บาท` : ''}
-          </p>
-          <div className="space-y-1.5 pl-2">
-            {pendingItems.map((p) => (
-              <ReminderRow
-                key={p.id}
-                marker="●"
-                markerClass="text-orange-300"
-                label={p.itemName || p.description || 'รอจ่ายเงิน'}
-                value={p.amount}
-              />
-            ))}
-            {taxItems.map((t) => (
-              <ReminderRow
-                key={t.id}
-                marker="◆"
-                markerClass="text-purple-300"
-                label={`${t.itemName || 'ใบกำกับภาษี'}${t.receiptNo ? ` #${t.receiptNo}` : ''}`}
-                value={t.amount}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {recurringItems.length > 0 && (
-        <div className="mb-2 pt-1.5 border-t border-gray-700">
-          <p className="text-purple-400 font-semibold mb-1">🔁 รายการประจำ</p>
-          <div className="space-y-1 pl-2">
-            {recurringItems.map(({ entry, item }) => (
-              <div key={entry.id} className="flex items-center justify-between gap-2">
-                <span className={entry.status === 'paid' ? 'text-emerald-400' : entry.status === 'skipped' ? 'text-gray-500 line-through' : 'text-purple-300'}>
-                  {entry.status === 'paid' ? '✅' : entry.status === 'skipped' ? '⏭' : '⏳'} {item.name}
-                </span>
-                {entry.amount > 0 && (
-                  <span className="text-gray-400 tabular-nums flex-shrink-0">{entry.amount.toLocaleString('th-TH')}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
+      {taxItems.length > 0 && <p className="text-[#E0A886]">รอใบกำกับภาษี {taxItems.length} รายการ</p>}
       {cardBills.length > 0 && (
-        <div className="mb-2 pt-1.5 border-t border-gray-700">
-          <p className="text-rose-400 font-semibold mb-1">💳 บิลบัตรเครดิต</p>
-          <div className="space-y-1 pl-2">
-            {cardBills.map((b) => (
-              <div key={b.key} className="flex items-start justify-between gap-2">
-                <span className={b.paid ? 'text-emerald-400' : b.overdue ? 'text-rose-300' : 'text-gray-200'}>
-                  {b.paid ? '✅' : b.overdue ? '⚠' : b.projected ? '~' : '⏳'} {b.cardName}
-                  {b.projected && <span className="text-gray-500"> (ประมาณการ)</span>}
-                </span>
-                <span className="text-gray-300 tabular-nums flex-shrink-0">{b.amount.toLocaleString('th-TH')}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <p className="text-[#F0A9A0]">
+          บิลบัตร {cardBills.map((b) => b.cardName).join(', ')}
+        </p>
       )}
-
-      {hasSummary && (
-        <div className="mb-2 pt-1.5 border-t border-gray-700">
-          <p className="text-gray-300 font-semibold mb-1">สรุปยอด</p>
-          <div className="space-y-1 pl-2">
-            <TooltipRow label="รายจ่ายประจำ" value={recurringTotal} />
-            <TooltipRow label="รายจ่าย" value={normalExpenseTotal} />
-            <div className="flex justify-between gap-3 pt-1 border-t border-gray-700/60">
-              <span className="text-red-400 font-semibold">รวมจ่าย</span>
-              <span className="font-bold tabular-nums text-red-400 flex-shrink-0">{paidTotal.toLocaleString('th-TH')}</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-emerald-400 font-semibold">รวมรับ</span>
-              <span className="font-bold tabular-nums text-emerald-400 flex-shrink-0">{totalIncome.toLocaleString('th-TH')}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {note && (
-        <div className="pt-1.5 border-t border-gray-700">
-          <p className="text-yellow-400 font-semibold mb-1">📝 โน้ต</p>
-          <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">{note}</p>
-        </div>
-      )}
-    </div>
+      {note && <p className="text-[#EBD98A] border-t border-white/15 pt-1.5">โน้ต: {note}</p>}
+    </div>,
+    document.body
   )
 }
 
+/**
+ * ช่องวันหนึ่งช่องบนปฏิทิน — ตามแบบใหม่
+ *
+ * ลำดับข้อมูลในช่อง: ป้าย (วันนี้/โน้ต) + เลขวัน → ยอดรับ/จ่าย → ป้ายงานที่ครบกำหนด → จุดสี
+ * สีพื้นบอกสถานะ: ขาว = ปกติ, ครีม = มีของค้างจ่าย, เหลืองอ่อน = มีโน้ต, เขียวอ่อน = วันที่เลือก
+ * ขอบเป็นเงาด้านใน (inset ring) แทน border จะได้ไม่ทำให้ช่องขยับตอนเปลี่ยนสถานะ
+ */
 export default function CalendarDayCell({
   date, dateStr, isCurrentMonth, isToday, isHighlighted, isInCustomRange,
   transactions, pendingItems, pendingIncomeItems = [], taxItems, recurringItems = [], cardBills = [], note,
@@ -212,37 +113,60 @@ export default function CalendarDayCell({
   yearlyItems = [], yearlyDueThisMonth = [], onYearlyClick,
 }) {
   const cellRef = useRef(null)
-  const [tooltipPos, setTooltipPos] = useState(null)
   const timerRef = useRef(null)
+  const [tooltipPos, setTooltipPos] = useState(null)
 
   const income = transactions.filter((t) => t.type === 'income')
   const expense = transactions.filter((t) => t.type === 'expense')
-  const totalIncome = income.reduce((s, t) => s + t.amount, 0)
-  const totalExpense = expense.reduce((s, t) => s + t.amount, 0)
+  const totalIncome = income.reduce((s, t) => s + Number(t.amount || 0), 0)
+  const totalExpense = expense.reduce((s, t) => s + Number(t.amount || 0), 0)
 
   const recurringPending = recurringItems.filter(({ entry }) => entry.status === 'pending')
-  const recurringPaid = recurringItems.filter(({ entry }) => entry.status === 'paid')
-
   const cardBillsUnpaid = cardBills.filter((b) => !b.paid)
-  const hasContent = totalIncome > 0 || totalExpense > 0 || pendingItems.length > 0 || pendingIncomeItems.length > 0 || taxItems.length > 0 || recurringItems.length > 0 || cardBills.length > 0 || note
-  const isOverdue = dateStr < todayStr && (pendingItems.length > 0 || recurringPending.length > 0)
-  const hasPendingPayment = pendingItems.length > 0
   const hasNote = !!note
+  const isOverdue = dateStr < todayStr && (pendingItems.length > 0 || recurringPending.length > 0)
 
-  // bg priority: note > overdue > custom-range > highlighted > white
-  let bgClass = 'bg-white'
-  if (isInCustomRange && !hasNote && !isOverdue) bgClass = 'bg-blue-50'
-  if (isHighlighted && !isToday && !hasNote && !isOverdue) bgClass = 'bg-blue-50'
-  if (hasPendingPayment && !hasNote) bgClass = 'bg-orange-50'
-  if (isOverdue && !hasNote) bgClass = 'bg-orange-50'
-  if (hasNote) bgClass = 'bg-yellow-100'
+  const hasContent = totalIncome > 0 || totalExpense > 0 || pendingItems.length > 0
+    || pendingIncomeItems.length > 0 || taxItems.length > 0 || recurringItems.length > 0
+    || cardBills.length > 0 || hasNote
 
-  // border
-  const borderClass = isToday
-    ? 'border-2 border-blue-400'
-    : isHighlighted && !isToday
-    ? 'border-2 border-blue-200'
-    : 'border border-gray-200'
+  // ── ป้ายงานที่ครบกำหนดวันนี้ — เลือกอันที่ "ต้องทำ" ก่อนเสมอ ────────────────
+  let mark = null
+  if (cardBillsUnpaid.length > 0) {
+    mark = { kind: 'card', label: `บิล ${cardBillsUnpaid[0].cardName}` }
+  } else if (pendingItems.length > 0) {
+    mark = { kind: 'pending', label: pendingItems[0].description || pendingItems[0].itemName || 'ค้างชำระ' }
+  } else if (recurringPending.length > 0) {
+    mark = { kind: 'recurring', label: recurringPending[0].item?.name ?? 'รายการประจำ' }
+  } else if (pendingIncomeItems.length > 0) {
+    mark = { kind: 'income', label: pendingIncomeItems[0].description || 'รอรับเงิน' }
+  } else if (taxItems.length > 0) {
+    mark = { kind: 'tax', label: taxItems[0].itemName || 'ใบกำกับภาษี' }
+  }
+  const markStyle = mark ? MARK_STYLE[mark.kind] : null
+
+  // จุดสีบอกว่ายังมีงานชนิดอื่นอีก (ชนิดที่ถูกใช้เป็นป้ายไปแล้วไม่ต้องนับซ้ำ)
+  const dots = []
+  if (pendingItems.length > 0 && mark?.kind !== 'pending') dots.push(DOT_COLOR.pending)
+  if (recurringPending.length > 0 && mark?.kind !== 'recurring') dots.push(DOT_COLOR.recurring)
+  if (cardBillsUnpaid.length > 0 && mark?.kind !== 'card') dots.push(DOT_COLOR.cardBill)
+  if (pendingIncomeItems.length > 0 && mark?.kind !== 'income') dots.push(DOT_COLOR.pendingIncome)
+  if (taxItems.length > 0 && mark?.kind !== 'tax') dots.push(DOT_COLOR.tax)
+  const shownDots = dots.slice(0, 3)
+  const extraDots = dots.length - shownDots.length
+
+  // พื้นหลัง: เลือกอยู่ > โน้ต > มีของค้าง/เกินกำหนด > อยู่ในช่วงที่กรอง > ปกติ
+  let bg = 'bg-white'
+  if (isInCustomRange) bg = 'bg-[#F7F8FC]'
+  if (pendingItems.length > 0 || isOverdue) bg = 'bg-[#FDFAF2]'
+  if (hasNote) bg = 'bg-[#FBF6DC]'
+  if (isHighlighted) bg = 'bg-[#F2FAD9]'
+
+  const ring = isHighlighted
+    ? 'shadow-[0_0_0_2px_#16181D_inset]'
+    : isToday
+      ? 'shadow-[0_0_0_1.5px_#C7F250_inset,0_0_0_1px_#E4E2DC_inset]'
+      : 'shadow-[0_0_0_1px_#EFEDE7_inset]'
 
   const handleMouseEnter = useCallback(() => {
     if (!hasContent) return
@@ -250,9 +174,8 @@ export default function CalendarDayCell({
     timerRef.current = setTimeout(() => {
       if (!cellRef.current) return
       const rect = cellRef.current.getBoundingClientRect()
-      const centeredLeft = rect.left + rect.width / 2
       setTooltipPos({
-        left: Math.min(Math.max(centeredLeft, 110), window.innerWidth - 110),
+        left: Math.min(Math.max(rect.left + rect.width / 2, 120), window.innerWidth - 120),
         top: rect.top,
         bottom: rect.bottom,
         above: rect.top > 260,
@@ -265,117 +188,83 @@ export default function CalendarDayCell({
     setTooltipPos(null)
   }, [])
 
-  const dotCount = pendingItems.length + pendingIncomeItems.length + taxItems.length + recurringPending.length + cardBillsUnpaid.length
-  const visiblePending = pendingItems.slice(0, 3)
-  const visiblePendingIncome = pendingIncomeItems.slice(0, Math.max(0, 3 - pendingItems.length))
-  const visibleTax = taxItems.slice(0, Math.max(0, 3 - pendingItems.length - pendingIncomeItems.length))
-  const visibleRecurring = recurringPending.slice(0, Math.max(0, 3 - pendingItems.length - pendingIncomeItems.length - taxItems.length))
-  const visibleCardBills = cardBillsUnpaid.slice(0, Math.max(0, 3 - pendingItems.length - pendingIncomeItems.length - taxItems.length - recurringPending.length))
-  const extraDots = dotCount > 3 ? dotCount - 3 : 0
+  const showYearlyFlag = yearlyItems.length > 0 && date.getDate() === 1
 
   return (
     <>
       <div
         ref={cellRef}
-        className={`relative p-1.5 rounded-lg cursor-pointer select-none flex flex-col
-          min-h-[80px] transition-all
-          ${bgClass} ${borderClass}
-          ${isCurrentMonth ? '' : 'opacity-40'}
-          hover:brightness-95`}
+        role="button"
+        tabIndex={0}
+        className={`relative px-1 lg:px-[7px] py-1 lg:py-1.5 rounded-[10px] cursor-pointer select-none flex flex-col
+          min-h-[58px] lg:min-h-[76px] overflow-hidden transition-shadow ${bg} ${ring}
+          ${isCurrentMonth ? '' : 'opacity-[0.42]'}
+          hover:shadow-[0_0_0_2px_#D8D4C9_inset]`}
         onClick={() => onClick(dateStr)}
         onContextMenu={(e) => { e.preventDefault(); onContextMenu(dateStr) }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        {/* Header: note icon + day number */}
-        <div className="flex items-center justify-between mb-0.5">
-          {hasNote
-            ? <span className="text-yellow-500 text-xs leading-none">✎</span>
-            : <span className="w-3" />}
-          <span className={`text-xs font-bold leading-none ${isToday ? 'text-blue-600' : 'text-gray-700'}`}>
+        <div className="flex items-center justify-between gap-1">
+          {/* ป้ายคำซ่อนบนมือถือ — ช่องแคบจนคำหัก วงกรอบ lime กับพื้นเหลืองบอกแทนอยู่แล้ว */}
+          {(isToday || hasNote) && (
+            <span className={`hidden sm:inline text-[9.5px] font-bold rounded-[5px] px-1.5 py-px whitespace-nowrap ${
+              hasNote ? 'bg-[#F3E7B5] text-[#7A6412]' : 'bg-lime text-ink'
+            }`}>
+              {hasNote ? 'โน้ต' : 'วันนี้'}
+            </span>
+          )}
+          <span className={`tabular-nums ml-auto text-[12.5px] ${
+            isHighlighted ? 'font-bold text-ink' : isToday ? 'font-bold text-[#5C7A0F]' : 'font-medium text-muted'
+          }`}>
             {date.getDate()}
           </span>
         </div>
 
-        {/* ป้ายรายปี — ติดไว้ที่วันที่ 1 ของทุกเดือน เพื่อให้เห็นทุกเดือนว่ามีรายจ่ายรายปีอยู่
-            ไม่ใช่โผล่ปีละครั้งแล้วหายไปจากสายตาอีก 11 เดือน */}
-        {yearlyItems.length > 0 && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onYearlyClick?.() }}
-            className={`w-full text-[10px] leading-tight rounded px-1 py-0.5 mb-0.5 font-medium truncate transition-colors ${
-              yearlyDueThisMonth.length > 0
-                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                : 'bg-violet-100 text-violet-700 hover:bg-violet-200'
-            }`}
-            title={
-              yearlyDueThisMonth.length > 0
-                ? `เดือนนี้มีรายจ่ายรายปีครบกำหนด ${yearlyDueThisMonth.length} รายการ`
-                : `มีรายจ่ายประจำรายปี ${yearlyItems.length} รายการ กดเพื่อดูทั้งหมด`
-            }
-          >
-            📆 {yearlyDueThisMonth.length > 0 ? `ครบ ${yearlyDueThisMonth.length}` : `รายปี ${yearlyItems.length}`}
-          </button>
-        )}
-
-        {/* Amounts */}
-        <div className="flex-1 space-y-0.5 mt-0.5">
+        <div className="flex-1 mt-[3px] min-h-0">
           {totalIncome > 0 && (
-            <p className="text-[11px] font-semibold text-emerald-600 leading-tight tabular-nums">
-              {fmtAmt(totalIncome)}
-            </p>
+            <p className="tabular-nums text-[10.5px] lg:text-xs font-semibold text-income leading-[1.15]">{fmtAmt(totalIncome)}</p>
           )}
           {totalExpense > 0 && (
-            <p className="text-[11px] font-semibold text-red-500 leading-tight tabular-nums">
-              -{fmtAmt(totalExpense)}
-            </p>
+            <p className="tabular-nums text-[10.5px] lg:text-xs font-semibold text-expense leading-[1.15]">−{fmtAmt(totalExpense)}</p>
           )}
         </div>
 
-        {/* Recurring paid indicator */}
-        {recurringPaid.length > 0 && recurringPending.length === 0 && (
-          <div className="flex gap-0.5 mt-0.5">
-            {recurringPaid.slice(0, 3).map((_, i) => (
-              <span key={'rp' + i} className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-purple-300" />
-            ))}
+        {/* ป้ายรายปี — ติดที่วันที่ 1 ของทุกเดือนเพื่อให้เห็นได้ทุกเดือน ไม่ใช่เฉพาะเดือนที่เรียกเก็บ */}
+        {showYearlyFlag && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onYearlyClick?.() }}
+            className={`mt-auto rounded-md px-1.5 py-px text-[10px] font-semibold truncate text-left ${
+              yearlyDueThisMonth.length > 0 ? 'bg-recurring-soft text-[#5A3C90]' : 'bg-paper text-muted'
+            }`}
+            title="ดูรายจ่ายประจำแบบรายปีทั้งหมด"
+          >
+            รายปี {yearlyItems.length}
+          </button>
+        )}
+
+        {/* ช่องบนมือถือแคบเกินกว่าจะใส่ป้ายชื่อ — เหลือจุดสีบอกว่ามีงาน กดวันแล้วดูในแผงข้างล่าง */}
+        {mark && (
+          <div className={`hidden sm:block mt-auto rounded-md px-1.5 py-px text-[10px] font-semibold truncate ${markStyle.bg} ${markStyle.fg}`}>
+            {mark.label}
           </div>
         )}
 
-        {/* Notification dots */}
-        {dotCount > 0 && (
-          <div className="flex gap-0.5 flex-wrap mt-1 items-center">
-            {visiblePending.map((_, i) => (
-              <span
-                key={'p' + i}
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${isOverdue ? 'bg-orange-600' : 'bg-orange-400'}`}
-              />
+        {shownDots.length > 0 && (
+          <div className="flex gap-[3px] items-center mt-[3px]">
+            {shownDots.map((c, i) => (
+              <span key={i} className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: c }} />
             ))}
-            {visiblePendingIncome.map((_, i) => (
-              <span key={'pi' + i} className="w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
-            ))}
-            {visibleTax.map((_, i) => (
-              <span key={'t' + i} className="w-2 h-2 rounded-full flex-shrink-0 bg-purple-500" />
-            ))}
-            {visibleRecurring.map((_, i) => (
-              <span key={'r' + i} className={`w-2 h-2 rounded-full flex-shrink-0 ${isOverdue ? 'bg-purple-700' : 'bg-purple-400'}`} />
-            ))}
-            {visibleCardBills.map((b, i) => (
-              <span key={'cb' + i} className={`w-2 h-2 rounded-full flex-shrink-0 ${b.overdue ? 'bg-rose-600' : 'bg-rose-400'}`} />
-            ))}
-            {extraDots > 0 && (
-              <span className="text-gray-400 text-[9px] leading-none">+{extraDots}</span>
-            )}
+            {extraDots > 0 && <span className="tabular-nums text-[9.5px] text-faint">+{extraDots}</span>}
           </div>
         )}
       </div>
 
-      {tooltipPos && hasContent && createPortal(
-        <CalendarTooltip
+      {tooltipPos && (
+        <Tooltip
           dateStr={dateStr}
           income={income}
           expense={expense}
-          totalIncome={totalIncome}
-          totalExpense={totalExpense}
           pendingItems={pendingItems}
           pendingIncomeItems={pendingIncomeItems}
           taxItems={taxItems}
@@ -384,8 +273,7 @@ export default function CalendarDayCell({
           note={note}
           getCategoryName={getCategoryName}
           pos={tooltipPos}
-        />,
-        document.body
+        />
       )}
     </>
   )

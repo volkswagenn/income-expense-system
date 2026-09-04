@@ -1,9 +1,11 @@
+import Popup from '../../components/shared/Popup'
 import { useState } from 'react'
 import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useWalletStore from '../../store/useWalletStore'
 import AmountDisplay from '../../components/shared/AmountDisplay'
+import Icon from '../../components/shared/Icon'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import DatePicker from '../../components/shared/DatePicker'
@@ -23,39 +25,53 @@ function WalletModal({ title, onClose, onConfirm, label, buttonLabel, buttonClas
   const missingAccount = needsAccount && !blocked && !accountId
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-4 p-6 space-y-4">
-        <h3 className="font-semibold text-base">{title}</h3>
-        <div>
-          <label className="label">วันที่</label>
-          <DatePicker value={date} onChange={setDate} />
-        </div>
-        {needsAccount && (
-          <TransferAccountPicker value={accountId} onChange={setAccountId} />
-        )}
-        <div>
-          <label className="label">{label}</label>
-          <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus />
-        </div>
-        <div className="flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onClose}>ยกเลิก</button>
-          <button
-            className={`btn ${buttonClass}`}
-            disabled={blocked || missingAccount}
-            onClick={() => { if (Number(amount) > 0) onConfirm(Number(amount), date, accountId) }}
-          >
-            {buttonLabel}
-          </button>
-        </div>
+    <Popup
+      title={title}
+      icon="account_balance_wallet"
+      width={400}
+      onClose={onClose}
+      onConfirm={() => { if (Number(amount) > 0) onConfirm(Number(amount), date, accountId) }}
+      disabled={blocked || missingAccount || !(Number(amount) > 0)}
+      confirmLabel={buttonLabel}
+    >
+      <div>
+        <label className="label">วันที่</label>
+        <DatePicker value={date} onChange={setDate} />
       </div>
-    </div>
+      {needsAccount && (
+        <TransferAccountPicker value={accountId} onChange={setAccountId} />
+      )}
+      <div>
+        <label className="label">{label}</label>
+        <AmountInput className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus />
+      </div>
+      {blocked && (
+        <p className="text-[11.5px] text-[#8A6A15] bg-pending-soft border border-pending-line rounded-ctl px-3 py-2">
+          ยังไม่มีบัญชีเงินโอน — เพิ่มได้ที่ จัดการข้อมูล › บัญชีธนาคาร
+        </p>
+      )}
+    </Popup>
   )
 }
 
+const fmtBaht = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 export default function MainWalletCard() {
   const { cash, transfer } = useWalletStore()
-  const total = cash + transfer
+  const subWallets = useWalletStore((s) => s.subWallets)
+  const accountCount = useWalletStore((s) => s.transferAccounts.length)
   const [modal, setModal] = useState(null)
+
+  // เงินในกระเป๋าย่อยถูกกันไว้ใช้เรื่องอื่นแล้ว จึงนับรวมในยอดรวม แต่ไม่นับใน "เหลือใช้ได้จริง"
+  const subTotal = subWallets.reduce((s, w) => s + (Number(w.balance) || 0), 0)
+  const free = cash + transfer
+  const grandTotal = free + subTotal
+
+  const SEGMENTS = [
+    { icon: 'payments', label: 'เงินสด', value: cash },
+    { icon: 'account_balance', label: `บัญชีธนาคาร · ${accountCount} บัญชี`, value: transfer },
+    { icon: 'savings', label: `กระเป๋าตังค์ย่อย · ${subWallets.length} ใบ`, value: subTotal },
+  ]
   const { warning, check, proceed, cancel } = useNegativeConfirm()
 
   const handleAction = (amount, date, accountId) => {
@@ -92,39 +108,49 @@ export default function MainWalletCard() {
 
   return (
     <>
-      <div className="card p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">👛</span>
-          <h2 className="section-title mb-0">กระเป๋าเงินหลัก</h2>
-        </div>
+      {/* แถบยอดรวมแนวนอน — ตัวเลขรวมอยู่ซ้าย รายละเอียดว่าเงินอยู่ไหนเรียงต่อไปทางขวา
+          แยก "เหลือใช้ได้จริง" ออกจากยอดรวมด้วยเส้นคั่น เพราะเงินในกระเป๋าย่อยถูกกันไว้
+          ใช้เรื่องอื่นแล้ว ถ้ารวมอยู่ก้อนเดียวจะเข้าใจผิดว่าหยิบมาใช้ได้ทั้งหมด */}
+      <div className="relative overflow-hidden rounded-panel bg-ink px-5 py-4 flex items-center gap-[26px] flex-wrap gap-y-3.5">
+        <div className="absolute -right-[30px] -top-[46px] w-[130px] h-[130px] rounded-full bg-lime opacity-[0.13]" />
 
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-5 text-white">
-          <p className="text-blue-200 text-sm">ยอดเงินคงเหลือรวม</p>
-          <p className="text-3xl font-bold tabular-nums mt-1">
-            {total.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
-            <span className="text-lg font-normal ml-1">บาท</span>
+        <div className="relative flex-none">
+          <p className="text-[12px] text-[#9AA0A8]">ยอดเงินคงเหลือรวม</p>
+          <p className="tabular-nums text-[32px] font-semibold text-white tracking-[-0.025em] leading-[1.1] mt-0.5">
+            {fmtBaht(grandTotal)}
           </p>
-          <p className="text-blue-200 text-xs mt-1">เงินสด + เงินโอน (แสดงเท่านั้น)</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className={`rounded-xl border p-4 ${cash < 0 ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
-            <p className="text-xs text-gray-500 mb-1">💵 กระเป๋าเงินสด</p>
-            <AmountDisplay amount={cash} size="lg" />
-            <div className="flex gap-1 mt-3 flex-wrap">
-              <button className="btn btn-success text-xs py-1 px-2" onClick={() => setModal('deposit_cash')}>+ ฝาก</button>
-              <button className="btn btn-secondary text-xs py-1 px-2" onClick={() => setModal('move_to_transfer')}>→ โอน</button>
-            </div>
-          </div>
+        <div className="relative flex-1 min-w-0 flex gap-[22px] flex-wrap gap-y-2.5">
+          {SEGMENTS.map((g) => (
+            <span key={g.label} className="flex-none">
+              <span className="flex items-center gap-1.5">
+                <Icon name={g.icon} size={15} className="text-lime" />
+                <span className="text-[11.5px] text-[#9AA0A8]">{g.label}</span>
+              </span>
+              <span className="tabular-nums block text-base font-semibold text-white mt-0.5">{fmtBaht(g.value)}</span>
+            </span>
+          ))}
+          <span className="flex-none pl-[22px] border-l border-white/[0.14]">
+            <span className="flex items-center gap-1.5">
+              <Icon name="check_circle" size={15} className="text-lime" />
+              <span className="text-[11.5px] text-[#9AA0A8]">เหลือใช้ได้จริงหลังกันเงิน</span>
+            </span>
+            <span className="tabular-nums block text-base font-semibold text-lime mt-0.5">{fmtBaht(free)}</span>
+          </span>
+        </div>
 
-          <div className={`rounded-xl border p-4 ${transfer < 0 ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'}`}>
-            <p className="text-xs text-gray-500 mb-1">🏦 กระเป๋าเงินโอน</p>
-            <AmountDisplay amount={transfer} size="lg" />
-            <div className="flex gap-1 mt-3 flex-wrap">
-              <button className="btn btn-success text-xs py-1 px-2" onClick={() => setModal('deposit_transfer')}>+ รับโอน</button>
-              <button className="btn btn-secondary text-xs py-1 px-2" onClick={() => setModal('move_to_cash')}>← ถอน</button>
-            </div>
-          </div>
+        <div className="relative flex-none flex gap-2 items-center">
+          <button
+            className="h-[34px] px-3.5 rounded-[10px] bg-lime text-ink text-[12.5px] font-semibold flex items-center gap-1.5 hover:bg-lime-dark"
+            onClick={() => setModal('deposit_cash')}
+          >
+            <Icon name="add" size={16} />
+            ฝากเงิน
+          </button>
+          <span className="self-center text-[11px] text-[#9AA0A8] leading-snug max-w-[150px]">
+            ย้ายเงินได้ที่ปุ่ม ⋮ ท้ายแต่ละบัญชี
+          </span>
         </div>
       </div>
 

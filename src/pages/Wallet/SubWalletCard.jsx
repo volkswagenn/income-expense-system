@@ -9,18 +9,15 @@ import DatePicker from '../../components/shared/DatePicker'
 import { depositToSubWallet, withdrawFromSubWallet, transferBetweenSubWallets, borrowFromSubWallet } from '../../lib/walletEngine'
 import useWalletStore from '../../store/useWalletStore'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
+import { IconPickerButton } from '../../components/shared/IconPicker'
+import Popup from '../../components/shared/Popup'
 
+/** เปลือกของป๊อปอัปฝาก/ถอน/โอน/ยืม — ปุ่มยืนยันอยู่ในเนื้อของแต่ละแบบ จึงไม่ใช้ท้ายมาตรฐาน */
 function Modal({ title, children, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-        <div className="px-5 py-4 border-b flex items-center justify-between">
-          <h3 className="font-semibold">{title}</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-        <div className="p-5">{children}</div>
-      </div>
-    </div>
+    <Popup title={title} icon="savings" width={420} onClose={onClose}>
+      {children}
+    </Popup>
   )
 }
 
@@ -28,7 +25,7 @@ function dateLabel(d) {
   try { return format(new Date(d + 'T00:00:00'), 'd MMM yyyy', { locale: th }) } catch { return d }
 }
 
-export default function SubWalletCard({ wallet, onDelete, onRename }) {
+export default function SubWalletCard({ wallet, onDelete, onRename, onSetIcon }) {
   const [modal, setModal] = useState(null)
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -102,8 +99,21 @@ export default function SubWalletCard({ wallet, onDelete, onRename }) {
             </div>
           ) : (
             <div className="flex items-center gap-2 flex-1">
-              <span className="text-lg">👜</span>
-              <button className="font-semibold text-gray-800 hover:text-blue-600 text-left" onClick={() => setEditName(true)}>
+              {/* กดที่ไอคอนเปลี่ยนไอคอน กดที่ชื่อเปลี่ยนชื่อ — สองอย่างนี้แยกปุ่มกัน
+                  ไม่งั้นคนที่อยากเปลี่ยนแค่ไอคอนจะเผลอเข้าโหมดแก้ชื่อทุกครั้ง */}
+              <IconPickerButton
+                bare
+                size={30}
+                value={wallet.icon}
+                tone="#3A55C4"
+                emptyIcon="wallet"
+                onChange={(v) => onSetIcon?.(wallet.id, v)}
+              />
+              <button
+                className="font-semibold text-gray-800 hover:text-blue-600 text-left"
+                title="กดที่ชื่อกระเป๋าในหน้ากระเป๋าเงินก็แก้ในที่เดิมได้เหมือนกัน"
+                onClick={() => setEditName(true)}
+              >
                 {wallet.name}
               </button>
             </div>

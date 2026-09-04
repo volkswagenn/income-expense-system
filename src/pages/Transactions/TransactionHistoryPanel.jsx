@@ -121,7 +121,7 @@ function TxCard({ tx, onEdit }) {
       <ConfirmPopup
         open={confirmDelete}
         title="ยืนยันการยกเลิกรายการ"
-        message={`ยกเลิกรายการ "${tx.itemName}" ${tx.amount.toLocaleString()} บาท\n\nผลที่จะเกิด:\n${cancelEffects.map(e => `• ${e}`).join('\n')}`}
+        message={`ต้องการลบรายการนี้ทิ้งทั้งรายการ พร้อมคืนเงินเข้าบัญชีเดิม\nยกเลิกรายการ "${tx.itemName}" ${tx.amount.toLocaleString()} บาท\nผลที่จะเกิด:\n${cancelEffects.map(e => `• ${e}`).join('\n')}`}
         onConfirm={handleDelete}
         onCancel={() => { setConfirmDelete(false); setDeleteError('') }}
         confirmLabel={deleting ? 'กำลังยกเลิก…' : 'ยืนยันยกเลิก'}
@@ -171,7 +171,12 @@ export default function TransactionHistoryPanel() {
     if (typeFilter !== 'all' && t.type !== typeFilter) return false
     if (catScope && !catScope.has(t.category)) return false
     return true
-  }).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
+    // createdAt ว่างได้ในรายการที่นำเข้าย้อนหลังหรือที่สร้างก่อนมีคอลัมน์นี้
+    // ถ้าเรียกใช้ตรงๆ ทั้งตารางจะพังทั้งหน้า ไม่ใช่แค่แถวนั้นเรียงเพี้ยน
+  }).sort((a, b) =>
+    String(b.date ?? '').localeCompare(String(a.date ?? '')) ||
+    String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+  )
 
   const totalIncome = filtered.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0)
   const totalExpense = filtered.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
@@ -229,22 +234,32 @@ export default function TransactionHistoryPanel() {
         <span className="text-sm text-gray-500 ml-auto">{filtered.length} รายการ</span>
       </div>
 
-      {/* Summary bar */}
+      {/* ตัวเลขสรุปของช่วงที่กรองอยู่ — บรรทัดล่างบอกว่าตัวเลขนั้นหมายถึงอะไร
+          ไม่งั้น "สุทธิ" ของช่วงที่เลือกจะถูกอ่านสลับกับยอดเงินคงเหลือในกระเป๋า */}
       {filtered.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-emerald-50 rounded-xl p-3 text-center">
-            <p className="text-xs text-gray-500">รายรับรวม</p>
-            <p className="text-lg font-bold text-emerald-600">{totalIncome.toLocaleString()}</p>
-          </div>
-          <div className="bg-red-50 rounded-xl p-3 text-center">
-            <p className="text-xs text-gray-500">รายจ่ายรวม</p>
-            <p className="text-lg font-bold text-red-600">{totalExpense.toLocaleString()}</p>
-          </div>
-          <div className={`rounded-xl p-3 text-center ${totalIncome - totalExpense >= 0 ? 'bg-blue-50' : 'bg-orange-50'}`}>
-            <p className="text-xs text-gray-500">กำไร/ขาดทุน</p>
-            <p className={`text-lg font-bold ${totalIncome - totalExpense >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
-              {(totalIncome - totalExpense).toLocaleString()}
+        <div className="grid grid-cols-3 gap-2.5">
+          <div className="rounded-[14px] border border-[#D9EBA0] bg-[#F4FBEE] px-3.5 py-[11px]">
+            <p className="text-[11px] text-[#5C7A0F]">รายรับรวม</p>
+            <p className="tabular-nums text-[22px] font-bold text-[#0F6A50] tracking-[-0.01em] mt-0.5">
+              {totalIncome.toLocaleString('th-TH')}
             </p>
+            <p className="text-[11px] text-faint mt-px">เงินเข้าในช่วงที่เลือก</p>
+          </div>
+          <div className="rounded-[14px] border border-[#F0C4BE] bg-[#FEF6F5] px-3.5 py-[11px]">
+            <p className="text-[11px] text-[#A3564C]">รายจ่ายรวม</p>
+            <p className="tabular-nums text-[22px] font-bold text-[#C0392B] tracking-[-0.01em] mt-0.5">
+              {totalExpense.toLocaleString('th-TH')}
+            </p>
+            <p className="text-[11px] text-faint mt-px">เงินออกในช่วงที่เลือก</p>
+          </div>
+          <div className="rounded-[14px] border border-[#EFEDE7] bg-[#FAF9F6] px-3.5 py-[11px]">
+            <p className="text-[11px] text-muted">{totalIncome - totalExpense >= 0 ? 'เหลือสุทธิ' : 'ขาดสุทธิ'}</p>
+            <p className={`tabular-nums text-[22px] font-bold tracking-[-0.01em] mt-0.5 ${
+              totalIncome - totalExpense >= 0 ? 'text-[#0F6A50]' : 'text-[#C0392B]'
+            }`}>
+              {(totalIncome - totalExpense).toLocaleString('th-TH')}
+            </p>
+            <p className="text-[11px] text-faint mt-px">รายรับหักรายจ่าย</p>
           </div>
         </div>
       )}
@@ -270,6 +285,9 @@ export default function TransactionHistoryPanel() {
       )}
 
       {editing && <EditTransactionPopup transaction={editing} onClose={() => setEditing(null)} />}
+      <p className="text-[11px] text-faint leading-relaxed pt-1">
+        แก้ไขหรือลบรายการย้อนหลังได้จากปุ่มท้ายแถว ทุกการแก้ไขถูกเก็บไว้ที่หน้าประวัติทั้งหมด
+      </p>
     </div>
   )
 }

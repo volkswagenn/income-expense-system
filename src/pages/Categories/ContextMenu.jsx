@@ -24,7 +24,11 @@ export default function ContextMenu({ x, y, items, onClose }) {
   }, [x, y, items])
 
   useEffect(() => {
-    const close = () => onClose()
+    // คลิกในเมนูต้องไม่ปิดเมนู — ตัวฟังนี้อยู่ชั้น capture ที่ window จึงทำงาน "ก่อน"
+    // ถึงตัวปุ่มเสมอ (e.stopPropagation() ของ React ที่กล่องเมนูกันไม่ได้) ถ้าปิดทันที
+    // ตอน mousedown ปุ่มจะหลุด DOM ก่อนถึง mouseup เบราว์เซอร์เลยไม่ยิง click
+    // → กดเมนู "สร้างหมวดหมู่ย่อย / เปลี่ยนชื่อ / ลบ" แล้วไม่มีอะไรเกิดขึ้น
+    const close = (e) => { if (ref.current?.contains(e.target)) return; onClose() }
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
     // capture เพื่อให้ปิดก่อนที่คลิกจะไปโดนอย่างอื่น
     window.addEventListener('mousedown', close, true)

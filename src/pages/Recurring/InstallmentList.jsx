@@ -1,3 +1,4 @@
+import Popup from '../../components/shared/Popup'
 import { useState } from 'react'
 import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
@@ -36,47 +37,37 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
   const [fee, setFee] = useState('')
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between">
-          <h3 className="font-semibold text-base">ปิดยอดคงเหลือ</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
+    <Popup
+      title="ปิดยอดคงเหลือ"
+      icon="credit_card"
+      width={420}
+      onClose={onCancel}
+      onConfirm={undefined}
+      busy={busy}
+      confirmLabel="ปิดยอด"
+    >
+        <p className="text-sm text-gray-600">
+          รวมงวดที่เหลือ <strong>{count} งวด</strong> เป็นรายการเดียว{' '}
+          <strong className="tabular-nums">{fmt(remaining)}</strong> บาท
+          เข้าบิลรอบที่เปิดอยู่ แล้วปิดสัญญา "{installment.name}"
+        </p>
+        <div>
+          <label className="label">วันที่ปิดยอด</label>
+          <DatePicker value={date} onChange={setDate} />
         </div>
-        <div className="p-5 space-y-4">
-          <p className="text-sm text-gray-600">
-            รวมงวดที่เหลือ <strong>{count} งวด</strong> เป็นรายการเดียว{' '}
-            <strong className="tabular-nums">{fmt(remaining)}</strong> บาท
-            เข้าบิลรอบที่เปิดอยู่ แล้วปิดสัญญา "{installment.name}"
-          </p>
-          <div>
-            <label className="label">วันที่ปิดยอด</label>
-            <DatePicker value={date} onChange={setDate} />
-          </div>
-          <div>
-            <label className="label">ค่าธรรมเนียมปิดยอด (ถ้ามี)</label>
-            <AmountInput
-              className="input"
-              value={fee}
-              onChange={(e) => setFee(e.target.value)}
-              placeholder="0.00"
-            />
-          </div>
-          <p className="text-xs text-gray-500">
-            ยอดรวมที่จะเข้าบิล {fmt(remaining + (Number(fee) || 0))} บาท
-          </p>
+        <div>
+          <label className="label">ค่าธรรมเนียมปิดยอด (ถ้ามี)</label>
+          <AmountInput
+            className="input"
+            value={fee}
+            onChange={(e) => setFee(e.target.value)}
+            placeholder="0.00"
+          />
         </div>
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button
-            className="btn btn-primary"
-            onClick={() => onConfirm({ date, fee: Number(fee) || 0 })}
-            disabled={busy}
-          >
-            {busy ? '⏳ กำลังปิด…' : 'ปิดยอด'}
-          </button>
-        </div>
-      </div>
-    </div>
+        <p className="text-xs text-gray-500">
+          ยอดรวมที่จะเข้าบิล {fmt(remaining + (Number(fee) || 0))} บาท
+        </p>
+    </Popup>
   )
 }
 
@@ -234,7 +225,7 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
   )
 }
 
-export default function InstallmentList() {
+export default function InstallmentList({ bare = false }) {
   const installments = useCreditCardStore((s) => s.installments)
   const { settleInstallment, cancelInstallment, payStatement, payEntry, undoEntry } = useCreditCardStore()
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
@@ -391,6 +382,8 @@ export default function InstallmentList() {
 
   return (
     <div className="space-y-4">
+      {/* bare = หน้าที่เรียกมามีหัวข้อและยอดสรุปของตัวเองอยู่แล้ว (หน้าบัตรและหนี้สิน) */}
+      {!bare && (
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
         <h2 className="section-title">💳 ผ่อนชำระผ่านบัตรเครดิต</h2>
@@ -406,6 +399,7 @@ export default function InstallmentList() {
           {unpaidTotal > 0 && <span className="ml-1 tabular-nums">{fmt(unpaidTotal)}</span>}
         </button>
       </div>
+      )}
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
@@ -417,7 +411,7 @@ export default function InstallmentList() {
         </div>
       ) : (
         <>
-          {active.length > 0 && (
+          {active.length > 0 && !bare && (
             <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 flex items-center justify-between">
               <span className="text-sm text-rose-800">
                 กำลังผ่อน {active.length} รายการ

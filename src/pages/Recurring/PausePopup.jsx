@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from '../../components/shared/Popup'
 import NumpadPopup from '../../components/shared/NumpadPopup'
 import { addMonths, THAI_MONTHS_SHORT } from '../../lib/recurringSchedule'
 import { localMonthStr } from '../../lib/dateUtils'
@@ -39,17 +40,16 @@ export default function PausePopup({ item, paidThisMonth, onConfirm, onClose }) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-base text-gray-900">⏸ พักการเรียกเก็บ</h3>
-            <p className="text-sm text-gray-500">{item.name}</p>
-          </div>
-          <button type="button" className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4">
+    <Popup
+      title="พักการเรียกเก็บ"
+      sub={item.name}
+      icon="schedule"
+      width={420}
+      onClose={onClose}
+      onConfirm={confirm}
+      busy={saving}
+      confirmLabel="พักการเรียกเก็บ"
+    >
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">พักกี่เดือน</label>
             <div className="grid grid-cols-4 gap-2">
@@ -96,15 +96,6 @@ export default function PausePopup({ item, paidThisMonth, onConfirm, onClose }) 
             ระหว่างพักรายการยังอยู่ในหน้านี้และบอกว่าเหลืออีกกี่เดือน แต่จะไม่ถูกนับเป็นยอดรอจ่าย
             รอบที่ยังไม่จ่ายในช่วงนี้จะถูกลบ ส่วนที่จ่ายไปแล้วยังอยู่ครบ
           </p>
-        </div>
-
-        <div className="px-5 pb-5 flex gap-3">
-          <button className="btn btn-secondary flex-1" onClick={onClose} disabled={saving}>ยกเลิก</button>
-          <button className="btn btn-primary flex-1" onClick={confirm} disabled={saving}>
-            {saving ? 'กำลังบันทึก…' : 'พักการเรียกเก็บ'}
-          </button>
-        </div>
-      </div>
 
       {showNumpad && (
         <NumpadPopup
@@ -118,6 +109,6 @@ export default function PausePopup({ item, paidThisMonth, onConfirm, onClose }) 
           onClose={() => setShowNumpad(false)}
         />
       )}
-    </div>
+    </Popup>
   )
 }

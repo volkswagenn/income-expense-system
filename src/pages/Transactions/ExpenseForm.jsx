@@ -1,7 +1,7 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import AmountInput from '../../components/shared/AmountInput'
 import { format } from 'date-fns'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import DateNavigator from '../../components/shared/DateNavigator'
 import DatePicker from '../../components/shared/DatePicker'
 import EditableDropdown from '../../components/shared/EditableDropdown'
@@ -11,6 +11,7 @@ import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import PayFromPicker from '../../components/shared/PayFromPicker'
+import Icon from '../../components/shared/Icon'
 import DebtFields, { EMPTY_DEBT, computeDebt, validateDebt } from '../../components/shared/DebtFields'
 import useDebtStore from '../../store/useDebtStore'
 import useWalletStore from '../../store/useWalletStore'
@@ -28,6 +29,16 @@ import { buildLogEntry } from '../../lib/logBuilder'
 import useLogStore from '../../store/useLogStore'
 import { useNegativeConfirm } from '../../hooks/useNegativeConfirm'
 import { useFormDraft, DraftBanner } from '../../hooks/useFormDraft'
+import useFormDefaults from '../../hooks/useFormDefaults'
+import UiIcon from '../../components/shared/UiIcon'
+import AmountNumpadPopup from '../../components/shared/AmountNumpadPopup'
+import RecentItemsPopup from '../../components/shared/RecentItemsPopup'
+
+// ปุ่มบวกยอดด่วน — เลขกลมที่ร้านค้าใช้บ่อย กดต่อกันได้ (100 + 100 = 200)
+// สามค่าตามแบบ ของเดิมมีห้าค่าจนกินที่จนช่องยอดถูกบีบ
+const QUICK_AMOUNTS = [100, 500, 1000]
+// แป้นตัวเลขในตัวของจอมือถือ — เรียงตามแบบ (จุดทศนิยมกับลบอยู่แถวล่าง)
+const PAD_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫']
 
 const EMPTY = {
   itemName: '', category: '', amount: '', method: 'cash', transferAccountId: '', pendingAccountId: '',
@@ -64,14 +75,18 @@ function normalizedTiers(tiers, months) {
   return out
 }
 
-export default function ExpenseForm() {
+export default function ExpenseForm({ onPreviewChange }) {
+  const navigate = useNavigate()
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [form, setForm, clearDraft, hasDraft] = useFormDraft('expense', EMPTY)
+  // ช่องทางจ่ายเริ่มต้นมาจากค่าที่ผู้ใช้ตั้งไว้ในหน้าตั้งค่า (เก็บในเครื่อง)
+  const formDefaults = useFormDefaults()
+  const [form, setForm, clearDraft, hasDraft] = useFormDraft('expense', { ...EMPTY, method: formDefaults.method })
   const [saved, setSaved] = useState(false)
   const [errMsg, setErrMsg] = useState('')
   // ระบบออนไลน์อย่างเดียว การบันทึกต้องรอผลจริงจากเซิร์ฟเวอร์ จึงต้องกันกดซ้ำระหว่างรอ
   const [saving, setSaving] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [numpadOpen, setNumpadOpen] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [attachments, setAttachments] = useState([])
   const { warning, check, proceed, cancel } = useNegativeConfirm()
@@ -79,7 +94,7 @@ export default function ExpenseForm() {
   const { addTransaction } = useTransactionStore()
   const { addPending, addTaxInvoice } = usePendingStore()
   const {
-    addVendor, updateVendor, softDeleteVendor,
+    addVendor, updateVendor, softDeleteVendor, setVendorIcon,
     addQuickItem, updateQuickItem, softDeleteQuickItem,
     getVendors, getQuickItems, getCategoryFilterIds,
   } = useCategoryStore()
@@ -320,7 +335,9 @@ export default function ExpenseForm() {
     }
 
     savedRef.current = { tx: null, pending: null, installment: null }
-    clearDraft()
+    // "บันทึกแล้วเปิดฟอร์มใหม่" ปิดอยู่ = เก็บสิ่งที่เพิ่งกรอกค้างไว้ให้ดู
+    // เปิดอยู่ = ล้างฟอร์มให้กรอกรายการถัดไปต่อได้เลย (ค่าตั้งต้นคือเปิด)
+    if (formDefaults.reopenAfterSave) clearDraft()
     setSaved(true)
     setUploadStatus(null)
     setAttachments([])
@@ -461,8 +478,33 @@ export default function ExpenseForm() {
     return null
   }, [form.category, recurringAllItems, recurringEntries, currentMonth])
 
+  // ส่งสถานะฟอร์มให้แผง "ก่อนกดบันทึก" ข้างขวารู้ว่ากดแล้วยอดไหนจะขยับเท่าไร
+  useEffect(() => {
+    onPreviewChange?.({
+      type: 'expense',
+      method: form.method,
+      amount: Number(form.amount) || 0,
+      accountId: form.transferAccountId,
+      cardId: form.cardId,
+      recurringName: matchingRecurring?.name ?? null,
+    })
+  }, [form.method, form.amount, form.transferAccountId, form.cardId, matchingRecurring, onPreviewChange])
+
   // ทุก taxStatus → upload ใบเสร็จ ยกเว้น 'received' → upload ใบกำกับภาษี
   const isTaxUpload = form.taxStatus === 'received'
+
+  // กางส่วนรายละเอียดให้เองเมื่อมีค่ากรอกไว้แล้ว (เช่นกู้ร่างเดิมกลับมา)
+  const hasMoreValues = !!(form.vendor || form.receiptNo || form.note || attachments.length > 0
+    || (form.taxStatus && form.taxStatus !== 'none'))
+  const [moreOpen, setMoreOpen] = useState(hasMoreValues)
+  const [recentsOpen, setRecentsOpen] = useState(false)
+  const moreSummary = [
+    form.vendor && 'ผู้ขาย',
+    form.receiptNo && 'เลขที่ใบเสร็จ',
+    form.taxStatus && form.taxStatus !== 'none' && 'ใบกำกับภาษี',
+    attachments.length > 0 && `${attachments.length} ไฟล์`,
+    form.note && 'หมายเหตุ',
+  ].filter(Boolean).join(' · ') || 'ไม่ได้กรอก 5 ช่อง — ไม่กรอกก็บันทึกได้'
 
   const handleUploadDone = (savedPath) => {
     setUploadOpen(false)
@@ -484,49 +526,173 @@ export default function ExpenseForm() {
     }
   }
 
+  /**
+   * แป้นตัวเลขบนมือถือ — อยู่ในแถบบันทึกท้ายฟอร์ม ไม่ต้องเปิดป๊อปอัป
+   * เปิดไว้ตั้งแต่แรกเพราะยอดเงินคือช่องแรกที่กรอกเสมอ ปุ่มแป้นในช่องยอดใช้พับเก็บได้
+   */
+  const [padOpen, setPadOpen] = useState(true)
+  const isMobile = () => window.matchMedia('(max-width: 1023px)').matches
+  const pressPad = (k) => {
+    const cur = String(form.amount ?? '')
+    if (k === '⌫') return set('amount', cur.slice(0, -1))
+    if (k === '.') return cur.includes('.') ? undefined : set('amount', (cur || '0') + '.')
+    if (cur.includes('.') && cur.split('.')[1].length >= 2) return
+    set('amount', cur === '0' ? k : cur + k)
+  }
+  const amountLabel = Number(form.amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
   return (
     <>
-      <div className="space-y-4">
+      <div className="p-4 sm:p-5 space-y-4">
         <DraftBanner hasDraft={hasDraft} onClear={clearDraft} />
         <DateNavigator date={date} onChange={setDate} />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <EditableDropdown
-            label="รายการจ่าย"
-            value={form.itemName}
-            onChange={(v) => set('itemName', v)}
-            items={quickList}
-            onAdd={(name) => logQuickItemAdd(name, form.category)}
-            onUpdate={(id, name) => logQuickItemUpdate(id, { name })}
-            onDelete={logQuickItemDelete}
-            placeholder="พิมพ์หรือเลือกรายการ..."
-          />
-
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="label mb-0">หมวดหมู่</label>
-              <Link
-                to="/categories"
-                className="text-xs text-blue-500 hover:text-blue-700 hover:underline"
-              >
-                🗂️ จัดการหมวดหมู่
-              </Link>
+        {/* ยอดเงินอยู่บนสุดและตัวใหญ่ที่สุด — เป็นค่าที่ต้องกรอกเสมอและกรอกก่อนเพื่อนจริง
+            ปุ่มยอดด่วนไว้สำหรับรายจ่ายซ้ำๆ ที่เป็นเลขกลม จะได้ไม่ต้องพิมพ์ทุกครั้ง */}
+        {form.method !== 'debt' && (
+          <div className="flex items-end gap-3.5 flex-wrap">
+            <div className="flex-none w-full sm:w-[262px]">
+              <label className="block text-[12.5px] font-semibold mb-1.5">จำนวนเงิน<span className="hidden lg:inline"> (บาท)</span></label>
+              {/* ขีดสีมะนาวคั่นระหว่างตัวเลขกับหน่วย ทำให้ตาแยกยอดออกจากคำว่า "บาท" ได้ทันที
+                  ปุ่มแป้นตัวเลขอยู่ในช่องเลย เพราะเป็นทางที่คนกรอกยอดหลายใบเสร็จใช้บ่อย
+                  (มือถือปุ่มนี้พับ/กางแป้นในแถบล่าง จอใหญ่เปิดป๊อปอัป) */}
+              <div className="h-[54px] lg:h-[46px] border border-ink shadow-[0_0_0_1px_#16181D] rounded-ctl bg-white flex items-center gap-[7px] pl-3.5 pr-1.5">
+                <AmountInput
+                  className="flex-1 min-w-0 border-none outline-none bg-transparent text-[26px] lg:text-[21px] font-semibold tabular-nums tracking-[-0.01em] p-0 h-auto"
+                  value={form.amount}
+                  onChange={(e) => set('amount', e.target.value)}
+                  placeholder="0"
+                />
+                <span className="w-0.5 h-5 bg-lime block flex-none" />
+                <span className="flex-none text-[12.5px] text-faint">บาท</span>
+                <button
+                  type="button"
+                  onClick={() => (isMobile() ? setPadOpen((v) => !v) : setNumpadOpen(true))}
+                  title="เปิดแป้นตัวเลข"
+                  className={`flex-none w-[38px] h-[38px] lg:w-[34px] lg:h-[34px] rounded-[9px] flex items-center justify-center hover:bg-hairline ${
+                    padOpen ? 'bg-lime lg:bg-paper' : 'bg-paper'
+                  }`}
+                >
+                  <UiIcon name="numpad" size={17} />
+                </button>
+              </div>
             </div>
-            <CategorySelect value={form.category} onChange={(v) => set('category', v)} />
+            <div className="flex gap-1.5 pb-1.5 flex-wrap">
+              {QUICK_AMOUNTS.map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => set('amount', String((Number(form.amount) || 0) + a))}
+                  className="h-[30px] px-2.5 rounded-[9px] bg-paper text-[12px] font-semibold hover:bg-hairline"
+                  title={`บวก ${a.toLocaleString()} บาท`}
+                >
+                  +{a.toLocaleString()}
+                </button>
+              ))}
+              {Number(form.amount) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => set('amount', '')}
+                  className="h-[30px] px-2.5 rounded-[9px] text-[12px] text-muted hover:bg-paper"
+                >
+                  ล้าง
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {matchingRecurring && (
-          <div className="p-2.5 bg-purple-50 rounded-lg border border-purple-200 text-xs text-purple-700">
-            🔁 มีรายการประจำ <strong>"{matchingRecurring.name}"</strong> รอจ่ายในหมวดนี้เดือนนี้ — ตรวจสอบที่แท็บ <strong>รายการประจำ</strong> ก่อนบันทึก
+        {/* รายการที่บันทึกไว้ — กดใบเดียวเติมชื่อ + หมวดหมู่ให้ทันที เหลือแค่ใส่ยอด
+            เป็นทางลัดของรายจ่ายที่ซ้ำเดิมทุกวัน ซึ่งเป็นส่วนใหญ่ของรายการที่บันทึก */}
+        <button
+          type="button"
+          onClick={() => setRecentsOpen(true)}
+          className="w-full h-[46px] px-3.5 border border-hairline rounded-ctl bg-[#FAF9F6] flex items-center gap-2.5 hover:bg-[#F2FAD9] hover:border-ink transition"
+        >
+          <span className="w-7 h-7 flex-none rounded-[9px] bg-ink flex items-center justify-center">
+            <UiIcon name="pin" tone="w" size={15} />
+          </span>
+          <span className="min-w-0 flex-1 text-left">
+            <span className="block text-[12.5px] font-semibold">เลือกจากรายการที่บันทึกไว้</span>
+            <span className="hidden sm:block text-[11px] text-faint truncate">
+              กดใบเดียวเติมชื่อรายการ หมวดหมู่ และช่องทางจ่ายให้ทันที เหลือแค่ใส่ยอดเงิน
+            </span>
+          </span>
+          <span className="tabular-nums flex-none text-[11px] font-bold bg-hairline text-muted rounded-full px-2.5 py-0.5">
+            {quickList.length}
+          </span>
+          {form.itemName && (
+            <span className="hidden md:block flex-none text-[11.5px] text-muted max-w-[150px] truncate">
+              ล่าสุด: {form.itemName}
+            </span>
+          )}
+          <Icon name="expand_more" size={20} className="flex-none text-muted" />
+        </button>
+
+        {/* มือถือ: 3 รายการที่ใช้บ่อยสุดโผล่เป็นชิปให้กดได้เลย ไม่ต้องเปิดกล่องก่อน */}
+        {quickList.length > 0 && (
+          <div className="lg:hidden -mt-1.5">
+            <div className="text-[11px] text-faint mb-1.5">ใช้บ่อย · กดครั้งเดียวเติมให้ครบ</div>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {quickList.slice(0, 3).map((q) => {
+                const on = form.itemName === q.name
+                return (
+                  <button
+                    key={q.id ?? q.name}
+                    type="button"
+                    onClick={() => setMany({ itemName: q.name, ...(q.categoryId ? { category: q.categoryId } : {}) })}
+                    className={`flex-none h-10 px-3 rounded-[11px] border text-[12.5px] font-medium flex items-center gap-1.5 ${
+                      on ? 'bg-[#F2FAD9] border-ink' : 'bg-white border-hairline'
+                    }`}
+                  >
+                    <Icon name="receipt_long" size={16} className="text-expense" />
+                    {q.name}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="label">จำนวนเงิน (บาท)</label>
-            <AmountInput className="input" value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" />
+            <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-1.5">
+              ชื่อรายการ
+              <span className="text-[11px] font-normal text-faint">พิมพ์เองได้ · จะถูกใช้เป็นชื่อในประวัติและรายงาน</span>
+            </label>
+            <EditableDropdown
+              value={form.itemName}
+              onChange={(v) => set('itemName', v)}
+              items={quickList}
+              onAdd={(name) => logQuickItemAdd(name, form.category)}
+              onUpdate={(id, name) => logQuickItemUpdate(id, { name })}
+              onDelete={logQuickItemDelete}
+              placeholder="เช่น ค่าวัตถุดิบ ร้านเจ๊หมวย"
+            />
           </div>
+
+          <div>
+            <div className="flex items-baseline gap-[7px] mb-1.5">
+              <label className="text-[12.5px] font-semibold">หมวดหมู่</label>
+              <span className="text-[11px] text-faint">ใช้จัดกลุ่มในรายงาน</span>
+              <Link to="/manage/categories" className="ml-auto text-xs text-income hover:underline">
+                จัดการหมวดหมู่
+              </Link>
+            </div>
+            <CategorySelect value={form.category} onChange={(v) => set('category', v)} />
+            <p className="text-[11px] text-faint leading-snug mt-[5px]">
+              การ์ด "ใช้บ่อย" ด้านบนเติมหมวดหมู่นี้ให้อัตโนมัติ · กดที่ช่องเพื่อเปลี่ยนเองได้
+            </p>
+          </div>
+        </div>
+
+        {matchingRecurring && (
+          <div className="p-2.5 bg-recurring-soft rounded-ctl border border-[#D6CBF0] text-xs text-[#5A3C90]">
+            มีรายการประจำ <strong>"{matchingRecurring.name}"</strong> รอจ่ายในหมวดนี้เดือนนี้ — ตรวจสอบที่แท็บ <strong>รายการประจำ</strong> ก่อนบันทึก
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-4">
           <div>
             <PayFromPicker
               value={{ method: form.method, transferAccountId: form.transferAccountId, cardId: form.cardId }}
@@ -870,6 +1036,26 @@ export default function ExpenseForm() {
         )}
 
 
+        {/* ช่องที่ไม่ได้กรอกทุกครั้ง พับเก็บไว้ใต้ปุ่มเดียว — ฟอร์มที่ต้องกรอกจริงจึงเหลือ
+            3 ช่อง (ยอด ชื่อรายการ หมวดหมู่) ตามที่ตั้งใจไว้ในแบบ ถ้ามีข้อมูลกรอกไว้แล้ว
+            จะกางออกให้เองเพื่อไม่ให้ค่าที่กรอกไปหายจากสายตา */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setMoreOpen((v) => !v)}
+            className={`w-full flex items-center gap-2.5 h-11 px-3.5 border border-dashed border-[#D8D4C9] bg-[#FAF9F6] hover:bg-paper ${
+              moreOpen ? 'rounded-t-ctl border-b-0' : 'rounded-ctl'
+            }`}
+          >
+            <Icon name="tune" size={18} className="text-muted" />
+            <span className="text-[13px] font-semibold">รายละเอียดเพิ่มเติม</span>
+            <span className="text-[11.5px] text-faint hidden sm:inline">ผู้ขาย · เลขที่ใบเสร็จ · ใบกำกับภาษี · ไฟล์แนบ · หมายเหตุ</span>
+            <span className="ml-auto text-[11.5px] text-faint">{moreOpen ? 'ปิดรายละเอียด' : moreSummary}</span>
+            <Icon name="expand_more" size={20} className={`text-muted transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {moreOpen && (
+            <div className="border border-hairline rounded-b-ctl p-3.5 space-y-4 bg-white">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <EditableDropdown
             label="ผู้ขาย/ร้านค้า"
@@ -879,6 +1065,8 @@ export default function ExpenseForm() {
             onAdd={logVendorAdd}
             onUpdate={logVendorUpdate}
             onDelete={logVendorDelete}
+            onSetIcon={setVendorIcon}
+            emptyIcon="storefront"
             placeholder="พิมพ์หรือเลือกร้านค้า..."
           />
           <div>
@@ -917,21 +1105,77 @@ export default function ExpenseForm() {
         </div>
 
         {form.taxStatus === 'waiting' && (
-          <div className="p-3 bg-orange-50 rounded-xl border border-orange-200 space-y-2">
-            <p className="text-xs text-orange-700 font-medium">📋 รอใบกำกับภาษี — ระบบจะสร้างการ์ดติดตามให้อัตโนมัติ</p>
+          <div className="p-3 bg-[#FBEFE4] rounded-ctl border border-[#EBD3BC] space-y-2">
+            <p className="text-xs text-[#B4571E] font-medium">รอใบกำกับภาษี — ระบบจะสร้างการ์ดติดตามให้อัตโนมัติ</p>
             <div>
               <label className="label">วันที่คาดว่าจะได้รับใบกำกับภาษี</label>
               <DatePicker value={form.taxDueDate} onChange={(v) => set('taxDueDate', v)} placeholder="ไม่ระบุ" />
             </div>
           </div>
         )}
+            </div>
+          )}
+        </div>
 
-        <div className="flex items-center gap-3">
-          <button className="btn btn-danger px-6" onClick={handleSave} disabled={saving}>
-            {saving ? '⏳ กำลังบันทึก…' : '💾 บันทึกรายจ่าย'}
+        {/* แถบบันทึกติดอยู่ท้ายฟอร์มเสมอ — ฟอร์มยาวขึ้นเมื่อกางรายละเอียดหรือเปิดผ่อนชำระ
+            ถ้าปุ่มลอยไปอยู่ท้ายสุดผู้ใช้จะต้องเลื่อนหาทุกครั้ง */}
+        {/* มือถือแถบนี้ต้องลอยเหนือแถบเมนูล่าง (68px) ไม่งั้นปุ่มบันทึกจะโดนบัง */}
+        <div className="sticky z-10 bottom-[68px] lg:bottom-0 -mx-4 sm:-mx-5 -mb-4 sm:-mb-5 px-4 sm:px-5 py-3 bg-white/95 backdrop-blur border-t border-[#F2F0EA] rounded-b-card flex items-center gap-3 flex-wrap">
+          {/* แป้นตัวเลขของจอมือถือ — 12 ปุ่ม สูง 44px ตามแบบ */}
+          {padOpen && form.method !== 'debt' && (
+            <div className="lg:hidden w-full grid grid-cols-3 gap-[7px]">
+              {PAD_KEYS.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => pressPad(k)}
+                  className={`h-11 rounded-ctl text-[18px] font-semibold flex items-center justify-center border border-[#EFEDE7] active:bg-paper ${
+                    k === '⌫' ? 'bg-[#EFEDE7]' : 'bg-white'
+                  }`}
+                >
+                  {k === '⌫' ? <UiIcon name="backspace" size={20} /> : k}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <button
+            className="h-[50px] w-full justify-center rounded-[14px] bg-ink lg:h-[42px] lg:w-auto lg:rounded-ctl lg:bg-expense px-5 text-white text-[15px] lg:text-sm font-semibold flex items-center gap-2 hover:brightness-110 disabled:opacity-50"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            <Icon name="check" size={20} className="lg:hidden" />
+            {saving ? 'กำลังบันทึก…' : (
+              <>
+                <span className="lg:hidden">บันทึกรายจ่าย{Number(form.amount) > 0 ? ` ${amountLabel} บาท` : ''}</span>
+                <span className="hidden lg:inline">บันทึกรายจ่าย</span>
+              </>
+            )}
           </button>
-          {saved && <span className="text-emerald-600 text-sm font-medium">✓ บันทึกสำเร็จ</span>}
-          {errMsg && <span className="text-red-500 text-sm">{errMsg}</span>}
+
+          {/* ปุ่มลัดสองอันที่ mockup วางไว้ข้างปุ่มบันทึก — งานที่มักทำต่อทันทีหลังกรอกยอด
+              (มือถือไม่มีตามแบบ แนบไฟล์ยังทำได้ใน "รายละเอียดเพิ่มเติม") */}
+          <button
+            type="button"
+            onClick={() => setUploadOpen(true)}
+            className="hidden lg:flex h-[38px] px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold items-center gap-1.5 hover:bg-paper"
+          >
+            <Icon name="upload_file" size={17} />
+            แนบใบเสร็จ
+            {attachments.length > 0 && <span className="tabular-nums font-bold text-income">{attachments.length}</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/transactions?tab=recurring')}
+            className="hidden lg:flex h-[38px] px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold items-center gap-1.5 hover:bg-paper"
+            title="ไปหน้ารายการประจำเพื่อตั้งรายการนี้ให้เรียกเก็บทุกเดือน"
+          >
+            <Icon name="history" size={17} />
+            ตั้งเป็นรายการประจำ
+          </button>
+
+          {saved && <span className="text-income text-sm font-medium">✓ บันทึกสำเร็จ</span>}
+          {errMsg && <span className="text-expense text-sm">{errMsg}</span>}
         </div>
       </div>
 
@@ -944,6 +1188,28 @@ export default function ExpenseForm() {
         confirmLabel="ยืนยัน (ติดลบ)"
         danger
       />
+
+      {recentsOpen && (
+        <RecentItemsPopup
+          items={quickList}
+          currentName={form.itemName}
+          onPick={({ name, categoryId }) => {
+            setMany({ itemName: name, ...(categoryId ? { category: categoryId } : {}) })
+            setRecentsOpen(false)
+          }}
+          onSaveCurrent={async (name) => { await logQuickItemAdd(name, form.category); setRecentsOpen(false) }}
+          onClose={() => setRecentsOpen(false)}
+        />
+      )}
+
+      {numpadOpen && (
+        <AmountNumpadPopup
+          initialValue={form.amount}
+          kicker={`รายจ่าย${form.itemName ? ' · ' + form.itemName : ''}`}
+          onSave={(v) => { set('amount', v); setNumpadOpen(false) }}
+          onClose={() => setNumpadOpen(false)}
+        />
+      )}
 
       {uploadOpen && (
         <FileUploadPopup

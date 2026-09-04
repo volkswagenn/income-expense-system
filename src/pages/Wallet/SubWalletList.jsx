@@ -5,12 +5,15 @@ import SubWalletCard from './SubWalletCard'
 import { buildLogEntry } from '../../lib/logBuilder'
 import useLogStore from '../../store/useLogStore'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import AppIcon from '../../components/shared/AppIcon'
+import { IconPickerButton } from '../../components/shared/IconPicker'
 
 export default function SubWalletList() {
-  const { subWallets, createSubWallet, deleteSubWallet, renameSubWallet, reorderSubWallets } = useWalletStore()
+  const { subWallets, createSubWallet, deleteSubWallet, renameSubWallet, reorderSubWallets, setSubWalletIcon } = useWalletStore()
   const { addLog } = useLogStore()
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newIcon, setNewIcon] = useState(null)
   const [initBal, setInitBal] = useState('')
   const [isSorting, setIsSorting] = useState(false)
   const [sortOrder, setSortOrder] = useState([])
@@ -21,15 +24,28 @@ export default function SubWalletList() {
   // และเขียน log ก่อนรู้ผล ทำให้ประวัติบอกว่าสำเร็จทั้งที่เซิร์ฟเวอร์ปฏิเสธ
   const handleCreate = async () => {
     if (!newName.trim()) return
-    const w = await createSubWallet(newName.trim(), Number(initBal) || 0)
+    const w = await createSubWallet(newName.trim(), Number(initBal) || 0, newIcon)
     addLog(buildLogEntry({
       activityType: 'SUB_CREATE',
       description: `สร้างกระเป๋า "${w.name}" ยอดเริ่มต้น ${Number(w.balance).toLocaleString()} บาท`,
       walletEffect: { target: `sub:${w.id}`, delta: Number(w.balance) || 0 },
     }))
     setNewName('')
+    setNewIcon(null)
     setInitBal('')
     setCreating(false)
+  }
+
+  const handleSetIcon = async (id, icon) => {
+    const w = subWallets.find((sw) => sw.id === id)
+    if (!w || (w.icon ?? null) === icon) return
+    await setSubWalletIcon(id, icon)
+    addLog(buildLogEntry({
+      activityType: 'SUB_RENAME',
+      description: icon ? `ตั้งไอคอนกระเป๋า "${w.name}"` : `เอาไอคอนกระเป๋า "${w.name}" ออก`,
+      oldValue: { icon: w.icon ?? null },
+      newValue: { icon, subWalletId: id },
+    }))
   }
 
   const handleDelete = async (id) => {
@@ -109,7 +125,18 @@ export default function SubWalletList() {
           <h4 className="font-medium text-sm text-blue-800">สร้างกระเป๋าตังค์ใหม่</h4>
           <div>
             <label className="label">ชื่อกระเป๋า</label>
-            <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="เช่น กองทุนฉุกเฉิน" autoFocus />
+            {/* ไอคอนอยู่ติดช่องชื่อเลย เพราะเป็นสิ่งที่ตั้งพร้อมกันตอนสร้าง
+                ถ้าแยกไปไว้ที่อื่นคนจะสร้างเสร็จโดยไม่ได้ตั้งไอคอนแล้วไม่กลับมาตั้งอีก */}
+            <div className="flex items-center gap-2">
+              <IconPickerButton
+                value={newIcon}
+                onChange={setNewIcon}
+                tone="#3A55C4"
+                emptyIcon="wallet"
+                title="เลือกไอคอนกระเป๋า"
+              />
+              <input className="input flex-1" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="เช่น กองทุนฉุกเฉิน" autoFocus />
+            </div>
           </div>
           <div>
             <label className="label">ยอดเงินเริ่มต้น (บาท)</label>
@@ -130,6 +157,7 @@ export default function SubWalletList() {
             return (
               <div key={id} className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl">
                 <span className="text-xs text-gray-400 w-5 text-center font-medium">{idx + 1}</span>
+                <AppIcon value={w.icon} size={17} color="#3A55C4" fallback="wallet" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{w.name}</p>
                   <p className="text-xs text-gray-500">{w.balance.toLocaleString()} บาท</p>
@@ -163,6 +191,7 @@ export default function SubWalletList() {
               wallet={w}
               onDelete={handleDelete}
               onRename={handleRename}
+              onSetIcon={handleSetIcon}
             />
           ))}
         </div>

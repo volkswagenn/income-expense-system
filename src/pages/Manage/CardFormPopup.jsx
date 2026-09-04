@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from '../../components/shared/Popup'
 import AmountInput from '../../components/shared/AmountInput'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import BankSelect from '../../components/shared/BankSelect'
@@ -86,14 +87,16 @@ export default function CardFormPopup({ card, onSave, onClose, busy }) {
   })()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
-          <h3 className="font-semibold text-base">💳 {isEdit ? 'แก้ไขบัตร' : 'เพิ่มบัตรเครดิต'}</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4">
+    <Popup
+      title={isEdit ? 'แก้ไขบัตร' : 'เพิ่มบัตรเครดิต'}
+      sub="ธนาคาร วงเงิน วันสรุปยอด และการหักบัญชีอัตโนมัติ"
+      icon="credit_card"
+      width={460}
+      onClose={onClose}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel={isEdit ? 'บันทึก' : 'เพิ่มบัตร'}
+    >
           <div>
             <label className="label">ธนาคาร / ผู้ออกบัตร</label>
             {useCustom ? (
@@ -273,15 +276,6 @@ export default function CardFormPopup({ card, onSave, onClose, busy }) {
           )}
 
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
-        </div>
-
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? '⏳' : isEdit ? 'บันทึก' : 'เพิ่มบัตร'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Popup>
   )
 }

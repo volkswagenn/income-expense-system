@@ -1,3 +1,4 @@
+import Popup from './Popup'
 import { useState } from 'react'
 import AmountInput from './AmountInput'
 import useTransactionStore from '../../store/useTransactionStore'
@@ -195,175 +196,156 @@ export default function EditTransactionPopup({ transaction, onClose }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-          {/* Header */}
-          <div className={`px-5 py-4 border-b flex items-center justify-between flex-shrink-0 ${form.type === 'income' ? 'bg-emerald-50' : 'bg-red-50'}`}>
-            <h3 className="font-semibold text-base">
-              แก้ไขรายการ{form.type === 'income' ? 'รายรับ' : 'รายจ่าย'}
-              <span className="ml-2 text-xs font-normal text-gray-500">(การแก้ไขจะปรับยอดกระเป๋าอัตโนมัติ)</span>
-            </h3>
-            <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
+      <Popup
+        title={`แก้ไขรายการ${form.type === 'income' ? 'รายรับ' : 'รายจ่าย'}`}
+        sub="การแก้ไขจะปรับยอดกระเป๋าอัตโนมัติ"
+        icon="edit_note"
+        headTone={form.type === 'income' ? 'default' : 'danger'}
+        width={520}
+        onClose={onClose}
+        onConfirm={() => setConfirm(true)}
+        busy={busy}
+        confirmLabel="ยืนยันการแก้ไข"
+      >
+        {/* ป้ายบอกว่ารายการนี้มีของที่เชื่อมอยู่ — แก้ยอดหรือวิธีจ่ายแล้วของพวกนี้จะขยับตาม */}
+        {linkedPending && (
+          <div className="flex-none text-[11.5px] bg-pending-soft border border-pending-line text-[#8A6A15] rounded-ctl px-3 py-2">
+            มีบิลค้างชำระที่เชื่อมอยู่ — {linkedPending.amount.toLocaleString('th-TH')} บาท (ยังไม่ชำระ)
+          </div>
+        )}
+        {linkedTax && (
+          <div className="flex-none text-[11.5px] bg-[#FBF1E7] border border-[#F0D6BE] text-[#B4571E] rounded-ctl px-3 py-2">
+            มีใบกำกับภาษีที่รอรับอยู่{linkedTax.dueDate ? ` · คาดว่าได้รับ ${linkedTax.dueDate}` : ''}
+          </div>
+        )}
+        {form.method !== transaction.method && (
+          <div className="flex-none text-[11.5px] bg-transfer-soft text-transfer rounded-ctl px-3 py-2">
+            เปลี่ยนวิธีชำระแล้ว ระบบจะคืนเงินให้ช่องทางเดิมและตัดจากช่องทางใหม่ให้เอง
+          </div>
+        )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">วันที่</label>
+              <DatePicker value={form.date} onChange={(v) => set('date', v)} />
+            </div>
+            <div>
+              <label className="label">จำนวนเงิน (บาท)</label>
+              <AmountInput className="input text-right" value={form.amount} onChange={(e) => set('amount', e.target.value)} />
+            </div>
           </div>
 
-          {/* Linked records banner */}
-          {(linkedPending || linkedTax) && (
-            <div className="px-5 pt-3 flex flex-col gap-1.5 flex-shrink-0">
-              {linkedPending && (
-                <div className="text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-1.5">
-                  ⚠️ มีบิลค้างชำระที่เชื่อมอยู่ — {linkedPending.amount.toLocaleString()} บาท (ยังไม่ชำระ)
-                </div>
-              )}
-              {linkedTax && (
-                <div className="text-xs bg-orange-50 border border-orange-200 text-orange-700 rounded-lg px-3 py-1.5">
-                  📋 มีใบกำกับภาษีที่รอรับอยู่
-                </div>
-              )}
-            </div>
-          )}
+          <div>
+            <label className="label">รายการ</label>
+            <input className="input" value={form.itemName ?? ''} onChange={(e) => set('itemName', e.target.value)} />
+          </div>
 
-          {/* Body */}
-          <div className="p-5 space-y-3 overflow-y-auto flex-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">วันที่</label>
-                <DatePicker value={form.date} onChange={(v) => set('date', v)} />
-              </div>
-              <div>
-                <label className="label">จำนวนเงิน (บาท)</label>
-                <AmountInput className="input text-right" value={form.amount} onChange={(e) => set('amount', e.target.value)} />
-              </div>
-            </div>
-
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">รายการ</label>
-              <input className="input" value={form.itemName ?? ''} onChange={(e) => set('itemName', e.target.value)} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">วิธีชำระ</label>
-                <select className="input" value={form.method ?? 'cash'} onChange={(e) => set('method', e.target.value)}>
-                  {form.type === 'income' ? (
-                    <>
-                      <option value="cash">💵 เงินสด</option>
-                      <option value="transfer">🏦 เงินโอน</option>
-                      {/* รายรับที่เข้าบัตร = เงินคืน หรือเงินคืนสินค้า ทำให้หนี้ลดลง */}
-                      <option value="card">💳 บัตรเครดิต</option>
-                      <option value="other">อื่นๆ</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="cash">💵 เงินสด</option>
-                      <option value="transfer">🏦 เงินโอน</option>
-                      <option value="card">💳 บัตรเครดิต</option>
-                      <option value="pending">⏳ ค้างชำระ</option>
-                    </>
-                  )}
-                </select>
-                {form.method === 'transfer' && (
-                  <div className="mt-2">
-                    <TransferAccountPicker
-                      value={form.transferAccountId}
-                      onChange={(v) => set('transferAccountId', v)}
-                      label={form.type === 'income' ? 'เข้าบัญชี' : 'ตัดจากบัญชี'}
-                    />
-                  </div>
+              <label className="label">วิธีชำระ</label>
+              <select className="input" value={form.method ?? 'cash'} onChange={(e) => set('method', e.target.value)}>
+                {form.type === 'income' ? (
+                  <>
+                    <option value="cash">💵 เงินสด</option>
+                    <option value="transfer">🏦 เงินโอน</option>
+                    {/* รายรับที่เข้าบัตร = เงินคืน หรือเงินคืนสินค้า ทำให้หนี้ลดลง */}
+                    <option value="card">💳 บัตรเครดิต</option>
+                    <option value="other">อื่นๆ</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="cash">💵 เงินสด</option>
+                    <option value="transfer">🏦 เงินโอน</option>
+                    <option value="card">💳 บัตรเครดิต</option>
+                    <option value="pending">⏳ ค้างชำระ</option>
+                  </>
                 )}
-                {form.method === 'card' && (
-                  <div className="mt-2">
-                    <CreditCardPicker
-                      value={form.cardId}
-                      onChange={(v) => set('cardId', v)}
-                      label={form.type === 'income' ? 'เงินคืนเข้าบัตร' : 'รูดบัตร'}
-                    />
-                  </div>
-                )}
-              </div>
-              {(form.type === 'expense' || form.type === 'income') && (
-                <div>
-                  <label className="label">หมวดหมู่</label>
-                  <CategorySelect
-                    type={form.type}
-                    value={form.category}
-                    onChange={(v) => set('category', v)}
-                    placeholder="ไม่ระบุ"
+              </select>
+              {form.method === 'transfer' && (
+                <div className="mt-2">
+                  <TransferAccountPicker
+                    value={form.transferAccountId}
+                    onChange={(v) => set('transferAccountId', v)}
+                    label={form.type === 'income' ? 'เข้าบัญชี' : 'ตัดจากบัญชี'}
                   />
                 </div>
               )}
-              {form.type === 'income' && form.method === 'other' && (
-                <div>
-                  <label className="label">ประเภทรายรับอื่นๆ</label>
-                  <input className="input" value={form.otherIncomeType ?? ''} onChange={(e) => set('otherIncomeType', e.target.value)} />
+              {form.method === 'card' && (
+                <div className="mt-2">
+                  <CreditCardPicker
+                    value={form.cardId}
+                    onChange={(v) => set('cardId', v)}
+                    label={form.type === 'income' ? 'เงินคืนเข้าบัตร' : 'รูดบัตร'}
+                  />
                 </div>
               )}
             </div>
-
-            {form.type === 'expense' && (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">ผู้ขาย/ร้านค้า</label>
-                    <input className="input" value={form.vendor ?? ''} onChange={(e) => set('vendor', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">เลขที่ใบเสร็จ</label>
-                    <input className="input" value={form.receiptNo ?? ''} onChange={(e) => set('receiptNo', e.target.value)} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">ใบกำกับภาษี</label>
-                    <select className="input" value={form.taxStatus ?? 'none'} onChange={(e) => set('taxStatus', e.target.value)}>
-                      <option value="none">ไม่ต้องการ</option>
-                      <option value="received">มีใบกำกับภาษี</option>
-                      <option value="waiting">รอใบกำกับภาษี</option>
-                    </select>
-                  </div>
-                  {form.method === 'pending' && (
-                    <div>
-                      <label className="label">วันครบกำหนดชำระ</label>
-                      <DatePicker value={form.dueDate ?? ''} onChange={(v) => set('dueDate', v)} placeholder="ไม่ระบุ" />
-                    </div>
-                  )}
-                </div>
-                {form.taxStatus === 'waiting' && (
-                  <div>
-                    <label className="label">วันที่คาดว่าจะได้รับใบกำกับภาษี</label>
-                    <DatePicker value={form.taxDueDate ?? ''} onChange={(v) => set('taxDueDate', v)} placeholder="ไม่ระบุ" />
-                  </div>
-                )}
-              </>
-            )}
-
-            <div>
-              <label className="label">หมายเหตุ</label>
-              <input className="input" value={form.note ?? ''} onChange={(e) => set('note', e.target.value)} />
-            </div>
-            {form.type === 'income' && (
+            {(form.type === 'expense' || form.type === 'income') && (
               <div>
-                <label className="label">รายละเอียด</label>
-                <textarea className="input resize-none" rows={2} value={form.detail ?? ''} onChange={(e) => set('detail', e.target.value)} />
+                <label className="label">หมวดหมู่</label>
+                <CategorySelect
+                  type={form.type}
+                  value={form.category}
+                  onChange={(v) => set('category', v)}
+                  placeholder="ไม่ระบุ"
+                />
+              </div>
+            )}
+            {form.type === 'income' && form.method === 'other' && (
+              <div>
+                <label className="label">ประเภทรายรับอื่นๆ</label>
+                <input className="input" value={form.otherIncomeType ?? ''} onChange={(e) => set('otherIncomeType', e.target.value)} />
               </div>
             )}
           </div>
 
-          {/* ผลลัพธ์ที่ล้ม ต้องเห็นในป๊อปอัพ ไม่ใช่ปิดเงียบเหมือนสำเร็จ */}
-          {error && (
-            <p className="mx-5 mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 flex-shrink-0">
-              แก้ไขไม่สำเร็จ — {error}
-            </p>
+          {form.type === 'expense' && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">ผู้ขาย/ร้านค้า</label>
+                  <input className="input" value={form.vendor ?? ''} onChange={(e) => set('vendor', e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">เลขที่ใบเสร็จ</label>
+                  <input className="input" value={form.receiptNo ?? ''} onChange={(e) => set('receiptNo', e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">ใบกำกับภาษี</label>
+                  <select className="input" value={form.taxStatus ?? 'none'} onChange={(e) => set('taxStatus', e.target.value)}>
+                    <option value="none">ไม่ต้องการ</option>
+                    <option value="received">มีใบกำกับภาษี</option>
+                    <option value="waiting">รอใบกำกับภาษี</option>
+                  </select>
+                </div>
+                {form.method === 'pending' && (
+                  <div>
+                    <label className="label">วันครบกำหนดชำระ</label>
+                    <DatePicker value={form.dueDate ?? ''} onChange={(v) => set('dueDate', v)} placeholder="ไม่ระบุ" />
+                  </div>
+                )}
+              </div>
+              {form.taxStatus === 'waiting' && (
+                <div>
+                  <label className="label">วันที่คาดว่าจะได้รับใบกำกับภาษี</label>
+                  <DatePicker value={form.taxDueDate ?? ''} onChange={(v) => set('taxDueDate', v)} placeholder="ไม่ระบุ" />
+                </div>
+              )}
+            </>
           )}
 
-          {/* Footer */}
-          <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end flex-shrink-0">
-            <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
-            <button className="btn btn-primary" onClick={() => setConfirm(true)} disabled={busy}>
-              {busy ? 'กำลังบันทึก…' : 'ยืนยันการแก้ไข'}
-            </button>
+          <div>
+            <label className="label">หมายเหตุ</label>
+            <input className="input" value={form.note ?? ''} onChange={(e) => set('note', e.target.value)} />
           </div>
-        </div>
-      </div>
+          {form.type === 'income' && (
+            <div>
+              <label className="label">รายละเอียด</label>
+              <textarea className="input resize-none" rows={2} value={form.detail ?? ''} onChange={(e) => set('detail', e.target.value)} />
+            </div>
+          )}
+      </Popup>
 
       <ConfirmPopup
         open={confirm}

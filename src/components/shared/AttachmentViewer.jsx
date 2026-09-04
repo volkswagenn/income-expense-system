@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Popup from './Popup'
 import { getAttachmentUrl, isCloudPath } from '../../lib/api/attachments'
 
 function fileNameFromPath(path = '') {
@@ -149,63 +150,62 @@ export default function AttachmentViewerPopup({ attachment, attachments, onClose
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-gray-900">{activeAttachment?.label || 'เอกสารแนบ'}</h3>
-            <p className="text-xs text-gray-500 truncate mt-0.5">
-              {attachmentList.length > 1 ? `${activeIndex + 1}/${attachmentList.length} · ` : ''}{fileName}
-            </p>
-          </div>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-5 overflow-y-auto flex-1 space-y-4">
-          <div className="rounded-xl border border-gray-200 bg-gray-50 min-h-80 flex items-center justify-center overflow-hidden">
-            <AttachmentPreview key={activeAttachment?.path} path={activeAttachment?.path} />
-          </div>
-
-          {attachmentList.length > 1 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-center gap-2">
-                <button className="btn btn-secondary text-sm" onClick={() => go(-1)}>ก่อนหน้า</button>
-                <span className="text-sm text-gray-500">{activeIndex + 1} / {attachmentList.length}</span>
-                <button className="btn btn-secondary text-sm" onClick={() => go(1)}>ถัดไป</button>
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {attachmentList.map((item, index) => (
-                  <button
-                    key={`${item.path}-${index}`}
-                    className={`shrink-0 w-28 rounded-lg border px-2 py-2 text-left ${index === activeIndex ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}
-                    onClick={() => setActiveIndex(index)}
-                  >
-                    <p className="text-xs font-medium text-gray-700 truncate">{item.label || `ไฟล์ ${index + 1}`}</p>
-                    <p className="text-[11px] text-gray-400 truncate mt-0.5">{fileNameFromPath(item.path)}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="bg-gray-50 rounded-xl px-4 py-3">
-            <p className="text-xs text-gray-500 mb-1">ชื่อไฟล์ที่บันทึกไว้</p>
-            <p className="font-mono text-xs text-gray-600 break-all">{activeAttachment.path}</p>
-          </div>
-        </div>
-
-        <div className="px-5 py-4 border-t bg-gray-50 flex flex-wrap gap-2 justify-end">
+    <Popup
+      title={activeAttachment?.label || 'เอกสารแนบ'}
+      sub={`${attachmentList.length > 1 ? `${activeIndex + 1}/${attachmentList.length} · ` : ''}${fileName ?? ''}`}
+      icon="upload_file"
+      width={520}
+      onClose={onClose}
+      footer={
+        <div className="flex-none flex items-center gap-2 justify-end px-[17px] py-3 border-t border-[#EFEDE7] bg-[#FAF9F6]">
+          {/* เปิดในแท็บใหม่มีเฉพาะไฟล์บนคลาวด์ — ไฟล์ในเครื่องไม่มี URL ให้เปิด */}
           {isCloudPath(activeAttachment?.path) && (
             <button
-              className="btn btn-secondary"
               onClick={() => getAttachmentUrl(activeAttachment.path).then((u) => window.open(u, '_blank', 'noopener')).catch(() => {})}
+              className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold hover:bg-paper"
             >
               เปิดในแท็บใหม่
             </button>
           )}
-          <button className="btn btn-primary" onClick={onClose}>ปิด</button>
+          <button
+            onClick={onClose}
+            className="h-[38px] px-[18px] rounded-[11px] bg-ink text-white text-[13px] font-semibold hover:brightness-125"
+          >
+            ปิด
+          </button>
         </div>
-      </div>
-    </div>
+      }
+    >
+        <div className="rounded-xl border border-gray-200 bg-gray-50 min-h-80 flex items-center justify-center overflow-hidden">
+          <AttachmentPreview key={activeAttachment?.path} path={activeAttachment?.path} />
+        </div>
+
+        {attachmentList.length > 1 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-center gap-2">
+              <button className="btn btn-secondary text-sm" onClick={() => go(-1)}>ก่อนหน้า</button>
+              <span className="text-sm text-gray-500">{activeIndex + 1} / {attachmentList.length}</span>
+              <button className="btn btn-secondary text-sm" onClick={() => go(1)}>ถัดไป</button>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {attachmentList.map((item, index) => (
+                <button
+                  key={`${item.path}-${index}`}
+                  className={`shrink-0 w-28 rounded-lg border px-2 py-2 text-left ${index === activeIndex ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}
+                  onClick={() => setActiveIndex(index)}
+                >
+                  <p className="text-xs font-medium text-gray-700 truncate">{item.label || `ไฟล์ ${index + 1}`}</p>
+                  <p className="text-[11px] text-gray-400 truncate mt-0.5">{fileNameFromPath(item.path)}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-gray-50 rounded-xl px-4 py-3">
+          <p className="text-xs text-gray-500 mb-1">ชื่อไฟล์ที่บันทึกไว้</p>
+          <p className="font-mono text-xs text-gray-600 break-all">{activeAttachment.path}</p>
+        </div>
+    </Popup>
   )
 }

@@ -45,9 +45,9 @@ export function scheduleLabel(item, { short = false } = {}) {
 export const VAT_RATE = 7
 
 export const VAT_MODES = [
-  { value: 'none', label: 'ไม่มี VAT', desc: 'ยอดสุทธิ' },
-  { value: 'included', label: 'รวม VAT', desc: 'ยอดที่กรอกรวมแล้ว' },
-  { value: 'add', label: `+VAT ${VAT_RATE}%`, desc: 'บวกเพิ่มให้' },
+  { value: 'none', label: 'ไม่มี VAT', desc: 'ยอดตามที่กรอก' },
+  { value: 'included', label: 'รวม VAT แล้ว', desc: 'แยกฐานภาษีให้' },
+  { value: 'add', label: 'บวก VAT', desc: `เพิ่ม ${VAT_RATE}% จากยอด` },
 ]
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100

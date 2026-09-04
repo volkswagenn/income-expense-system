@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { format, startOfMonth, endOfMonth } from 'date-fns'
-import { useNavigate } from 'react-router-dom'
+import { format } from 'date-fns'
+
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -10,6 +10,7 @@ import useCreditCardStore from '../../store/useCreditCardStore'
 import CalendarDayCell from './CalendarDayCell'
 import CalendarNotePopup from './CalendarNotePopup'
 import YearlyRecurringPopup from './YearlyRecurringPopup'
+import Icon from '../../components/shared/Icon'
 import { isYearly, pauseInfo } from '../../lib/recurringSchedule'
 import { localMonthStr } from '../../lib/dateUtils'
 
@@ -43,19 +44,25 @@ function buildCells(year, month) {
   })
 }
 
-export default function CalendarView({ filter, setFilter, startDate, endDate, setStartDate, setEndDate }) {
+/**
+ * @param selectedDate  วันที่แผงรายละเอียดข้างขวากำลังแสดง (แถบไฮไลต์บนปฏิทิน)
+ * @param onSelectDate  กดวัน = เลือกวันนั้น
+ * @param openDayDate   วันที่ต้องเปิดกล่องรายละเอียด (แผงข้างขวาสั่งเปิดได้ด้วย)
+ * @param onCloseDay    ปิดกล่องรายละเอียด
+ */
+export default function CalendarView({
+  selectedDate, onSelectDate, openDayDate, onOpenDay, onCloseDay,
+}) {
   const today = new Date()
   const todayStr = format(today, 'yyyy-MM-dd')
 
-  const [viewYear, setViewYear] = useState(() =>
-    startDate ? new Date(startDate + 'T00:00:00').getFullYear() : today.getFullYear()
-  )
-  const [viewMonth, setViewMonth] = useState(() =>
-    startDate ? new Date(startDate + 'T00:00:00').getMonth() : today.getMonth()
-  )
+  const [viewYear, setViewYear] = useState(() => today.getFullYear())
+  const [viewMonth, setViewMonth] = useState(() => today.getMonth())
   const [noteDate, setNoteDate] = useState(null)
   const [showYearly, setShowYearly] = useState(false)
   const [show, setShow] = useState(ALL_ON)
+  // มือถือเห็นชิปชั้นข้อมูล 4 อันแรกตามแบบ กดปุ่ม tune เพื่อกางที่เหลือ
+  const [allChips, setAllChips] = useState(false)
 
   const toggleLayer = (key) => setShow((s) => ({ ...s, [key]: !s[key] }))
   const activeCount = LAYERS.filter((l) => show[l.key]).length
@@ -71,15 +78,22 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
   // ปฏิทินที่แคบ ใช้ชื่อสั้น (ชื่อบัตร + เลขท้าย) ไม่งั้นชื่อยาวจนล้นกล่อง
   const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
   const getUpcomingBills = useCreditCardStore((s) => s.getUpcomingBills)
-  const navigate = useNavigate()
 
-  // Sync view when FilterBar changes startDate
+  // กด T ที่ไหนก็ได้เพื่อกลับมาเดือนปัจจุบัน — ป้าย kbd บนปุ่ม "วันนี้" บอกไว้
+  // ข้ามเมื่อโฟกัสอยู่ในช่องกรอก ไม่งั้นพิมพ์ตัว t แล้วปฏิทินเด้งกลับเดือนนี้
   useEffect(() => {
-    if (!startDate) return
-    const d = new Date(startDate + 'T00:00:00')
-    setViewYear(d.getFullYear())
-    setViewMonth(d.getMonth())
-  }, [startDate])
+    const onKey = (e) => {
+      if (e.key !== 't' && e.key !== 'T' && e.key !== 'ะ') return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target
+      if (el?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el?.tagName)) return
+      setViewYear(today.getFullYear())
+      setViewMonth(today.getMonth())
+      onSelectDate?.(todayStr)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [todayStr, onSelectDate])
 
   // Generate recurring entries when calendar month changes (หรือเมื่อรายการประจำเปลี่ยน)
   useEffect(() => {
@@ -88,6 +102,9 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
   }, [viewYear, viewMonth, recurringItems])
 
   const cells = useMemo(() => buildCells(viewYear, viewMonth), [viewYear, viewMonth])
+
+  // กล่องรายละเอียดของวัน เปิดได้จาก 2 ทาง: กดขวาบนช่องวัน หรือแผงข้างขวาสั่งเปิด
+  const dayPopupDate = noteDate ?? openDayDate ?? null
 
   const txByDate = useMemo(() => {
     const map = {}
@@ -213,104 +230,105 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
     if (m > 11) { m = 0; y++ }
     setViewMonth(m)
     setViewYear(y)
-    // sync FilterBar (ยกเว้น custom ซึ่งยืด range ข้ามเดือน)
-    if (filter !== 'custom') {
-      const d = new Date(y, m, 1)
-      setFilter('month')
-      setStartDate(format(startOfMonth(d), 'yyyy-MM-dd'))
-      setEndDate(format(endOfMonth(d), 'yyyy-MM-dd'))
-    }
   }
 
   const goToToday = () => {
     setViewYear(today.getFullYear())
     setViewMonth(today.getMonth())
-    setFilter('month')
-    setStartDate(format(startOfMonth(today), 'yyyy-MM-dd'))
-    setEndDate(format(endOfMonth(today), 'yyyy-MM-dd'))
+    onSelectDate?.(todayStr)
   }
 
-  const isHighlighted = (dateStr) => {
-    if (filter === 'today' || filter === 'yesterday') return dateStr === startDate
-    if (filter === 'custom' && startDate === endDate) return dateStr === startDate
-    return false
-  }
-
-  const isInCustomRange = (dateStr) =>
-    filter === 'custom' && startDate !== endDate && dateStr >= startDate && dateStr <= endDate
+  // วันที่ผู้ใช้กดเลือก คือวันที่แผงข้างขวากำลังแสดงอยู่ — ต้องเห็นชัดว่าเป็นอันไหน
+  //
+  // เดิมยังไฮไลต์ตามช่วงวันที่ของแถบกรองด้านบนได้ด้วย แต่แถบกรองนั้นถูกถอดออกจาก
+  // หน้าภาพรวมแล้ว (ย้ายไปหน้ารายงานซึ่งเป็นที่ของการเลือกช่วงเวลา) เหลือทางเดียวคือกดวัน
+  const isHighlighted = (dateStr) => selectedDate === dateStr
+  const isInCustomRange = () => false
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <div className="flex items-center gap-1">
+    <div className="card flex flex-col overflow-hidden">
+      {/* หัวปฏิทิน — เลื่อนเดือน / วันนี้ / จำนวนชั้นข้อมูลที่เปิดอยู่ */}
+      <div className="flex items-center gap-2.5 px-4 pt-3 pb-2.5 flex-wrap">
+        <div className="flex items-center gap-0.5">
           <button
-            className="btn btn-secondary w-8 h-8 p-0 flex items-center justify-center text-base"
+            className="w-[30px] h-[30px] rounded-[9px] flex items-center justify-center text-muted hover:bg-paper hover:text-ink"
             onClick={() => navigateMonth(-1)}
+            title="เดือนก่อนหน้า"
           >
-            ‹
+            <Icon name="chevron_left" size={19} />
           </button>
-          <h2 className="text-sm font-semibold text-gray-800 min-w-[140px] text-center">
+          <h2 className="text-[15px] font-semibold min-w-[132px] text-center">
             {THAI_MONTHS_FULL[viewMonth]} {viewYear + 543}
           </h2>
           <button
-            className="btn btn-secondary w-8 h-8 p-0 flex items-center justify-center text-base"
+            className="w-[30px] h-[30px] rounded-[9px] flex items-center justify-center text-muted hover:bg-paper hover:text-ink"
             onClick={() => navigateMonth(1)}
+            title="เดือนถัดไป"
           >
-            ›
+            <Icon name="chevron_right" size={19} />
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          {yearlyItems.length > 0 && (
-            <button
-              className="btn btn-secondary text-sm gap-1"
-              onClick={() => setShowYearly(true)}
-              title="ดูรายจ่ายประจำแบบรายปีทั้งหมด"
-            >
-              📆 รายปี
-              <span className="ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-violet-100 text-violet-700 text-[11px] font-bold inline-flex items-center justify-center">
-                {yearlyItems.length}
-              </span>
-            </button>
-          )}
-          <button className="btn btn-secondary text-sm" onClick={goToToday}>วันนี้</button>
-        </div>
-      </div>
 
-      {/* ตัวกรองสิ่งที่แสดงบนปฏิทิน */}
-      <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5 border-b border-gray-100 bg-gray-50/60">
-        <span className="text-xs text-gray-400 mr-0.5">แสดง:</span>
-        {LAYERS.map((l) => (
-          <button
-            key={l.key}
-            onClick={() => toggleLayer(l.key)}
-            className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border transition-colors ${
-              show[l.key]
-                ? 'bg-white border-gray-300 text-gray-700 shadow-sm'
-                : 'bg-transparent border-gray-200 text-gray-300 line-through'
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${show[l.key] ? l.dot : 'bg-gray-300'}`} />
-            {l.label}
-          </button>
-        ))}
+        {/* ป้าย T บอกปุ่มลัด กด T ที่ไหนก็ได้เพื่อกลับมาเดือนปัจจุบัน */}
         <button
-          className="text-xs text-blue-500 hover:text-blue-700 ml-auto"
+          className="h-[34px] lg:h-[30px] px-3 rounded-[9px] bg-paper text-[12.5px] font-semibold flex items-center gap-[5px] hover:bg-hairline"
+          onClick={goToToday}
+        >
+          วันนี้
+          <kbd className="hidden lg:inline text-[10.5px] font-semibold rounded-[5px] px-1.5 py-0.5 bg-white text-faint">T</kbd>
+        </button>
+
+        {/* มือถือ: ปุ่ม tune กางชิปชั้นข้อมูลที่เหลือ (แบบมีชิปแค่ 4 อันแรกให้เห็น) */}
+        <button
+          className={`lg:hidden ml-auto w-[34px] h-[34px] rounded-[9px] border flex items-center justify-center ${
+            allChips ? 'bg-ink border-ink text-lime' : 'border-hairline text-muted'
+          }`}
+          onClick={() => setAllChips((v) => !v)}
+          title="ชั้นข้อมูลทั้งหมด"
+        >
+          <Icon name="tune" size={18} />
+        </button>
+
+        <span className="hidden lg:flex ml-auto h-[30px] px-2.5 rounded-[9px] border border-hairline text-[12.5px] text-muted items-center gap-1.5">
+          <Icon name="tune" size={16} />
+          ชั้นข้อมูล {activeCount}/{LAYERS.length}
+        </span>
+        <button
+          className="hidden lg:flex h-[30px] px-2.5 rounded-[9px] border border-hairline text-[12.5px] font-semibold text-income hover:bg-income-soft hover:border-ink"
           onClick={() => setShow(activeCount === LAYERS.length ? {} : ALL_ON)}
         >
           {activeCount === LAYERS.length ? 'ซ่อนทั้งหมด' : 'แสดงทั้งหมด'}
         </button>
       </div>
 
-      {/* Day-of-week headers */}
-      <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
-        {DAY_HEADERS.map((d) => (
-          <div key={d} className="text-center text-xs font-medium text-gray-500 py-2">{d}</div>
+      {/* ชั้นข้อมูลที่เลือกแสดงบนปฏิทิน */}
+      {/* มือถือชิปอยู่แถวเดียวเลื่อนซ้าย-ขวา (แบบวาง 4 อันในแถวเดียว) จอใหญ่ห่อบรรทัดได้ */}
+      <div className="flex flex-nowrap overflow-x-auto [scrollbar-width:none] lg:flex-wrap lg:overflow-visible items-center gap-1.5 px-4 pb-2">
+        {LAYERS.map((l, i) => (
+          <button
+            key={l.key}
+            onClick={() => toggleLayer(l.key)}
+            className={`${i >= 4 && !allChips ? 'hidden lg:flex' : 'flex'} flex-none items-center gap-1.5 whitespace-nowrap text-[11.5px] h-[28px] lg:h-6 px-2.5 rounded-full border transition-colors ${
+              show[l.key]
+                ? 'bg-white border-hairline text-ink'
+                : 'bg-transparent border-hairline text-[#C9C5BA] line-through'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${show[l.key] ? l.dot : 'bg-[#D6D3CA]'}`} />
+            {l.label}
+          </button>
         ))}
       </div>
 
-      {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-0.5 p-1">
+      {/* หัวคอลัมน์วัน */}
+      <div className="grid grid-cols-7 border-t border-[#EFEDE7] bg-[#FAF9F6]">
+        {DAY_HEADERS.map((d) => (
+          <div key={d} className="text-center text-[11.5px] font-semibold text-faint py-[7px]">{d}</div>
+        ))}
+      </div>
+
+      {/* ตารางวัน */}
+      <div className="grid grid-cols-7 gap-1 p-1.5">
         {cells.map((date) => {
           const dateStr = format(date, 'yyyy-MM-dd')
           // ซ่อนตามตัวกรองด้านบน — ส่งเฉพาะชั้นข้อมูลที่เปิดอยู่
@@ -334,7 +352,9 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
               cardBills={show.cardBill ? (cardBillsByDate[dateStr] || []) : []}
               note={show.note ? (notes[dateStr] || '') : ''}
               onContextMenu={setNoteDate}
-              onClick={() => navigate('/transactions')}
+              // กดวัน = เลือกวันนั้นให้แผงข้างขวาแสดงรายละเอียด (ของเดิมเด้งไปหน้าบันทึกรายการทันที
+              // ซึ่งทำให้ดูยอดของวันที่ผ่านมาไม่ได้เลย) — กดซ้ำหรือกดขวาเพื่อเปิดกล่องรายละเอียด
+              onClick={() => (selectedDate === dateStr ? onOpenDay?.(dateStr) : onSelectDate?.(dateStr))}
               getCategoryName={getCategoryName}
               todayStr={todayStr}
               yearlyItems={date.getDate() === 1 && date.getMonth() === viewMonth ? yearlyItems : []}
@@ -345,8 +365,18 @@ export default function CalendarView({ filter, setFilter, startDate, endDate, se
         })}
       </div>
 
-      {noteDate && (
-        <CalendarNotePopup date={noteDate} onClose={() => setNoteDate(null)} />
+      {dayPopupDate && (
+        // ส่งข้อมูลของวันนั้นแบบไม่กรองตามชั้นที่เปิด/ปิดอยู่ — กล่องนี้คือ "รายละเอียดทั้งวัน"
+        // ถ้ากรองตามปุ่มด้านบนด้วย ผู้ใช้จะเปิดมาเห็นยอดขาดหายโดยไม่รู้ว่าเพราะปิดชั้นไว้
+        <CalendarNotePopup
+          date={dayPopupDate}
+          transactions={txByDate[dayPopupDate] || []}
+          recurringItems={recurringByDate[dayPopupDate] || []}
+          pendingItems={pendingByDate[dayPopupDate] || []}
+          pendingIncomeItems={pendingIncomeByDate[dayPopupDate] || []}
+          getCategoryName={getCategoryName}
+          onClose={() => { setNoteDate(null); onCloseDay?.() }}
+        />
       )}
       {showYearly && (
         <YearlyRecurringPopup

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Popup from './Popup'
 import AmountInput from './AmountInput'
 import { format } from 'date-fns'
 import DatePicker from './DatePicker'
@@ -36,14 +37,15 @@ export default function CardCashbackPopup({ cardLabel, estimate = 0, onConfirm, 
   const active = KINDS.find((k) => k.value === kind)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between">
-          <h3 className="font-semibold text-base">💰 บันทึกเงินคืนเข้าบัตร</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
-        </div>
-
-        <div className="p-5 space-y-4">
+    <Popup
+      title="บันทึกเงินคืนเข้าบัตร"
+      icon="savings"
+      width={420}
+      onClose={onCancel}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel="บันทึก"
+    >
           <p className="text-xs text-gray-500">{cardLabel}</p>
 
           <div>
@@ -105,15 +107,6 @@ export default function CardCashbackPopup({ cardLabel, estimate = 0, onConfirm, 
             บันทึกเป็นรายรับที่ปลายทางเป็นบัตร หนี้จะลดลงทันที
             และยอดนี้จะไปปรากฏในรายงานรายรับหมวด "เครดิตเงินคืนบัตร"
           </p>
-        </div>
-
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? '⏳ กำลังบันทึก…' : 'บันทึก'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Popup>
   )
 }

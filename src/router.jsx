@@ -4,6 +4,7 @@ import App from './App'
 import Dashboard from './pages/Dashboard'
 import TransactionsPage from './pages/Transactions'
 import WalletPage from './pages/Wallet'
+import CardsPage from './pages/Cards'
 import PendingTasksPage from './pages/PendingTasks'
 
 /**
@@ -45,6 +46,8 @@ export const router = createHashRouter([
       { index: true, element: <Dashboard /> },
       { path: 'dashboard', element: <Dashboard /> },
       { path: 'wallet', element: <WalletPage /> },
+      // บัตรเครดิต งวดผ่อน และสัญญาหนี้ ย้ายออกจากท้ายหน้ากระเป๋าเงินมาเป็นหน้าของตัวเอง
+      { path: 'cards', element: <CardsPage /> },
       { path: 'pending-tasks', element: <PendingTasksPage /> },
       { path: 'wallet/pending', element: <Navigate to="/pending-tasks" replace /> },
       { path: 'transactions', element: <TransactionsPage /> },

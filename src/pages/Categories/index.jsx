@@ -5,9 +5,12 @@ import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import SectionCard from '../../components/shared/SectionCard'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
+import AppIcon from '../../components/shared/AppIcon'
+import { IconPickerButton } from '../../components/shared/IconPicker'
 import ContextMenu from './ContextMenu'
 import SortableList from './SortableList'
 import { CATEGORY_THEME, CATEGORY_TYPE_LIST } from './categoryTheme'
+import { useRegisterManageAdd } from '../Manage/manageHeader'
 
 // ── แถวสำหรับพิมพ์ชื่อใหม่ / เปลี่ยนชื่อ ────────────────────────────────────────
 function InlineInput({ defaultValue = '', placeholder, onSubmit, onCancel, depth = 0, theme }) {
@@ -43,7 +46,7 @@ function InlineInput({ defaultValue = '', placeholder, onSubmit, onCancel, depth
 }
 
 // ── แถวหมวดหมู่หนึ่งบรรทัด ──────────────────────────────────────────────────────
-function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, theme }) {
+function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, onSetIcon, theme }) {
   const isMain = depth === 0
   return (
     <div
@@ -54,7 +57,23 @@ function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, th
       onClick={() => onSelect(node.id)}
       onContextMenu={(e) => onContextMenu(e, node, depth)}
     >
-      <span className="select-none">{isMain ? '📁' : '📄'}</span>
+      {/* กดที่ไอคอนเพื่อเปลี่ยนไอคอนได้เลย ไม่ต้องเข้าเมนูคลิกขวา
+          หยุดไม่ให้คลิกทะลุไปโดนแถว ไม่งั้นการเปิดตัวเลือกจะไปเลือกแถวนั้นด้วย
+          และป๊อปอัปที่เปิดอยู่ในนี้จะส่งคลิกทุกครั้งกลับมาที่แถวเช่นกัน */}
+      <span
+        className="flex-none"
+        onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
+      >
+        <IconPickerButton
+          bare
+          size={26}
+          value={node.icon}
+          tone={theme.iconTone}
+          emptyIcon={isMain ? 'folder' : 'description'}
+          onChange={(v) => onSetIcon(node.id, v)}
+        />
+      </span>
       <span className={`flex-1 text-sm truncate ${isMain ? `font-medium ${theme.mainText}` : theme.subText}`}>
         {node.name}
       </span>
@@ -71,7 +90,7 @@ function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, th
 // ── หน้าเพจ ────────────────────────────────────────────────────────────────────
 export default function CategoriesPage({ embedded = false }) {
   const categories = useCategoryStore((s) => s.categories)
-  const { addCategory, updateCategory, softDeleteCategory, reorderCategories } = useCategoryStore()
+  const { addCategory, updateCategory, softDeleteCategory, reorderCategories, setCategoryIcon } = useCategoryStore()
   const transactions = useTransactionStore((s) => s.transactions)
   const { addLog } = useLogStore()
 
@@ -82,6 +101,9 @@ export default function CategoriesPage({ embedded = false }) {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
   const [sorting, setSorting] = useState(false)   // โหมดลากจัดลำดับ
+
+  // ปุ่ม "เพิ่มหมวดหมู่" บนหัวการ์ดของหน้าจัดการข้อมูล = เปิดช่องพิมพ์ชื่อหมวดหมู่หลัก
+  useRegisterManageAdd(() => { setCreatingUnder(null); setRenamingId(null); setSorting(false) })
 
   const theme = CATEGORY_THEME[catType]
   const tree = useMemo(() => buildCategoryTree(categories, catType), [categories, catType])
@@ -152,6 +174,20 @@ export default function CategoriesPage({ embedded = false }) {
     setRenamingId(null)
   }
 
+  const handleSetIcon = async (id, icon) => {
+    const old = categories.find((c) => c.id === id)
+    if ((old?.icon ?? null) === icon) return
+    await setCategoryIcon(id, icon)
+    addLog(buildLogEntry({
+      activityType: 'CATEGORY_UPDATE',
+      description: icon
+        ? `ตั้งไอคอนหมวดหมู่${theme.label} "${old?.name ?? id}"`
+        : `เอาไอคอนหมวดหมู่${theme.label} "${old?.name ?? id}" ออก`,
+      oldValue: { icon: old?.icon ?? null },
+      newValue: { icon },
+    }))
+  }
+
   const handleDelete = async () => {
     const node = deleteTarget
     const subCount = node.children?.length ?? 0
@@ -211,42 +247,39 @@ export default function CategoriesPage({ embedded = false }) {
   })()
 
   return (
-    <div className="space-y-5" onContextMenu={(e) => e.preventDefault()}>
-      {embedded ? (
-        <div>
-          <h2 className="font-semibold text-gray-900">🏷️ หมวดหมู่</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            หมวดหมู่รายรับและรายจ่ายแยกกันคนละชุด — คลิกขวาเพื่อสร้าง แก้ไข หรือลบ
-          </p>
+    <div className="space-y-3.5" onContextMenu={(e) => e.preventDefault()}>
+      {/* หัวข้อ + คำใบ้วิธีใช้ + แท็บประเภท อยู่แถวเดียวกันตามแบบ
+          (ของเดิมกินสามแถว ทั้งที่หน้านี้ควรให้ที่กับรายการหมวดหมู่เป็นหลัก) */}
+      <div className="flex items-center gap-2.5 flex-wrap">
+        {/* ฝังในหน้าจัดการข้อมูล หัวข้อกับคำอธิบายอยู่บนหัวการ์ดแล้ว เหลือแค่แท็บประเภท */}
+        {!embedded && (
+          <>
+            <span className="text-[14.5px] font-semibold">
+              หมวดหมู่{CATEGORY_TYPE_LIST.find((t) => t.key === catType)?.label ?? ''}
+            </span>
+            <span className="hidden md:block text-xs text-faint">
+              ลากเพื่อจัดลำดับ · คลิกขวาเพื่อสร้าง แก้ไข หรือลบ
+            </span>
+          </>
+        )}
+        <div className="ml-auto inline-flex bg-paper rounded-[11px] p-[3px]">
+          {CATEGORY_TYPE_LIST.map((t) => {
+            const count = categories.filter((c) => !c.deleted && c.type === t.key).length
+            const on = catType === t.key
+            return (
+              <button
+                key={t.key}
+                className={`h-8 px-3.5 rounded-[9px] text-[12.5px] flex items-center gap-1.5 transition ${
+                  on ? 'bg-white shadow-[0_1px_2px_rgba(22,24,29,.08)] text-ink font-semibold' : 'text-muted hover:text-ink'
+                }`}
+                onClick={() => switchType(t.key)}
+              >
+                {t.label}
+                <span className={`tabular-nums text-[11px] ${on ? 'text-faint' : 'text-faint'}`}>{count}</span>
+              </button>
+            )
+          })}
         </div>
-      ) : (
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">จัดการหมวดหมู่</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            หมวดหมู่รายรับและรายจ่ายแยกกันคนละชุด — คลิกขวาเพื่อสร้าง แก้ไข หรือลบ
-          </p>
-        </div>
-      )}
-
-      {/* แท็บเลือกประเภท */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {CATEGORY_TYPE_LIST.map((t) => {
-          const count = categories.filter((c) => !c.deleted && c.type === t.key).length
-          return (
-            <button
-              key={t.key}
-              className={`btn text-sm px-4 py-2 rounded-lg transition-all ${
-                catType === t.key ? t.tabActive : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => switchType(t.key)}
-            >
-              {t.icon} หมวดหมู่{t.label}
-              <span className={`ml-1.5 text-xs ${catType === t.key ? 'opacity-80' : 'text-gray-400'}`}>
-                ({count})
-              </span>
-            </button>
-          )
-        })}
       </div>
 
       <div className={`flex items-start gap-2.5 p-3 border rounded-xl text-xs ${theme.hintBox}`}>
@@ -281,7 +314,8 @@ export default function CategoriesPage({ embedded = false }) {
                 {sorting ? '✓ เสร็จแล้ว' : '⇅ จัดลำดับ'}
               </button>
             )}
-            {!sorting && (
+            {/* ฝังในหน้าจัดการข้อมูล ปุ่มเพิ่มอยู่บนหัวการ์ดแล้ว ไม่ต้องมีปุ่มซ้ำในแถวราก */}
+            {!sorting && !embedded && (
               <button
                 className={`btn text-xs py-1 px-2.5 ${theme.button}`}
                 onClick={() => { setCreatingUnder(null); setRenamingId(null) }}
@@ -319,7 +353,7 @@ export default function CategoriesPage({ embedded = false }) {
                 <div>
                   <div className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 border ${theme.rowHover} border-transparent cursor-grab active:cursor-grabbing`}>
                     <span className="text-gray-300 select-none">⋮⋮</span>
-                    <span className="select-none">📁</span>
+                    <AppIcon value={main.icon} size={17} color={theme.iconTone} fallback="folder" />
                     <span className={`flex-1 text-sm font-medium truncate ${theme.mainText}`}>{main.name}</span>
                     {main.children.length > 0 && (
                       <span className={`text-xs shrink-0 ${theme.countText}`}>{main.children.length} ย่อย</span>
@@ -334,7 +368,7 @@ export default function CategoriesPage({ embedded = false }) {
                         renderItem={(sub) => (
                           <div className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 border border-transparent ${theme.rowHover} cursor-grab active:cursor-grabbing`}>
                             <span className="text-gray-300 select-none">⋮⋮</span>
-                            <span className="select-none">📄</span>
+                            <AppIcon value={sub.icon} size={16} color={theme.iconTone} fallback="description" />
                             <span className={`flex-1 text-sm truncate ${theme.subText}`}>{sub.name}</span>
                           </div>
                         )}
@@ -344,7 +378,7 @@ export default function CategoriesPage({ embedded = false }) {
 
                   {main.children.length === 1 && (
                     <div className="ml-[26px] flex items-center gap-2.5 rounded-lg px-2.5 py-2 opacity-60">
-                      <span className="select-none">📄</span>
+                      <AppIcon value={main.children[0].icon} size={16} color={theme.iconTone} fallback="description" />
                       <span className={`flex-1 text-sm truncate ${theme.subText}`}>{main.children[0].name}</span>
                     </div>
                   )}
@@ -369,6 +403,7 @@ export default function CategoriesPage({ embedded = false }) {
                   selected={selectedId === main.id}
                   onSelect={setSelectedId}
                   onContextMenu={openMenu}
+                  onSetIcon={handleSetIcon}
                   theme={theme}
                 />
               )}
@@ -392,6 +427,7 @@ export default function CategoriesPage({ embedded = false }) {
                     selected={selectedId === sub.id}
                     onSelect={setSelectedId}
                     onContextMenu={openMenu}
+                    onSetIcon={handleSetIcon}
                     theme={theme}
                   />
                 )

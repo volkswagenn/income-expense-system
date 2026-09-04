@@ -1,4 +1,7 @@
 import { useState, useRef } from 'react'
+import Popup from './Popup'
+import Icon from './Icon'
+import UiIcon from './UiIcon'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { getDatedAttachmentFolder } from '../../lib/attachmentPaths'
@@ -23,6 +26,9 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const inputRef = useRef(null)
+  const cameraRef = useRef(null)
+  const galleryRef = useRef(null)
+  const [dragging, setDragging] = useState(false)
 
   const buildFilename = (f, index = 0) => {
     const ext = f.name.includes('.') ? f.name.split('.').pop().toLowerCase() : 'file'
@@ -82,86 +88,156 @@ export default function FileUploadPopup({ title, description, createdAt, filenam
     }
   }
 
+  const KB = (n) => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
+  const extOf = (name) => (name.includes('.') ? name.split('.').pop().toUpperCase().slice(0, 4) : 'FILE')
+  const TINT = {
+    PDF: 'bg-expense-soft text-[#A93A2E]',
+    JPG: 'bg-income-soft text-[#0F6A50]',
+    JPEG: 'bg-income-soft text-[#0F6A50]',
+    PNG: 'bg-transfer-soft text-transfer',
+  }
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-4 border-b bg-blue-50 flex items-center justify-between">
-          <h3 className="font-semibold text-base text-blue-900">📎 {title}</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
-        </div>
-
-        {/* Body */}
-        <div className="p-5 space-y-4">
-          {description && (
-            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2">{description}</p>
-          )}
-
-          {/* File picker */}
-          <div>
-            <label className="label">เลือกไฟล์</label>
-            <div className="flex items-center gap-2">
-              <input
-                ref={inputRef}
-                type="file"
-                className="hidden"
-                multiple
-                accept="image/*,.pdf,.jpg,.jpeg,.png,.webp"
-                onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setError('') }}
-              />
-              <button
-                className="btn btn-secondary text-sm"
-                onClick={() => inputRef.current?.click()}
-              >
-                📂 เลือกไฟล์…
-              </button>
-              {files.length > 0 && (
-                <span className="text-sm text-gray-700 truncate max-w-xs">
-                  {files.length === 1 ? files[0].name : `${files.length} ไฟล์`}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Filename preview */}
-          {files.length > 0 && (
-            <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm space-y-1">
-              <p className="text-blue-800 font-medium">ชื่อไฟล์ที่จะบันทึก:</p>
-              <div className="space-y-1 max-h-28 overflow-y-auto">
-                {filenames.map((filename) => (
-                  <p key={filename} className="font-mono text-blue-700 break-all">{filename}</p>
-                ))}
-              </div>
-              <p className="text-blue-600 text-xs">
-                ไฟล์จะถูกอัปโหลดขึ้นเซิร์ฟเวอร์ที่ {folder.replace(/^[^/]+\//, '')}/ — ทุกเครื่องในร้านเปิดดูได้
-              </p>
-            </div>
-          )}
-
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={saving}>ยกเลิก</button>
+    <Popup
+      title={title}
+      sub={description}
+      icon="upload_file"
+      width={460}
+      onClose={onCancel}
+      busy={saving}
+      error={error}
+      footer={
+        <div className="flex-none flex items-center gap-2 justify-end px-[17px] py-3 border-t border-[#EFEDE7] bg-[#FAF9F6]">
           <button
-            className="btn btn-ghost text-gray-500"
+            onClick={onCancel}
+            disabled={saving}
+            className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold hover:bg-paper disabled:opacity-50"
+          >
+            ยกเลิก
+          </button>
+          <button
             onClick={() => onConfirm(null)}
             disabled={saving}
+            className="h-[38px] px-4 rounded-[11px] text-[13px] text-muted hover:bg-paper disabled:opacity-50"
           >
             ข้ามไป
           </button>
           <button
-            className="btn btn-primary"
             onClick={handleConfirm}
             disabled={saving}
+            className="h-[38px] px-[18px] rounded-[11px] bg-ink text-white text-[13px] font-semibold hover:brightness-125 disabled:opacity-50"
           >
-            {saving ? 'กำลังอัปโหลด…' : files.length > 0 ? `☁️ อัปโหลด (${files.length})` : 'ยืนยัน'}
+            {saving ? 'กำลังอัปโหลด…' : files.length > 0 ? `อัปโหลด ${files.length} ไฟล์` : 'ยืนยัน'}
           </button>
         </div>
+      }
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        multiple
+        accept="image/*,.pdf,.jpg,.jpeg,.png,.webp"
+        onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setError('') }}
+      />
+
+      {/* กล่องลากวาง — รับทั้งลากมาวางและกดเลือก เพราะบนคอมคนลากไฟล์จากโฟลเดอร์เร็วกว่า */}
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          const dropped = Array.from(e.dataTransfer?.files ?? [])
+          if (dropped.length > 0) { setFiles(dropped); setError('') }
+        }}
+        className={`flex-none w-full border-[1.5px] border-dashed rounded-[14px] px-4 py-[22px] text-center transition ${
+          dragging ? 'border-ink bg-[#F2FAD9]' : 'border-[#C9C5BA] bg-[#FAF9F6] hover:bg-[#F2FAD9] hover:border-ink'
+        }`}
+      >
+        <Icon name="upload_file" size={30} className="text-muted" />
+        <p className="text-[13px] font-semibold mt-1.5">ลากไฟล์มาวางที่นี่ หรือกดเพื่อเลือกไฟล์</p>
+        <p className="text-[11.5px] text-faint leading-relaxed mt-[3px]">
+          รูปใบเสร็จ ใบกำกับภาษี สลิปโอนเงิน · JPG PNG PDF ไม่เกิน 15 MB ต่อไฟล์ แนบได้หลายไฟล์ต่อรายการ
+        </p>
+      </button>
+
+      {/* บนมือถือสองปุ่มนี้เปิดกล้องกับคลังรูปโดยตรง บนคอมจะเปิดหน้าต่างเลือกไฟล์ปกติ */}
+      <div className="flex-none grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => cameraRef.current?.click()}
+          className="h-10 rounded-[11px] border border-hairline bg-white text-[12.5px] font-semibold flex items-center justify-center gap-[7px] hover:bg-paper"
+        >
+          <UiIcon name="camera" size={15} />
+          ถ่ายรูปจากกล้อง
+        </button>
+        <button
+          type="button"
+          onClick={() => galleryRef.current?.click()}
+          className="h-10 rounded-[11px] border border-hairline bg-white text-[12.5px] font-semibold flex items-center justify-center gap-[7px] hover:bg-paper"
+        >
+          <UiIcon name="gallery" size={15} />
+          เลือกจากคลังรูป
+        </button>
       </div>
-    </div>
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setError('') }}
+      />
+      <input
+        ref={galleryRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setError('') }}
+      />
+
+      {files.length > 0 && (
+        <div className="flex-none">
+          <p className="text-[11.5px] font-semibold text-muted mb-1.5">ไฟล์ของรายการนี้ · {files.length} ไฟล์</p>
+          <div className="flex flex-col gap-[7px]">
+            {files.map((f, i) => {
+              const ext = extOf(f.name)
+              return (
+                <div key={`${f.name}-${i}`} className="flex items-center gap-[9px] border border-hairline rounded-[11px] px-2.5 py-2">
+                  <span className={`w-8 h-8 flex-none rounded-lg flex items-center justify-center text-[11px] font-bold ${TINT[ext] ?? 'bg-paper text-muted'}`}>
+                    {ext}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] font-medium truncate">{f.name}</span>
+                    <span className="tabular-nums block text-[11px] text-faint">
+                      {KB(f.size)} · {saving ? 'กำลังอัปโหลด' : 'พร้อมอัปโหลด'}
+                    </span>
+                  </span>
+                  <button
+                    onClick={() => setFiles((list) => list.filter((_, x) => x !== i))}
+                    disabled={saving}
+                    className="flex-none w-7 h-7 rounded-lg flex items-center justify-center text-faint hover:bg-[#FEF6F5] hover:text-expense disabled:opacity-40"
+                    title="เอาไฟล์นี้ออก"
+                  >
+                    <Icon name="close" size={17} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-faint leading-relaxed mt-2">
+            ชื่อไฟล์ที่จะบันทึก: <span className="font-mono break-all">{filenames.join(' · ')}</span>
+          </p>
+        </div>
+      )}
+
+      <p className="flex-none text-[11px] text-faint leading-relaxed">
+        ไฟล์ผูกกับรายการนี้ เปิดดูย้อนหลังได้จากหน้าประวัติและรายงาน · ลบรายการแล้วไฟล์จะถูกลบตามไปด้วย
+      </p>
+    </Popup>
   )
 }

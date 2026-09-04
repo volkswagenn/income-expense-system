@@ -1,5 +1,5 @@
+import Popup from '../../components/shared/Popup'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import useDebtStore from '../../store/useDebtStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -9,6 +9,7 @@ import { formatIsoThai } from '../../lib/cardCycle'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import CategorySelect from '../../components/shared/CategorySelect'
 import DebtFields, { EMPTY_DEBT, computeDebt, validateDebt } from '../../components/shared/DebtFields'
+import { useRegisterManageAdd } from './manageHeader'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -35,22 +36,18 @@ function DebtFormPopup({ onSave, onClose, busy }) {
     onSave(v, calc)
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
-          <h3 className="font-semibold text-base">📒 เพิ่มหนี้สิน</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-        <div className="p-5">
-          <DebtFields value={v} onChange={(x) => { setV(x); setError('') }} />
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">⚠️ {error}</p>}
-        </div>
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? '⏳' : 'บันทึกหนี้สิน'}</button>
-        </div>
-      </div>
-    </div>
+    <Popup
+      title="เพิ่มหนี้สิน"
+      icon="receipt_long"
+      width={420}
+      onClose={onClose}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel="บันทึกหนี้สิน"
+    >
+        <DebtFields value={v} onChange={(x) => { setV(x); setError('') }} />
+        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">⚠️ {error}</p>}
+    </Popup>
   )
 }
 
@@ -102,36 +99,30 @@ function DebtEditPopup({ debt, entries = [], onSave, onClose, busy }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between sticky top-0">
-          <h3 className="font-semibold text-base">📒 แก้ไขหนี้สิน</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onClose}>×</button>
-        </div>
-
-        <div className="p-5">
-          {paidCount > 0 && (
-            <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3">
-              จ่ายผ่านระบบไปแล้ว {paidCount} งวด — งวดเหล่านี้จะไม่ถูกแตะ แก้ได้เฉพาะงวดที่ยังไม่จ่าย
-            </p>
-          )}
-
-          <DebtFields value={v} onChange={(x) => { setV(x); setError('') }} />
-
-          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mt-3">
-            กดบันทึกแล้วตารางงวดที่ยังไม่จ่ายจะถูกสร้างใหม่ตามค่าที่แก้
-            {prepaidCount > 0 && ' รวมงวดที่ทำเครื่องหมายว่าจ่ายมาก่อนใช้ระบบด้วย'}
+    <Popup
+      title="แก้ไขหนี้สิน"
+      icon="receipt_long"
+      width={420}
+      onClose={onClose}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel="บันทึก"
+    >
+        {paidCount > 0 && (
+          <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3">
+            จ่ายผ่านระบบไปแล้ว {paidCount} งวด — งวดเหล่านี้จะไม่ถูกแตะ แก้ได้เฉพาะงวดที่ยังไม่จ่าย
           </p>
+        )}
 
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">⚠️ {error}</p>}
-        </div>
+        <DebtFields value={v} onChange={(x) => { setV(x); setError('') }} />
 
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end sticky bottom-0">
-          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? '⏳' : 'บันทึก'}</button>
-        </div>
-      </div>
-    </div>
+        <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mt-3">
+          กดบันทึกแล้วตารางงวดที่ยังไม่จ่ายจะถูกสร้างใหม่ตามค่าที่แก้
+          {prepaidCount > 0 && ' รวมงวดที่ทำเครื่องหมายว่าจ่ายมาก่อนใช้ระบบด้วย'}
+        </p>
+
+        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">⚠️ {error}</p>}
+    </Popup>
   )
 }
 
@@ -141,7 +132,9 @@ function DebtRow({ debt, categoryName, onEdit, onCancelDebt }) {
   const term = TERMS[debt.term] ?? TERMS.long
   const status = STATUS[debt.status] ?? STATUS.active
   return (
-    <div className="rounded-xl border border-gray-200 p-3.5 flex items-center gap-3">
+    // จอแคบวางยอดกับปุ่มลงมาแถวล่าง ไม่งั้นชื่อสัญญาถูกบีบจนอ่านไม่ออก
+    <div className="rounded-xl border border-gray-200 p-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+      <div className="flex items-center gap-3 min-w-0 flex-1">
       <span className="text-2xl leading-none">{isRecv ? '🤝' : '📒'}</span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -163,17 +156,20 @@ function DebtRow({ debt, categoryName, onEdit, onCancelDebt }) {
           </p>
         )}
       </div>
-      <div className="text-right shrink-0">
-        <p className="text-xs text-gray-400">คงเหลือ</p>
-        <p className={`font-bold tabular-nums text-sm ${isRecv ? 'text-emerald-600' : 'text-amber-700'}`}>
-          {fmt(progress?.remainingAmount ?? 0)}
-        </p>
       </div>
-      <div className="flex gap-1 shrink-0">
-        <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => onEdit(debt)}>แก้ไข</button>
-        {debt.status === 'active' && (
-          <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => onCancelDebt(debt, progress)}>ยกเลิก</button>
-        )}
+      <div className="flex items-center gap-3 justify-between sm:justify-end">
+        <div className="text-right shrink-0">
+          <p className="text-xs text-gray-400">คงเหลือ</p>
+          <p className={`font-bold tabular-nums text-sm ${isRecv ? 'text-emerald-600' : 'text-amber-700'}`}>
+            {fmt(progress?.remainingAmount ?? 0)}
+          </p>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => onEdit(debt)}>แก้ไข</button>
+          {debt.status === 'active' && (
+            <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => onCancelDebt(debt, progress)}>ยกเลิก</button>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -191,6 +187,8 @@ export default function DebtManage() {
   const [showDone, setShowDone] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  useRegisterManageAdd(() => setFormOpen(true))
 
   const run = async (fn) => {
     if (busy) return
@@ -261,18 +259,8 @@ export default function DebtManage() {
     }, { short: 0, long: 0 })
 
   return (
+    // ชื่อหัวข้อกับปุ่มเพิ่มอยู่บนหัวการ์ดของหน้าจัดการข้อมูล (ดู manageHeader.js)
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <h2 className="font-semibold text-gray-900">📒 หนี้สิน</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            สัญญาผ่อน เงินกู้ และเงินที่ให้คนอื่นยืม — จ่ายค่างวดที่{' '}
-            <Link to="/wallet" className="text-blue-600 hover:underline">หน้ากระเป๋าเงิน</Link>
-          </p>
-        </div>
-        <button className="btn btn-primary text-xs" onClick={() => setFormOpen(true)}>+ เพิ่มหนี้สิน</button>
-      </div>
-
       {(byTerm.short > 0 || byTerm.long > 0) && (
         <div className="grid grid-cols-2 gap-2">
           {Object.entries(TERMS).map(([k, t]) => (

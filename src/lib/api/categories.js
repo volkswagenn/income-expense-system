@@ -15,17 +15,26 @@ export async function listCategories() {
   ))
 }
 
-export async function createCategory({ name, type, parentId = null }) {
-  const row = toRow('categories', { shopId: getShopId(), name, type, parentId, deleted: false })
+export async function createCategory({ name, type, parentId = null, icon = null }) {
+  const row = toRow('categories', { shopId: getShopId(), name, type, parentId, icon, deleted: false })
   return fromRow('categories', await unwrap(
     supabase.from('categories').insert(row).select().single()
   ))
 }
 
-export async function renameCategory(id, name) {
+/**
+ * แก้ไขหมวดหมู่ — ส่งเฉพาะฟิลด์ที่เปลี่ยน เช่น { name } หรือ { icon }
+ * แยกจาก renameCategory เพราะตอนนี้มีมากกว่าชื่อให้แก้แล้ว
+ * (ส่ง icon: null คือสั่งเอาไอคอนออก ไม่ใช่ "ไม่เปลี่ยน" — toRow ทิ้งเฉพาะ undefined)
+ */
+export async function updateCategory(id, changes) {
   return fromRow('categories', await unwrap(
-    supabase.from('categories').update({ name }).eq('id', id).select().single()
+    supabase.from('categories').update(toRow('categories', changes)).eq('id', id).select().single()
   ))
+}
+
+export async function renameCategory(id, name) {
+  return updateCategory(id, { name })
 }
 
 /** ลบหมวดหมู่หลักต้องพาหมวดหมู่ย่อยไปด้วย ไม่งั้นย่อยจะลอยอยู่โดยไม่มีหัว */
@@ -49,16 +58,21 @@ export async function listVendors() {
   ))
 }
 
-export async function createVendor(name) {
+export async function createVendor(name, icon = null) {
   return fromRow('vendors', await unwrap(
-    supabase.from('vendors').insert({ shop_id: getShopId(), name, deleted: false }).select().single()
+    supabase.from('vendors').insert({ shop_id: getShopId(), name, icon, deleted: false }).select().single()
+  ))
+}
+
+/** แก้ไขผู้ขาย — ส่งเฉพาะฟิลด์ที่เปลี่ยน เช่น { name } หรือ { icon } */
+export async function updateVendor(id, changes) {
+  return fromRow('vendors', await unwrap(
+    supabase.from('vendors').update(toRow('vendors', changes)).eq('id', id).select().single()
   ))
 }
 
 export async function renameVendor(id, name) {
-  return fromRow('vendors', await unwrap(
-    supabase.from('vendors').update({ name }).eq('id', id).select().single()
-  ))
+  return updateVendor(id, { name })
 }
 
 export async function softDeleteVendor(id) {

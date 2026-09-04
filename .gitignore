@@ -8,3 +8,14 @@ dist/
 .codex-chrome-profile*/
 .codex-edge-profile*/
 *.log
+
+# ไฟล์ทำงานชั่วคราวตอนไล่แก้ UI ตาม mockup — ไม่ต้องเข้า repo
+public/__mockup/
+__ui-preview.html
+src/__uiPreview.jsx
+__note-preview.html
+src/__notePreview.jsx
+
+# ภาพหน้าจอที่แปะมาระหว่างคุยแบบ — ไม่ใช่ตัวแบบ ไม่ต้องถ่วง repo
+claude_design/**/shots/
+claude_design/**/uploads/

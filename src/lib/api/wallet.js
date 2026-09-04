@@ -111,17 +111,27 @@ export async function deleteTransferAccount(id) {
 
 // ── กระเป๋าตังค์ย่อย ────────────────────────────────────────────────────────
 
-export async function createSubWallet({ name, initialBalance = 0 }) {
-  const row = toRow('sub_wallets', { shopId: getShopId(), name, balance: Number(initialBalance) || 0 })
+export async function createSubWallet({ name, initialBalance = 0, icon = null }) {
+  const row = toRow('sub_wallets', { shopId: getShopId(), name, icon, balance: Number(initialBalance) || 0 })
   return fromRow('sub_wallets', await unwrap(
     supabase.from('sub_wallets').insert(row).select().single()
   ))
 }
 
-export async function renameSubWallet(id, name) {
+/**
+ * แก้ไขกระเป๋าย่อย — รับเฉพาะชื่อกับไอคอน
+ * ยอดเงินห้ามแก้ทางนี้เด็ดขาด ต้องผ่าน RPC ที่บวกลบเป็น delta เท่านั้น
+ * ไม่งั้นสองเครื่องที่แก้พร้อมกันจะเขียนทับยอดกันจนเงินหาย
+ */
+export async function updateSubWalletInfo(id, { name, icon }) {
+  const row = toRow('sub_wallets', { name, icon })
   return fromRow('sub_wallets', await unwrap(
-    supabase.from('sub_wallets').update({ name }).eq('id', id).select().single()
+    supabase.from('sub_wallets').update(row).eq('id', id).select().single()
   ))
+}
+
+export async function renameSubWallet(id, name) {
+  return updateSubWalletInfo(id, { name })
 }
 
 export async function deleteSubWallet(id) {

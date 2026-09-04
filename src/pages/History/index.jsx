@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import Popup from '../../components/shared/Popup'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 import { th } from 'date-fns/locale'
 import useLogStore from '../../store/useLogStore'
@@ -9,6 +10,8 @@ import { ACTIVITY_LABELS } from '../../lib/logBuilder'
 import { cancelTransaction, describeTxCancelEffects } from '../../lib/transactionActions'
 import { localDateStr } from '../../lib/dateUtils'
 import SectionCard from '../../components/shared/SectionCard'
+import TabBar from '../../components/shared/TabBar'
+import Icon from '../../components/shared/Icon'
 import DateRangeFilter from '../../components/shared/DateRangeFilter'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -47,6 +50,28 @@ function typeColor(type) {
   if (type?.startsWith('SUB_')) return 'bg-purple-100 text-purple-700'
   if (type === 'IMPORT_DATA') return 'bg-indigo-100 text-indigo-700'
   return 'bg-gray-100 text-gray-600'
+}
+
+/** ไอคอน + สีของแต่ละชนิดเหตุการณ์ — ใช้แทนป้ายข้อความยาวๆ ในตาราง */
+function TYPE_TINT(type) {
+  if (type === 'TX_INCOME_RECORD' || (type ?? '').includes('INCOME')) {
+    return { box: 'bg-income-soft text-income', icon: 'arrow_downward' }
+  }
+  if (type === 'TX_EXPENSE_RECORD' || (type ?? '').includes('EXPENSE') || type === 'OPEN_BILL') {
+    return { box: 'bg-expense-soft text-expense', icon: 'arrow_upward' }
+  }
+  if ((type ?? '').startsWith('CARD')) return { box: 'bg-expense-soft text-[#A93A2E]', icon: 'credit_card' }
+  if ((type ?? '').startsWith('SUB_')) return { box: 'bg-recurring-soft text-recurring', icon: 'savings' }
+  if ((type ?? '').startsWith('RECURRING')) return { box: 'bg-recurring-soft text-recurring', icon: 'history' }
+  if ((type ?? '').startsWith('DEBT') || (type ?? '').startsWith('INSTALLMENT')) {
+    return { box: 'bg-pending-soft text-pending', icon: 'receipt_long' }
+  }
+  if (type === 'PAY_PENDING' || (type ?? '').includes('PENDING')) {
+    return { box: 'bg-pending-soft text-pending', icon: 'pending_actions' }
+  }
+  if (type === 'IMPORT_DATA') return { box: 'bg-transfer-soft text-transfer', icon: 'upload_file' }
+  if ((type ?? '').includes('TAX')) return { box: 'bg-[#FBEFE4] text-[#B4571E]', icon: 'receipt_long' }
+  return { box: 'bg-paper text-muted', icon: 'edit_note' }
 }
 
 function AllTab() {
@@ -114,48 +139,97 @@ function AllTab() {
     })
     .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))
 
+  // ชิปกรองด่วน — ชนิดที่คนมองหาบ่อยที่สุด ส่วนที่เหลือยังเลือกจากรายการเต็มได้
+  const QUICK = [
+    { value: '', label: 'ทั้งหมด' },
+    { value: 'TX_INCOME_RECORD', label: 'รายรับ' },
+    { value: 'TX_EXPENSE_RECORD', label: 'รายจ่าย' },
+    { value: 'PAY_PENDING', label: 'จ่ายค้างชำระ' },
+    { value: 'CARD_PAYMENT', label: 'จ่ายบิลบัตร' },
+  ]
+
   return (
-    <div className="space-y-4">
-      <DateRangeFilter
-        filter={filter} setFilter={setFilter}
-        startDate={startDate} endDate={endDate}
-        setStartDate={setStartDate} setEndDate={setEndDate}
-      />
-      <div className="flex flex-wrap gap-2 items-center">
-        <select className="input text-sm py-1.5 w-52" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-          {typeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <input
-          className="input text-sm py-1.5 flex-1 min-w-48"
-          placeholder="ค้นหาทุกประวัติ..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+    <div className="flex flex-col gap-3">
+      {/* แถบกรองอยู่ในการ์ดของตัวเอง แยกจากการ์ดรายการ — เลื่อนอ่านรายการยาวๆ
+          แล้วแถบกรองยังอยู่ที่เดิม ไม่ปนกับเนื้อหา */}
+      <div className="card px-4 py-3 flex items-center gap-2 flex-wrap flex-none">
+        <DateRangeFilter
+          filter={filter} setFilter={setFilter}
+          startDate={startDate} endDate={endDate}
+          setStartDate={setStartDate} setEndDate={setEndDate}
+          compact
         />
+        {QUICK.map((q) => {
+          const on = typeFilter === q.value
+          return (
+            <button
+              key={q.value || 'all'}
+              onClick={() => setTypeFilter(q.value)}
+              className={`h-8 px-3 rounded-[9px] text-[12.5px] border transition ${
+                on ? 'bg-ink text-white border-ink font-semibold' : 'bg-white text-muted border-hairline hover:bg-paper'
+              }`}
+            >
+              {q.label}
+            </button>
+          )
+        })}
+        <select
+          className="h-8 px-2.5 rounded-[9px] border border-hairline bg-white text-[12.5px] text-muted"
+          value={QUICK.some((q) => q.value === typeFilter) ? '' : typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value="">ชนิดอื่น…</option>
+          {typeOptions.filter((o) => o.value).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <div className="ml-auto min-w-[200px] flex-1 sm:flex-none h-[34px] px-3 rounded-ctl bg-paper flex items-center gap-2">
+          <Icon name="search" size={17} className="text-faint flex-none" />
+          <input
+            className="flex-1 min-w-0 bg-transparent outline-none text-[12.5px]"
+            placeholder="ค้นหาคำในรายการ"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       </div>
-      <div className="space-y-2">
-        <p className="text-sm text-gray-500">{events.length.toLocaleString()} รายการ</p>
-        {events.length === 0 ? (
-          <p className="text-center text-gray-400 py-10">ไม่มีประวัติในช่วงที่เลือก</p>
-        ) : (
-          events.map((event) => (
-            <div key={event.id} className="rounded-lg border border-gray-100 bg-white p-3 flex items-start gap-3">
-              <div className="text-xs text-gray-400 w-28 shrink-0">
-                {(() => { try { return format(new Date(event.timestamp), 'd MMM yy HH:mm', { locale: th }) } catch { return event.timestamp } })()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor(event.activityType)}`}>
-                  {event.label}
+
+      <div className="card px-[18px] pt-1.5 pb-0 flex-1 min-h-0">
+      {events.length === 0 ? (
+        <p className="text-center text-[13px] text-faint py-12">ไม่มีประวัติในช่วงที่เลือก</p>
+      ) : (
+        <div>
+          {events.map((event) => {
+            const delta = event.walletEffect?.delta
+            const tone = TYPE_TINT(event.activityType)
+            return (
+              <div
+                key={event.id}
+                className="flex items-center gap-3 py-2.5 border-b border-[#F2F0EA] hover:bg-[#FAF9F6] -mx-2 px-2 rounded-lg"
+              >
+                <span className="w-[104px] flex-none">
+                  <span className="tabular-nums block text-[12.5px] font-medium">
+                    {(() => { try { return format(new Date(event.timestamp), 'd MMM yy', { locale: th }) } catch { return event.date } })()}
+                  </span>
+                  <span className="tabular-nums block text-[10.5px] text-faint">
+                    {(() => { try { return format(new Date(event.timestamp), 'HH:mm', { locale: th }) } catch { return '' } })()}
+                  </span>
                 </span>
-                <p className="text-sm text-gray-700 mt-1 break-words">{event.description}</p>
-              </div>
-              {event.walletEffect?.delta != null && (
-                <span className={`text-xs font-semibold tabular-nums shrink-0 ${event.walletEffect.delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {event.walletEffect.delta > 0 ? '+' : ''}{Number(event.walletEffect.delta).toLocaleString()}
+                <span className={`w-[30px] h-[30px] flex-none rounded-[9px] flex items-center justify-center ${tone.box}`}>
+                  <Icon name={tone.icon} size={16} />
                 </span>
-              )}
-            </div>
-          ))
-        )}
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[13px] truncate">{event.description}</span>
+                  <span className="block text-[11px] text-faint">{event.label}</span>
+                </span>
+                {delta != null && (
+                  <span className={`tabular-nums flex-none text-[13px] font-semibold ${delta > 0 ? 'text-income' : 'text-expense'}`}>
+                    {delta > 0 ? '+' : ''}{Number(delta).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
       </div>
     </div>
   )
@@ -236,44 +310,40 @@ function CancelConfirmPopup({ target, busy, error, onConfirm, onCancel }) {
   const descriptionText = `"${target.tx.itemName}" ${Number(target.tx.amount).toLocaleString()} บาท`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="bg-red-50 px-5 py-4 border-b border-red-100">
-          <h3 className="font-semibold text-red-700">ยืนยันการยกเลิก</h3>
-          <p className="text-xs text-red-500 mt-0.5">รายการจะถูกยกเลิกและเงินจะถูกคืนสู่ต้นทาง</p>
+    <Popup
+      title="ยืนยันการยกเลิก"
+      sub="รายการจะถูกยกเลิกและเงินจะถูกคืนสู่ต้นทาง"
+      icon="delete_sweep"
+      width={420}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      busy={busy}
+      danger
+      confirmLabel="ยืนยัน"
+    >
+        <div className="bg-gray-50 rounded-xl p-3">
+          <p className="text-xs text-gray-500 font-medium mb-1">รายการที่จะยกเลิก</p>
+          <p className="text-sm text-gray-800 leading-relaxed">{descriptionText}</p>
         </div>
-        <div className="p-5 space-y-3">
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-500 font-medium mb-1">รายการที่จะยกเลิก</p>
-            <p className="text-sm text-gray-800 leading-relaxed">{descriptionText}</p>
-          </div>
-          {target.effects.length > 0 && (
-            <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
-              <p className="text-xs font-semibold text-amber-700 mb-2">ผลที่จะเกิดขึ้น</p>
-              <div className="space-y-1.5">
-                {target.effects.map((e, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <span className="text-amber-500 shrink-0">↩</span>
-                    <span className="text-sm text-amber-800">{e}</span>
-                  </div>
-                ))}
-              </div>
+        {target.effects.length > 0 && (
+          <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+            <p className="text-xs font-semibold text-amber-700 mb-2">ผลที่จะเกิดขึ้น</p>
+            <div className="space-y-1.5">
+              {target.effects.map((e, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-amber-500 shrink-0">↩</span>
+                  <span className="text-sm text-amber-800">{e}</span>
+                </div>
+              ))}
             </div>
-          )}
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-              {error}
-            </p>
-          )}
-        </div>
-        <div className="px-5 pb-5 flex gap-3 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ปิด</button>
-          <button className="btn btn-danger" onClick={onConfirm} disabled={busy}>
-            {busy ? 'กำลังยกเลิก…' : 'ยืนยัน'}
-          </button>
-        </div>
-      </div>
-    </div>
+          </div>
+        )}
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            {error}
+          </p>
+        )}
+    </Popup>
   )
 }
 
@@ -399,8 +469,8 @@ function MoneyTab() {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { key: 'all',   label: '📋 ทั้งหมด' },
-  { key: 'money', label: '💰 รายการเงิน' },
+  { key: 'all', label: 'ทั้งหมด', icon: 'history' },
+  { key: 'money', label: 'รายการเงิน', icon: 'payments' },
 ]
 
 export default function HistoryPage() {
@@ -431,39 +501,23 @@ export default function HistoryPage() {
   }, [loadFirstPage])
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-xl font-bold text-gray-900">ประวัติการทำรายการทั้งหมด</h1>
-
+    <div className="space-y-3.5">
       {loadError && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+        <p className="text-[12.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-4 py-2.5">
           โหลดประวัติไม่สำเร็จ — {loadError}
         </p>
       )}
 
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`btn text-sm px-4 py-2 rounded-lg transition-all ${tab === t.key ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <SectionCard>
-        {loading && loadedCount === 0 ? (
-          <div className="flex items-center justify-center py-14">
-            <div className="w-7 h-7 rounded-full border-[3px] border-hairline border-t-ink animate-spin" />
-          </div>
-        ) : (
-          <>
-            {tab === 'all'   && <AllTab />}
-            {tab === 'money' && <MoneyTab />}
-          </>
-        )}
-      </SectionCard>
+      {/* หน้านี้แสดงประวัติทุกการเปลี่ยนแปลงในรายการเดียว ไม่มีแท็บแยก
+          รายการเงินอย่างเดียวดูได้ที่ บันทึกรายการ › ค้นหารายการ ซึ่งกรองได้ละเอียดกว่า
+          (แท็บ "รายการเงิน" เดิมถูกถอดออก บันทึกไว้ใน MOCKUP-NOTES.md ข้อ ก9) */}
+      {loading && loadedCount === 0 ? (
+        <div className="card flex items-center justify-center py-14">
+          <div className="w-7 h-7 rounded-full border-[3px] border-hairline border-t-ink animate-spin" />
+        </div>
+      ) : (
+        <AllTab />
+      )}
 
       {/* ประวัติโหลดทีละหน้า (หน้าละ 100) — ถ้าเลือกช่วงวันที่ย้อนหลังแล้วไม่เจอ
           ให้กดโหลดเพิ่มจนครอบคลุมช่วงนั้น ไม่งั้นจะเข้าใจผิดว่าไม่มีประวัติ */}

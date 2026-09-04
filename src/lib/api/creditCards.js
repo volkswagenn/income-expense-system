@@ -183,3 +183,48 @@ export async function cashAdvance(cardId, { amount, fee = 0, target, date, note 
 export async function undoCashAdvance(advanceId, log = null) {
   await unwrap(supabase.rpc('undo_card_advance', { p_advance: advanceId, p_log: log }))
 }
+
+// ── เครื่องหมายถูกรายแถวในบิลบัตร (card.sql ส่วน 11) ─────────────────────────
+
+/**
+ * บรรทัดที่ติ๊กไว้แล้วของร้าน — คืน Set ของ rowKey
+ * ตารางยังไม่มี (ยังไม่รัน card.sql รอบใหม่) ให้คืนว่างแทนที่จะพังทั้งหน้า
+ */
+export async function listCardRowMarks() {
+  const { data, error } = await supabase
+    .from('card_row_marks')
+    .select('row_key')
+    .eq('shop_id', getShopId())
+
+  if (error) {
+    if (isMissingTable(error)) {
+      console.warn('ยังไม่มีตาราง card_row_marks — รัน supabase/card.sql รอบใหม่ก่อนจึงจะติ๊กรายการในบิลได้')
+      return []
+    }
+    throw new Error(toThaiError(error))
+  }
+  return (data ?? []).map((r) => r.row_key)
+}
+
+/** ติ๊กหนึ่งบรรทัด — ไม่แตะยอดเงินใดๆ เป็นแค่เครื่องหมายว่าไล่เช็คแล้ว */
+export async function markCardRow({ cardId, cycle, rowKey }) {
+  const { data: sessionData } = await supabase.auth.getSession()
+  await unwrap(
+    supabase.from('card_row_marks').insert({
+      shop_id: getShopId(),
+      card_id: cardId,
+      cycle: cycle ?? null,
+      row_key: rowKey,
+      marked_by: sessionData?.session?.user?.id ?? null,
+    })
+  )
+  return rowKey
+}
+
+/** เอาเครื่องหมายถูกออก */
+export async function unmarkCardRow(rowKey) {
+  await unwrap(
+    supabase.from('card_row_marks').delete().eq('shop_id', getShopId()).eq('row_key', rowKey)
+  )
+  return rowKey
+}

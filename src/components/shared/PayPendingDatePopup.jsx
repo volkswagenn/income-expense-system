@@ -1,3 +1,4 @@
+import Popup from './Popup'
 import { useState } from 'react'
 import { format } from 'date-fns'
 import TransferAccountPicker from './TransferAccountPicker'
@@ -18,59 +19,45 @@ export default function PayPendingDatePopup({ open, item, method, danger = false
   const resolvedAccountId = needsAccount ? resolveAccount(accountId) : null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className={`px-5 py-4 border-b flex items-center justify-between ${danger ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
-          <div>
-            <h3 className={`font-semibold text-base ${danger ? 'text-red-700' : 'text-gray-900'}`}>
-              {danger ? 'ยอดเงินจะติดลบ' : 'ยืนยันการชำระเงิน'}
-            </h3>
-            <p className="text-sm text-gray-500 truncate max-w-[260px]">{item.description}</p>
-          </div>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
+    <Popup
+      title={danger ? 'ยอดเงินจะติดลบ' : 'ยืนยันการชำระเงิน'}
+      sub={item.description}
+      icon={danger ? 'error' : 'payments'}
+      headTone={danger ? 'danger' : 'default'}
+      width={420}
+      onClose={onCancel}
+      onConfirm={() => onConfirm(paidDate, resolvedAccountId, toTimestamp(paidDate, paidTime))}
+      danger={danger}
+      disabled={!paidDate || (needsAccount && !resolvedAccountId)}
+      confirmLabel="ยืนยันชำระ"
+    >
+      <div className="flex-none bg-paper rounded-ctl px-3.5 py-3 flex flex-col gap-1.5">
+        <div className="flex justify-between gap-2.5 text-[12.5px]">
+          <span className="text-muted">ยอดชำระ</span>
+          <span className="tabular-nums font-bold">{item.amount?.toLocaleString('th-TH')} บาท</span>
         </div>
-
-        <div className="p-5 space-y-4 text-sm">
-          <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 space-y-1">
-            <div className="flex justify-between gap-3">
-              <span className="text-gray-500">ยอดชำระ</span>
-              <span className="font-bold text-gray-900">{item.amount?.toLocaleString('th-TH')} บาท</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-gray-500">วิธีชำระ</span>
-              <span className="font-medium text-gray-800">{methodLabel}</span>
-            </div>
-          </div>
-
-          {danger && (
-            <p className="text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              การชำระนี้จะทำให้ยอด{methodLabel}ติดลบ กรุณาตรวจสอบก่อนยืนยัน
-            </p>
-          )}
-
-          {needsAccount && (
-            <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
-          )}
-
-          <DateTimeField
-            label="วันที่จ่ายเงิน"
-            date={paidDate}
-            time={paidTime}
-            onChange={({ date, time }) => { setPaidDate(date); setPaidTime(time) }}
-          />
-        </div>
-
-        <div className="px-5 pb-5 flex gap-3">
-          <button className="btn btn-secondary flex-1" onClick={onCancel}>ยกเลิก</button>
-          <button
-            className={`btn flex-1 ${danger ? 'btn-danger' : 'btn-primary'} disabled:opacity-50 disabled:cursor-not-allowed`}
-            onClick={() => onConfirm(paidDate, resolvedAccountId, toTimestamp(paidDate, paidTime))}
-            disabled={!paidDate || (needsAccount && !resolvedAccountId)}
-          >
-            ยืนยันชำระ
-          </button>
+        <div className="flex justify-between gap-2.5 text-[12.5px]">
+          <span className="text-muted">วิธีชำระ</span>
+          <span className="font-semibold">{methodLabel}</span>
         </div>
       </div>
-    </div>
+
+      {danger && (
+        <p className="flex-none text-[11.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3 py-2.5 leading-relaxed">
+          การชำระนี้จะทำให้ยอด{methodLabel}ติดลบ กรุณาตรวจสอบก่อนยืนยัน
+        </p>
+      )}
+
+      {needsAccount && (
+        <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
+      )}
+
+      <DateTimeField
+        label="วันที่จ่ายเงิน"
+        date={paidDate}
+        time={paidTime}
+        onChange={({ date, time }) => { setPaidDate(date); setPaidTime(time) }}
+      />
+    </Popup>
   )
 }

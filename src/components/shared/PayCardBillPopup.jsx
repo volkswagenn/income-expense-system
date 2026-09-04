@@ -5,6 +5,8 @@ import useWalletStore from '../../store/useWalletStore'
 import DatePicker from './DatePicker'
 import TransferAccountPicker from './TransferAccountPicker'
 import { formatIsoThai } from '../../lib/cardCycle'
+import Popup from './Popup'
+import UiIcon from './UiIcon'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -51,109 +53,145 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
     onConfirm({ method, accountId: resolved, amount: value, date })
   }
 
+  const isFull = Math.abs(value - remaining) < 0.005
+  const isCustom = !isFull && !isMinimum
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b bg-gray-50 sticky top-0 flex items-center justify-between">
-          <h3 className="font-semibold text-base">💳 จ่ายบิลบัตรเครดิต</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
+    <Popup
+      title="จ่ายบิลบัตรเครดิต"
+      sub={`${cardLabel} · รอบ ${statement.cycle ?? '—'}`}
+      icon="credit_card"
+      headTone="danger"
+      width={460}
+      onClose={onCancel}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel={`จ่าย ${fmt(value)} บาท`}
+      error={error}
+    >
+      {/* ยอดที่ต้องจ่ายตัวใหญ่สุดในกล่อง — เป็นตัวเลขเดียวที่คนเปิดป๊อปอัปนี้มาดู */}
+      <div className="flex-none bg-expense-soft border border-[#F0C4BE] rounded-[14px] px-3.5 py-3">
+        <div className="text-[11.5px] text-[#A93A2E]">{cardLabel} · รอบ {statement.cycle ?? '—'}</div>
+        <div className="tabular-nums text-[29px] font-semibold text-[#C03A2D] tracking-[-0.025em] leading-[1.15] mt-px">
+          {fmt(remaining)}
         </div>
-
-        <div className="p-5 space-y-4">
-          <div className="rounded-xl bg-rose-50 border border-rose-100 p-3">
-            <p className="text-xs text-rose-700">{cardLabel}</p>
-            <p className="text-2xl font-bold text-rose-700 tabular-nums mt-0.5">{fmt(remaining)}</p>
-            <p className="text-xs text-rose-600 mt-0.5">
-              ครบกำหนด {formatIsoThai(statement.dueDate)}
-              {Number(statement.paidAmount) > 0 && ` · จ่ายไปแล้ว ${fmt(statement.paidAmount)}`}
-            </p>
-          </div>
-
-          <div>
-            <label className="label">จ่ายจาก</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className={`btn text-sm ${method === 'cash' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => { setMethod('cash'); setError('') }}
-              >
-                💵 เงินสด
-              </button>
-              <button
-                className={`btn text-sm ${method === 'transfer' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => { setMethod('transfer'); setError('') }}
-              >
-                🏦 เงินโอน
-              </button>
-            </div>
-          </div>
-
-          {method === 'transfer' && (
-            <TransferAccountPicker value={accountId} onChange={setAccountId} label="ตัดจากบัญชี" />
-          )}
-
-          <div>
-            <label className="label">จำนวนที่จ่าย</label>
-            <div className="flex gap-2 mb-2">
-              <button className="btn btn-secondary text-xs flex-1" onClick={() => setPreset(remaining)}>
-                เต็มจำนวน
-              </button>
-              {minimum > 0 && minimum < remaining && (
-                <button className="btn btn-secondary text-xs flex-1" onClick={() => setPreset(minimum)}>
-                  ขั้นต่ำ {fmt(minimum)}
-                </button>
-              )}
-            </div>
-            <AmountInput
-              className="input text-right"
-              value={amount}
-              onChange={(e) => { setAmount(e.target.value); setError('') }}
-            />
-          </div>
-
-          <div>
-            <label className="label">วันที่จ่าย</label>
-            <DatePicker value={date} onChange={setDate} />
-          </div>
-
-          {(isMinimum || isPartial) && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1">
-              <p className="font-medium">⚠️ จ่ายไม่เต็มจำนวน</p>
-              <p>
-                ระยะปลอดดอกเบี้ยจะหายไป และธนาคารจะคิดดอกเบี้ยย้อนตั้งแต่วันที่ทำรายการ
-                ไม่ใช่คิดจากยอดที่เหลือ
-              </p>
-              <p>ยอดที่เหลือ {fmt(remaining - value)} บาท จะถูกยกไปรวมในบิลรอบถัดไป</p>
-            </div>
-          )}
-
-          {value > remaining && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
-              💚 จ่ายเกิน {fmt(value - remaining)} บาท — ส่วนที่เกินจะเป็นเครดิตในบัตร
-              และถูกหักออกจากบิลรอบถัดไปให้เอง
-            </div>
-          )}
-
-          {notEnough && (
-            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
-              ⚠️ ยอดใน{method === 'cash' ? 'เงินสด' : 'บัญชีที่เลือก'}มี {fmt(sourceBalance)} บาท จ่ายแล้วจะติดลบ
-            </p>
-          )}
-
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
-
-          <p className="text-xs text-gray-500">
-            การจ่ายบิลเป็นการย้ายเงินไปปิดหนี้ ไม่ใช่รายจ่ายก้อนใหม่
-            รายจ่ายถูกบันทึกไปแล้วตั้งแต่วันที่รูด จึงไม่ถูกนับซ้ำในรายงาน
-          </p>
-        </div>
-
-        <div className="px-5 py-4 border-t bg-gray-50 sticky bottom-0 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? '⏳ กำลังจ่าย…' : `จ่าย ${fmt(value)} บาท`}
-          </button>
+        <div className="text-[11.5px] text-[#7A5B56] mt-0.5">
+          ครบกำหนด {formatIsoThai(statement.dueDate)}
+          {minimum > 0 && ` · ขั้นต่ำ ${fmt(minimum)}`}
+          {Number(statement.paidAmount) > 0
+            ? ` · จ่ายไปแล้ว ${fmt(statement.paidAmount)}`
+            : ' · ยังไม่จ่ายในรอบนี้'}
         </div>
       </div>
-    </div>
+
+      <div className="flex-none">
+        <label className="block text-[11.5px] text-muted mb-[5px]">จ่ายจาก</label>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: 'cash', label: 'เงินสด', icon: 'cash' },
+            { key: 'transfer', label: 'เงินโอน', icon: 'bank' },
+          ].map((m) => {
+            const on = method === m.key
+            return (
+              <button
+                key={m.key}
+                onClick={() => { setMethod(m.key); setError('') }}
+                className={`h-10 rounded-[11px] text-[13px] flex items-center justify-center gap-1.5 transition ${
+                  on ? 'bg-ink text-white font-semibold' : 'border border-hairline bg-white text-muted hover:bg-paper'
+                }`}
+              >
+                <UiIcon name={m.icon} tone={on ? 'w' : undefined} size={15} />
+                {m.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {method === 'transfer' && (
+        <div className="flex-none">
+          <label className="block text-[11.5px] text-muted mb-[5px]">ตัดจากบัญชี</label>
+          <TransferAccountPicker value={accountId} onChange={setAccountId} label="" />
+        </div>
+      )}
+
+      <div className="flex-none">
+        <label className="block text-[11.5px] text-muted mb-[5px]">จำนวนที่จ่าย</label>
+        <div className="grid grid-cols-3 gap-2 mb-[7px]">
+          <button
+            onClick={() => setPreset(remaining)}
+            className={`h-8 rounded-[9px] border border-hairline text-[12px] font-semibold ${
+              isFull ? 'bg-ink text-white' : 'bg-white text-muted hover:bg-paper'
+            }`}
+          >
+            เต็มจำนวน {fmt(remaining)}
+          </button>
+          <button
+            onClick={() => setPreset(minimum)}
+            disabled={!(minimum > 0 && minimum < remaining)}
+            className={`h-8 rounded-[9px] border border-hairline text-[12px] font-semibold disabled:opacity-40 ${
+              isMinimum ? 'bg-ink text-white' : 'bg-white text-muted hover:bg-paper'
+            }`}
+          >
+            ขั้นต่ำ {fmt(minimum)}
+          </button>
+          <button
+            onClick={() => { setAmount(''); setError('') }}
+            className={`h-8 rounded-[9px] border border-hairline text-[12px] font-semibold ${
+              isCustom ? 'bg-ink text-white' : 'bg-white text-muted hover:bg-paper'
+            }`}
+          >
+            กำหนดยอดเอง
+          </button>
+        </div>
+        <AmountInput
+          className="h-11 px-[13px] border border-ink rounded-[11px] w-full text-right text-[19px] font-semibold tabular-nums outline-none"
+          value={amount}
+          onChange={(e) => { setAmount(e.target.value); setError('') }}
+          placeholder="0.00"
+        />
+      </div>
+
+      <div className="flex-none">
+        <label className="block text-[11.5px] text-muted mb-[5px]">วันที่จ่าย</label>
+        <DatePicker value={date} onChange={setDate} />
+      </div>
+
+      {isCustom && (
+        <div className="flex-none bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2.5 text-[11.5px] text-muted leading-relaxed">
+          พิมพ์ยอดที่โอนจริงลงในช่องด้านบน ใช้ตอนจ่ายไม่ตรงยอดเต็มและไม่ตรงขั้นต่ำ
+          เช่นจ่ายบางส่วนหรือจ่ายเกินเพื่อเก็บเป็นเครดิต · ยอดที่เหลือจะคิดดอกเบี้ยตามเงื่อนไขบัตร
+        </div>
+      )}
+
+      {(isMinimum || (isPartial && value > 0)) && (
+        <div className="flex-none bg-pending-soft border border-pending-line rounded-ctl px-3 py-2.5 text-[11.5px] text-[#8A6A15] leading-relaxed">
+          <b className="flex items-center gap-1.5">
+            <UiIcon name="warning" tone="amber" size={15} />
+            จ่ายไม่เต็มจำนวน
+          </b>
+          ระยะปลอดดอกเบี้ยจะหายไป และธนาคารจะคิดดอกเบี้ยย้อนตั้งแต่วันที่ทำรายการ ไม่ใช่คิดจากยอดที่เหลือ
+          <br />
+          ยอดที่เหลือ {fmt(remaining - value)} บาท จะถูกยกไปรวมในบิลรอบถัดไป
+        </div>
+      )}
+
+      {value > remaining && (
+        <div className="flex-none bg-income-soft border border-[#BFE0D2] rounded-ctl px-3 py-2.5 text-[11.5px] text-[#0F6A50] leading-relaxed">
+          จ่ายเกิน {fmt(value - remaining)} บาท — ส่วนที่เกินจะเป็นเครดิตในบัตร และถูกหักออกจากบิลรอบถัดไปให้เอง
+        </div>
+      )}
+
+      {notEnough && (
+        <p className="flex-none text-[11.5px] text-expense bg-expense-soft rounded-ctl px-3 py-2">
+          ยอดใน{method === 'cash' ? 'เงินสด' : 'บัญชีที่เลือก'}มี {fmt(sourceBalance)} บาท จ่ายแล้วจะติดลบ
+        </p>
+      )}
+
+      <p className="flex-none text-[11px] text-faint leading-relaxed">
+        การจ่ายบิลเป็นการย้ายเงินไปปิดหนี้ ไม่ใช่รายจ่ายก้อนใหม่ รายจ่ายถูกบันทึกไปแล้วตั้งแต่วันที่รูด
+        จึงไม่ถูกนับซ้ำในรายงาน
+      </p>
+    </Popup>
   )
 }

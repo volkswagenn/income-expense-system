@@ -1,3 +1,5 @@
+import Popup from './Popup'
+import UiIcon from './UiIcon'
 import { useState } from 'react'
 import { format } from 'date-fns'
 import useWalletStore from '../../store/useWalletStore'
@@ -43,65 +45,90 @@ export default function PayDebtPopup({ debt, entry, progress, onConfirm, onCance
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-sm max-h-[92vh] overflow-y-auto">
-        <div className="px-5 pt-3 pb-2 text-center">
-          <div className="w-10 h-1 rounded-full bg-gray-200 mx-auto mb-3 sm:hidden" />
-          <p className="text-xs text-gray-500">{debt.name} · งวดที่ {entry.seq} จาก {debt.months}</p>
-          <p className={`text-3xl font-bold tabular-nums mt-1 ${isRecv ? 'text-emerald-700' : 'text-gray-900'}`}>{fmt(value)}</p>
-          <p className="text-xs text-gray-500">ครบกำหนด {formatIsoThai(entry.dueDate)}</p>
+    <Popup
+      title={isRecv ? 'รับคืนค่างวด' : 'จ่ายค่างวด'}
+      sub={`${debt.name} · งวดที่ ${entry.seq} จาก ${debt.months}`}
+      icon="receipt_long"
+      width={420}
+      onClose={onCancel}
+      onConfirm={submit}
+      busy={busy}
+      confirmLabel={`${isRecv ? 'ยืนยันรับคืน' : 'ยืนยันจ่าย'} ${fmt(value)}`}
+      error={error}
+    >
+      {/* ยอดงวดตัวใหญ่บนสุด — เป็นตัวเลขเดียวที่ต้องยืนยันก่อนกด */}
+      <div className={`flex-none rounded-[14px] px-3.5 py-3 ${isRecv ? 'bg-income-soft border border-[#BFE0D2]' : 'bg-paper'}`}>
+        <div className="text-[11.5px] text-muted">ยอดงวดนี้</div>
+        <div className={`tabular-nums text-[29px] font-semibold tracking-[-0.025em] leading-[1.15] ${isRecv ? 'text-income' : 'text-ink'}`}>
+          {fmt(value)}
         </div>
+        <div className="text-[11.5px] text-faint mt-0.5">ครบกำหนด {formatIsoThai(entry.dueDate)}</div>
+      </div>
 
-        <div className="px-5 pb-4 space-y-3">
-          <div>
-            <label className="label">{isRecv ? 'รับเข้า' : 'จ่ายจาก'}</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button className={`btn text-sm ${method === 'cash' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setMethod('cash'); setError('') }}>
-                💵 เงินสด <span className="text-xs opacity-70 ml-1 tabular-nums">{fmt(cash)}</span>
+      <div className="flex-none">
+        <label className="block text-[11.5px] text-muted mb-[5px]">{isRecv ? 'รับเข้า' : 'จ่ายจาก'}</label>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: 'cash', label: 'เงินสด', icon: 'cash', sub: fmt(cash) },
+            { key: 'transfer', label: 'เงินโอน', icon: 'bank', sub: '' },
+          ].map((m) => {
+            const on = method === m.key
+            return (
+              <button
+                key={m.key}
+                onClick={() => { setMethod(m.key); setError('') }}
+                className={`h-10 rounded-[11px] text-[13px] flex items-center justify-center gap-1.5 transition ${
+                  on ? 'bg-ink text-white font-semibold' : 'border border-hairline bg-white text-muted hover:bg-paper'
+                }`}
+              >
+                <UiIcon name={m.icon} tone={on ? 'w' : undefined} size={15} />
+                {m.label}
+                {m.sub && <span className="tabular-nums text-[11px] opacity-70">{m.sub}</span>}
               </button>
-              <button className={`btn text-sm ${method === 'transfer' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setMethod('transfer'); setError('') }}>
-                🏦 เงินโอน
-              </button>
-            </div>
-            {method === 'transfer' && (
-              <div className="mt-2"><TransferAccountPicker value={accountId} onChange={setAccountId} label="" /></div>
-            )}
-          </div>
+            )
+          })}
+        </div>
+        {method === 'transfer' && (
+          <div className="mt-2"><TransferAccountPicker value={accountId} onChange={setAccountId} label="" /></div>
+        )}
+      </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="label">วันที่</label>
-              <DatePicker value={date} onChange={setDate} />
-            </div>
-            <div>
-              <label className="label">จำนวน</label>
-              <input className="input text-right" type="number" value={amount} onChange={(e) => { setAmount(e.target.value); setError('') }} />
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 text-xs space-y-1">
-            <p className="text-gray-500">หลังจ่ายงวดนี้</p>
-            <div className="flex justify-between"><span>คงเหลือ</span><span className="tabular-nums font-medium">{fmt(remainingAfter)}</span></div>
-            <div className="flex justify-between"><span>เหลืออีก</span><span className="tabular-nums font-medium">{countAfter} งวด</span></div>
-            {nextAfter
-              ? <div className="flex justify-between"><span>งวดถัดไป งวดที่ {nextAfter.seq}</span><span className="tabular-nums">{formatIsoThai(nextAfter.dueDate)}</span></div>
-              : <div className="flex justify-between text-emerald-700 font-medium"><span>งวดสุดท้าย</span><span>ปิดสัญญา</span></div>}
-            {after !== null && (
-              <div className={`flex justify-between border-t border-gray-200 pt-1 ${after < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                <span>{isRecv ? 'เงินในกระเป๋าหลังรับ' : 'เงินในกระเป๋าหลังจ่าย'}</span>
-                <span className="tabular-nums font-medium">{fmt(after)}</span>
-              </div>
-            )}
-          </div>
-
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
-
-          <button className="btn btn-primary w-full !h-11" onClick={submit} disabled={busy}>
-            {busy ? '⏳ กำลังบันทึก…' : `${isRecv ? 'ยืนยันรับคืน' : 'ยืนยันจ่าย'} ${fmt(value)}`}
-          </button>
-          <button className="btn btn-secondary w-full" onClick={onCancel} disabled={busy}>ยกเลิก</button>
+      <div className="flex-none grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-[11.5px] text-muted mb-[5px]">วันที่</label>
+          <DatePicker value={date} onChange={setDate} />
+        </div>
+        <div>
+          <label className="block text-[11.5px] text-muted mb-[5px]">จำนวน</label>
+          <input
+            className="input h-10 text-right tabular-nums"
+            type="number"
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setError('') }}
+          />
         </div>
       </div>
-    </div>
+
+      {/* บอกผลหลังกด — เหลือกี่งวด ปิดสัญญาเมื่อไหร่ เงินในกระเป๋าจะเหลือเท่าไร */}
+      <div className="flex-none rounded-ctl bg-paper px-3 py-2.5 text-[11.5px] flex flex-col gap-1">
+        <p className="text-muted">หลัง{isRecv ? 'รับคืน' : 'จ่าย'}งวดนี้</p>
+        <div className="flex justify-between"><span>คงเหลือ</span><span className="tabular-nums font-semibold">{fmt(remainingAfter)}</span></div>
+        <div className="flex justify-between"><span>เหลืออีก</span><span className="tabular-nums font-semibold">{countAfter} งวด</span></div>
+        {nextAfter ? (
+          <div className="flex justify-between">
+            <span>งวดถัดไป งวดที่ {nextAfter.seq}</span>
+            <span className="tabular-nums">{formatIsoThai(nextAfter.dueDate)}</span>
+          </div>
+        ) : (
+          <div className="flex justify-between text-income font-semibold"><span>งวดสุดท้าย</span><span>ปิดสัญญา</span></div>
+        )}
+        {after !== null && (
+          <div className={`flex justify-between border-t border-hairline pt-1 mt-0.5 ${after < 0 ? 'text-expense' : 'text-income'}`}>
+            <span>{isRecv ? 'เงินในกระเป๋าหลังรับ' : 'เงินในกระเป๋าหลังจ่าย'}</span>
+            <span className="tabular-nums font-semibold">{fmt(after)}</span>
+          </div>
+        )}
+      </div>
+    </Popup>
   )
 }

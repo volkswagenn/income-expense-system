@@ -1,3 +1,4 @@
+import Popup from '../../components/shared/Popup'
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
@@ -14,10 +15,18 @@ import SourceTag from '../../components/shared/SourceTag'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
+/**
+ * สีของสถานะงวด — ชุดเดียวกับตารางงวดผ่อนบัตร (Recurring/InstallmentList)
+ *
+ * งวดที่จ่ายไปแล้วต้องเป็นสีเขียวทั้งคู่ ไม่งั้นงวดที่ผ่อนมาก่อนเริ่มใช้แอปจะดูเหมือน
+ * ยังไม่จ่าย ทั้งที่จ่ายไปแล้วจริง — สัญญาผ่อนรถ 60 งวดที่ผ่อนมาแล้ว 23 งวด
+ * จะอ่านแล้วนึกว่าค้างทั้งตาราง แต่ใช้เขียวคนละเฉดเพื่อให้ยังแยกออกว่างวดไหน
+ * กดจ่ายผ่านแอป (มีเงินออกจากกระเป๋าให้ตรวจสอบย้อนได้) กับงวดไหนแค่บันทึกไว้เฉยๆ
+ */
 const STATUS = {
-  paid:      { label: 'จ่ายแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  paid:      { label: '✓ จ่ายแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-300' },
+  prepaid:   { label: '✓ ผ่อนมาก่อนใช้ระบบ', cls: 'bg-teal-50 text-teal-700 border-teal-200' },
   pending:   { label: 'ยังไม่ถึง', cls: 'bg-gray-50 text-gray-500 border-gray-200' },
-  prepaid:   { label: 'ผ่อนมาก่อนใช้ระบบ', cls: 'bg-slate-50 text-slate-500 border-slate-200' },
   cancelled: { label: 'ยกเลิก', cls: 'bg-gray-50 text-gray-400 border-gray-200 line-through' },
 }
 
@@ -29,34 +38,27 @@ function SettlePopup({ debt, progress, onConfirm, onCancel, busy }) {
   const resolveAccount = useWalletStore((s) => s.resolveTransferAccountId)
   const total = progress.remainingAmount + (Number(fee) || 0)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-5 py-4 border-b bg-gray-50 flex items-center justify-between">
-          <h3 className="font-semibold text-base">ปิดยอดคงเหลือ</h3>
-          <button className="text-gray-400 hover:text-gray-600 text-xl leading-none" onClick={onCancel}>×</button>
+    <Popup
+      title="ปิดยอดคงเหลือ"
+      icon="receipt_long"
+      width={420}
+      onClose={onCancel}
+      onConfirm={undefined}
+      busy={busy}
+      confirmLabel="ปิดยอด"
+    >
+        <p className="text-sm text-gray-600">รวม {progress.remainingCount} งวดที่เหลือ <strong className="tabular-nums">{fmt(progress.remainingAmount)}</strong> บาท แล้วปิดสัญญา "{debt.name}"</p>
+        <div className="grid grid-cols-2 gap-2">
+          <button className={`btn text-sm ${method === 'cash' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMethod('cash')}>💵 เงินสด</button>
+          <button className={`btn text-sm ${method === 'transfer' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMethod('transfer')}>🏦 เงินโอน</button>
         </div>
-        <div className="p-5 space-y-3">
-          <p className="text-sm text-gray-600">รวม {progress.remainingCount} งวดที่เหลือ <strong className="tabular-nums">{fmt(progress.remainingAmount)}</strong> บาท แล้วปิดสัญญา "{debt.name}"</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button className={`btn text-sm ${method === 'cash' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMethod('cash')}>💵 เงินสด</button>
-            <button className={`btn text-sm ${method === 'transfer' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMethod('transfer')}>🏦 เงินโอน</button>
-          </div>
-          {method === 'transfer' && <TransferAccountPicker value={accountId} onChange={setAccountId} label="" />}
-          <div className="grid grid-cols-2 gap-2">
-            <div><label className="label">วันที่</label><DatePicker value={date} onChange={setDate} /></div>
-            <div><label className="label">ค่าธรรมเนียม</label><input className="input text-right" type="number" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0.00" /></div>
-          </div>
-          <p className="text-xs text-gray-500">ยอดรวมที่จะจ่าย {fmt(total)} บาท</p>
+        {method === 'transfer' && <TransferAccountPicker value={accountId} onChange={setAccountId} label="" />}
+        <div className="grid grid-cols-2 gap-2">
+          <div><label className="label">วันที่</label><DatePicker value={date} onChange={setDate} /></div>
+          <div><label className="label">ค่าธรรมเนียม</label><input className="input text-right" type="number" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0.00" /></div>
         </div>
-        <div className="px-5 py-4 border-t bg-gray-50 flex gap-2 justify-end">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>ยกเลิก</button>
-          <button className="btn btn-primary" disabled={busy || (method === 'transfer' && !resolveAccount(accountId))}
-            onClick={() => onConfirm({ method, accountId: method === 'transfer' ? resolveAccount(accountId) : null, date, fee: Number(fee) || 0 })}>
-            {busy ? '⏳' : 'ปิดยอด'}
-          </button>
-        </div>
-      </div>
-    </div>
+        <p className="text-xs text-gray-500">ยอดรวมที่จะจ่าย {fmt(total)} บาท</p>
+    </Popup>
   )
 }
 
@@ -169,7 +171,7 @@ function DebtCard({ debt, onPay, onUndo, onSettle, onCancelDebt }) {
   )
 }
 
-export default function DebtList({ embedded = false }) {
+export default function DebtList({ embedded = false, bare = false }) {
   const debts = useDebtStore((s) => s.debts)
   const totals = useDebtStore((s) => s.getTotals())
   const { payEntry, undoEntry, settleDebt, cancelDebt } = useDebtStore()
@@ -246,6 +248,9 @@ export default function DebtList({ embedded = false }) {
 
   return (
     <div className="space-y-3">
+      {/* bare = หน้าที่เรียกมามีหัวข้อและยอดรวมของตัวเองอยู่แล้ว (หน้าบัตรและหนี้สิน)
+          ถ้าไม่ซ่อน จะเห็นหัวข้อกับยอดรวมซ้ำสองชุดติดกัน */}
+      {!bare && (
       <div className="flex items-start justify-between gap-3">
         {embedded ? (
           <div className="min-w-0">
@@ -271,6 +276,7 @@ export default function DebtList({ embedded = false }) {
         )}
         <Link to="/manage/debts" className="btn btn-secondary text-xs shrink-0">จัดการหนี้สิน</Link>
       </div>
+      )}
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
 
