@@ -315,7 +315,7 @@ function CancelConfirmPopup({ target, busy, error, onConfirm, onCancel }) {
       sub="รายการจะถูกยกเลิกและเงินจะถูกคืนสู่ต้นทาง"
       icon="delete_sweep"
       width={420}
-      onClose={onClose}
+      onClose={onCancel}
       onConfirm={onConfirm}
       busy={busy}
       danger

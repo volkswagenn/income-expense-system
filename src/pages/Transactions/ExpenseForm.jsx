@@ -12,6 +12,7 @@ import TransferAccountPicker from '../../components/shared/TransferAccountPicker
 import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import PayFromPicker from '../../components/shared/PayFromPicker'
 import Icon from '../../components/shared/Icon'
+import StepHeading from '../../components/shared/StepHeading'
 import DebtFields, { EMPTY_DEBT, computeDebt, validateDebt } from '../../components/shared/DebtFields'
 import useDebtStore from '../../store/useDebtStore'
 import useWalletStore from '../../store/useWalletStore'
@@ -506,6 +507,20 @@ export default function ExpenseForm({ onPreviewChange }) {
     form.note && 'หมายเหตุ',
   ].filter(Boolean).join(' · ') || 'ไม่ได้กรอก 5 ช่อง — ไม่กรอกก็บันทึกได้'
 
+  // สถานะของแต่ละขั้นตอน — ช่องทางจ่ายบางแบบยังต้องเลือกต่อ (บัญชีไหน บัตรใบไหน)
+  // จึงยังไม่นับว่าเสร็จจนกว่าจะเลือกครบ
+  const payReady = form.method === 'transfer' ? !!resolveAccount(form.transferAccountId)
+    : form.method === 'card' ? !!resolveCard(form.cardId)
+    : form.method === 'debt' ? !!(form.debt?.months && form.debt?.monthly)
+    : true
+  const stepDone = [
+    Number(form.amount) > 0 || form.method === 'debt',
+    !!form.itemName.trim(),
+    payReady,
+    hasMoreValues,
+  ]
+  const nextStep = stepDone.findIndex((d, i) => !d && i < 3)
+
   const handleUploadDone = (savedPath) => {
     setUploadOpen(false)
     if (savedPath) {
@@ -550,9 +565,17 @@ export default function ExpenseForm({ onPreviewChange }) {
         {/* ยอดเงินอยู่บนสุดและตัวใหญ่ที่สุด — เป็นค่าที่ต้องกรอกเสมอและกรอกก่อนเพื่อนจริง
             ปุ่มยอดด่วนไว้สำหรับรายจ่ายซ้ำๆ ที่เป็นเลขกลม จะได้ไม่ต้องพิมพ์ทุกครั้ง */}
         {form.method !== 'debt' && (
+          <div>
+            <StepHeading
+              n={1}
+              title="ใส่จำนวนเงิน"
+              hint="กดปุ่มยอดด่วนหรือแป้นตัวเลขก็ได้"
+              done={stepDone[0]}
+              current={nextStep === 0}
+            />
           <div className="flex items-end gap-3.5 flex-wrap">
             <div className="flex-none w-full sm:w-[262px]">
-              <label className="block text-[12.5px] font-semibold mb-1.5">จำนวนเงิน<span className="hidden lg:inline"> (บาท)</span></label>
+              <label className="sr-only">จำนวนเงิน (บาท)</label>
               {/* ขีดสีมะนาวคั่นระหว่างตัวเลขกับหน่วย ทำให้ตาแยกยอดออกจากคำว่า "บาท" ได้ทันที
                   ปุ่มแป้นตัวเลขอยู่ในช่องเลย เพราะเป็นทางที่คนกรอกยอดหลายใบเสร็จใช้บ่อย
                   (มือถือปุ่มนี้พับ/กางแป้นในแถบล่าง จอใหญ่เปิดป๊อปอัป) */}
@@ -599,6 +622,7 @@ export default function ExpenseForm({ onPreviewChange }) {
                 </button>
               )}
             </div>
+          </div>
           </div>
         )}
 
@@ -654,6 +678,14 @@ export default function ExpenseForm({ onPreviewChange }) {
           </div>
         )}
 
+        <StepHeading
+          n={2}
+          title="รายการนี้คืออะไร"
+          hint="ชื่อรายการและหมวดหมู่ ใช้ในประวัติและรายงาน"
+          done={stepDone[1]}
+          current={nextStep === 1}
+          className="!mb-0"
+        />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-1.5">
@@ -694,7 +726,16 @@ export default function ExpenseForm({ onPreviewChange }) {
 
         <div className="grid grid-cols-1 gap-4">
           <div>
+            <StepHeading
+              n={3}
+              title="จ่ายด้วยอะไร"
+              hint="เลือกช่องทาง แล้วระบุบัญชีหรือบัตรถ้าต้องมี"
+              done={stepDone[2]}
+              current={nextStep === 2}
+              className="!mb-1.5"
+            />
             <PayFromPicker
+              label=""
               value={{ method: form.method, transferAccountId: form.transferAccountId, cardId: form.cardId }}
               onChange={setMany}
               options={['cash', 'transfer', 'card', 'debt', 'pending']}
@@ -1040,6 +1081,13 @@ export default function ExpenseForm({ onPreviewChange }) {
             3 ช่อง (ยอด ชื่อรายการ หมวดหมู่) ตามที่ตั้งใจไว้ในแบบ ถ้ามีข้อมูลกรอกไว้แล้ว
             จะกางออกให้เองเพื่อไม่ให้ค่าที่กรอกไปหายจากสายตา */}
         <div>
+          <StepHeading
+            n={4}
+            title="รายละเอียดเพิ่มเติม"
+            hint="ผู้ขาย · ใบเสร็จ · ใบกำกับภาษี · ไฟล์แนบ"
+            done={stepDone[3]}
+            optional
+          />
           <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}

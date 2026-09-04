@@ -7,6 +7,7 @@ import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import CategorySelect from '../../components/shared/CategorySelect'
 import Icon from '../../components/shared/Icon'
+import StepHeading from '../../components/shared/StepHeading'
 import useTransactionStore from '../../store/useTransactionStore'
 import useLogStore from '../../store/useLogStore'
 import usePendingStore from '../../store/usePendingStore'
@@ -284,6 +285,11 @@ export default function IncomeForm({ onPreviewChange }) {
     attachments.length > 0 && `ไฟล์แนบ ${attachments.length}`,
   ].filter(Boolean).join(' · ') || 'ไม่ได้กรอก 3 ช่อง — ไม่กรอกก็บันทึกได้'
 
+  // สถานะของแต่ละขั้นตอน — "ที่ต้องทำต่อ" คือขั้นแรกที่ยังไม่ได้กรอก
+  // (สองขั้นหลังไม่บังคับ จึงไม่ถูกชี้ว่าเป็นขั้นที่ต้องทำ ไม่งั้นจะดูเหมือนกรอกไม่ครบตลอด)
+  const stepDone = [total > 0, !!form.category, isPendingMode, !!(form.note || form.detail || attachments.length)]
+  const nextStep = stepDone[0] ? (stepDone[1] ? -1 : 1) : 0
+
   return (
     <div className="flex flex-col">
       <div className="px-5 pt-4 space-y-4">
@@ -294,10 +300,13 @@ export default function IncomeForm({ onPreviewChange }) {
       {/* ช่องทางรับเงิน — กรอกได้หลายช่องพร้อมกัน แต่ละช่องกลายเป็นหนึ่งรายการ
           ช่องที่มียอดจะขึ้นขอบเข้ม จะได้เห็นทันทีว่ากำลังจะบันทึกกี่รายการ */}
       <div className="px-5 pt-4">
-        <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-2">
-          รับเงินเข้าช่องทางไหน
-          <span className="text-[11px] font-normal text-faint">กรอกได้หลายช่องพร้อมกัน แต่ละช่องถูกบันทึกเป็นหนึ่งรายการ</span>
-        </label>
+        <StepHeading
+          n={1}
+          title="รับเงินเข้าช่องทางไหน"
+          hint="กรอกได้หลายช่องพร้อมกัน แต่ละช่องถูกบันทึกเป็นหนึ่งรายการ"
+          done={stepDone[0]}
+          current={nextStep === 0}
+        />
 
         <div className="flex flex-col gap-2">
           <IncomeRow
@@ -428,7 +437,16 @@ export default function IncomeForm({ onPreviewChange }) {
       </div>
 
       {/* หมวดหมู่ + ประเภทเอกสาร */}
-      <div className="px-5 pt-4 grid grid-cols-1 md:grid-cols-2 gap-3.5">
+      <div className="px-5 pt-4">
+        <StepHeading
+          n={2}
+          title="หมวดหมู่และเอกสาร"
+          hint="ใช้จัดกลุ่มในรายงาน · ออกให้ลูกค้าหรือไม่"
+          done={stepDone[1]}
+          current={nextStep === 1}
+        />
+      </div>
+      <div className="px-5 grid grid-cols-1 md:grid-cols-2 gap-3.5">
         <div>
           <label className="flex items-baseline gap-[7px] text-[12.5px] font-semibold mb-1.5">
             หมวดหมู่รายรับ
@@ -461,6 +479,7 @@ export default function IncomeForm({ onPreviewChange }) {
 
       {/* เปิดบิลรอรับเงิน — ติ๊กแล้วทุกช่องรวมเป็นบิลใบเดียว ยังไม่เข้ากระเป๋า */}
       <div className="px-5 pt-4">
+        <StepHeading n={3} title="ได้รับเงินแล้วหรือยัง" hint="ถ้ายังไม่ได้รับ ให้เปิดเป็นบิลรอรับเงิน" done={stepDone[2]} optional />
         <button
           type="button"
           onClick={() => setIsPendingMode((v) => !v)}
@@ -480,6 +499,7 @@ export default function IncomeForm({ onPreviewChange }) {
 
       {/* ช่องที่ไม่ได้กรอกทุกครั้ง พับเก็บไว้ใต้ปุ่มเดียว เหมือนฝั่งรายจ่าย */}
       <div className="px-5 pt-3.5">
+        <StepHeading n={4} title="รายละเอียดเพิ่มเติม" hint="หมายเหตุ · รายละเอียด · ไฟล์แนบ" done={stepDone[3]} optional />
         <button
           type="button"
           onClick={() => setMoreOpen((v) => !v)}

@@ -197,7 +197,8 @@ export default function PayFromPicker({
 
   return (
     <div>
-      <label className="label">{label}</label>
+      {/* ส่งค่าว่างมาได้ ถ้าที่เรียกใช้มีหัวข้ออยู่แล้ว จะได้ไม่มีหัวข้อซ้อนกันสองชั้น */}
+      {label && <label className="label">{label}</label>}
 
       {/* มือถือเรียง 3 คอลัมน์ตามแบบ (ปุ่มสูงพอให้นิ้วกด ~52px) จอใหญ่กางแถวเดียว */}
       <div className={`grid gap-2 ${
@@ -238,7 +239,7 @@ export default function PayFromPicker({
       title="จ่ายจาก"
           icon="payments"
           width={420}
-          onClose={onClose}
+          onClose={close}
         >
             {/* ชั้นที่ 1 วิธี */}
             <div className={`grid gap-1.5 ${METHODS.length >= 5 ? 'grid-cols-5' : METHODS.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
