@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import useCreditCardStore from '../../store/useCreditCardStore'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
 import { formatCard } from '../../components/shared/CreditCardPicker'
 import { nextClosingDate, formatThaiDate, formatIsoThai, daysUntil } from '../../lib/cardCycle'
@@ -141,7 +142,9 @@ export default function AllCardsView({ onOpenCard }) {
               className="flex items-center gap-3.5 border border-hairline rounded-[13px] px-3.5 py-3 bg-white text-left hover:bg-[#FAF9F6] hover:border-ink transition"
             >
               <span className="w-[38px] h-[38px] flex-none rounded-[11px] bg-paper flex items-center justify-center">
-                <BankLogo bankName={r.card.bankName} size="md" />
+                <span className="w-8 h-8 flex-none rounded-lg bg-paper flex items-center justify-center">
+                  <AppIcon value={r.card.icon} size={18} fallback={DEFAULT_ICONS.card} />
+                </span>
               </span>
               <span className="flex-1 min-w-0">
                 <span className="block text-[13px] font-semibold truncate">{formatCard(r.card)}</span>

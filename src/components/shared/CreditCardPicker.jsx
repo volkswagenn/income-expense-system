@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import useCreditCardStore from '../../store/useCreditCardStore'
-import BankLogo from './BankLogo'
+import AppIcon from './AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 
 export function formatCard(card) {
   if (!card) return 'ไม่ระบุบัตร'
@@ -57,7 +58,7 @@ export default function CreditCardPicker({
       <div>
         <label className="label">{label}</label>
         <div className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-100 text-sm text-rose-900 flex items-center gap-2">
-          <BankLogo bankName={c.bankName} size="sm" />
+          <span className="w-6 h-6 flex-none rounded-md bg-paper flex items-center justify-center"><AppIcon value={c.icon} size={15} fallback={DEFAULT_ICONS.card} /></span>
           <span className="truncate flex-1">{formatCard(c)}</span>
           {showOutstanding && (
             <span className="text-xs text-rose-600 tabular-nums shrink-0" title="ยอดหนี้คงค้าง">

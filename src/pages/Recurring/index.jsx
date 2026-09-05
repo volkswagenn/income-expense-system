@@ -562,7 +562,7 @@ export default function RecurringPage() {
             <div className="mt-3 space-y-2">
               {activeItems.map((item) => (
                 <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-white">
-                  <AppIcon value={item.icon} size={19} color="#6D4AA8" fallback="event_repeat" />
+                  <AppIcon value={item.icon} size={19} fallback="event_repeat" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${item.enabled ? 'bg-emerald-400' : 'bg-gray-300'}`} />

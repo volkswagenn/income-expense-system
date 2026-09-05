@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Popup from '../../components/shared/Popup'
 import Icon from '../../components/shared/Icon'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import { listWalletLogsSince } from '../../lib/api/logs'
 import {
   buildYearStatement, buildMonthEntries, deltaForAccount, monthLabel, yearsWithMovement,
@@ -97,7 +98,9 @@ export default function AccountMenuPopup({ account, onClose, onEdit }) {
       {view === 'menu' && (
         <>
           <div className="rounded-panel bg-paper px-4 py-3.5 flex items-center gap-3">
-            <BankLogo bankName={account.bankName} size="lg" />
+            <span className="w-10 h-10 flex-none rounded-lg bg-white border border-hairline flex items-center justify-center">
+              <AppIcon value={account.icon} size={22} fallback={DEFAULT_ICONS.account} />
+            </span>
             <div className="min-w-0 flex-1">
               <p className="text-[11.5px] text-muted">ยอดคงเหลือตอนนี้</p>
               <p className={`text-[24px] font-semibold tabular-nums leading-tight ${

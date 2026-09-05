@@ -1,22 +1,28 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Popup from './Popup'
 import Icon from './Icon'
 import AppIcon from './AppIcon'
-import { ICON_GROUPS, BRAND_ICONS, BANK_ICONS, ICON_TOTAL, iconLabel } from '../../lib/iconCatalog'
+import { ICON_GROUPS, EMOJI_GROUPS, BRAND_ICONS, BANK_ICONS, ICON_TOTAL, iconLabel } from '../../lib/iconCatalog'
 
 /**
  * ตัวเลือกไอคอน ใช้ร่วมกันทุกที่ที่ให้ตั้งไอคอนได้
  *
  * ทำไมต้องมีช่องค้นหาที่ค้นภาษาไทยได้
- *   ชุดไอคอนมี 350 ตัว ถ้าให้ไล่ดูทีละกลุ่มจะหาไม่เจอ และคนใช้คิดเป็นภาษาไทย
+ *   ชุดไอคอนมีเกือบ 900 ตัว ถ้าให้ไล่ดูทีละกลุ่มจะหาไม่เจอ และคนใช้คิดเป็นภาษาไทย
  *   ("ค่าไฟ") ไม่ได้คิดเป็นชื่อไฟล์ ("bolt") ทุกตัวจึงมีชื่อไทยกำกับไว้ให้ค้น
  *
- * ทำไมแยก "แบรนด์" กับ "ธนาคาร" ออกจากกลุ่มอื่น
- *   สองชุดนี้เป็นโลโก้จริงที่มีสีประจำตัว ไม่ใช่ไอคอนสีเดียวเหมือนกลุ่มอื่น
- *   ถ้าปนกันในกลุ่มเดียวจะดูรก และตอนค้นหาจะได้ผลปนกันจนเลือกยาก
+ * ทำไมแบ่งเป็นสามแบบก่อน แล้วค่อยแบ่งกลุ่ม
+ *   ไอคอนสาม "ภาษา" นี้วาดคนละแบบ ถ้าเรียงปนกันในตารางเดียวจะดูเหมือนหลุดธีม
+ *     • ไอคอนสี   – ภาพหลายสี จำได้จากรูปตั้งแต่เหลือบตา เหมาะกับหมวดหมู่
+ *     • ไอคอนเรียบ – กราฟิกสีเดียว เปลี่ยนสีตามบริบทได้ เหมาะกับที่ต้องกลืนไปกับพื้น
+ *     • แบรนด์/ธนาคาร – โลโก้จริงที่มีสีประจำตัว ใช้ระบุว่าเป็นเจ้าไหน
+ *   เริ่มที่ "ไอคอนสี" เพราะเป็นชุดที่อ่านง่ายที่สุดสำหรับคนที่ยังไม่รู้จะเลือกอะไร
+ *
+ * ตอนค้นหาจะข้ามทั้งการแบ่งแบบและการแบ่งกลุ่ม เพราะคนที่พิมพ์ "กาแฟ"
+ * ไม่ได้สนใจว่ามันอยู่ชุดไหน ขอแค่เห็นทุกตัวที่เกี่ยวเพื่อเทียบกันในตาเดียว
  *
  * props
- *   value     – ค่าปัจจุบัน เช่น "ms:bolt"; null/'' = ยังไม่เลือก
+ *   value     – ค่าปัจจุบัน เช่น "ms:bolt" "emoji:money-bag"; null/'' = ยังไม่เลือก
  *   onPick    – (ค่าใหม่ | null) => void — ส่ง null เมื่อกด "ไม่ใช้ไอคอน"
  *   onClose   – ปิดโดยไม่เปลี่ยนอะไร
  *   tone      – สีที่ใช้แสดงตัวอย่างไอคอนทั่วไป (ให้ตรงกับที่จะไปแสดงจริง)
@@ -27,47 +33,89 @@ const SPECIAL_TABS = [
   { key: '__bank', label: 'ธนาคาร', cover: 'account_balance' },
 ]
 
+const STYLES = [
+  { key: 'color', label: 'ไอคอนสี' },
+  { key: 'plain', label: 'ไอคอนเรียบ' },
+  { key: 'logo', label: 'แบรนด์/ธนาคาร' },
+]
+
+/** ค่าที่เก็บไว้อยู่ในชุดไหน ใช้เปิดตัวเลือกมาที่แบบเดิมของผู้ใช้ */
+function styleOf(value) {
+  const kind = typeof value === 'string' ? value.split(':')[0] : ''
+  if (kind === 'emoji') return 'color'
+  if (kind === 'brand' || kind === 'bank') return 'logo'
+  if (kind === 'ms') return 'plain'
+  return 'color'
+}
+
+function groupsOfStyle(style) {
+  if (style === 'color') {
+    return EMOJI_GROUPS.map((g) => ({ key: g.key, label: g.label, cover: `emoji:${g.cover}` }))
+  }
+  if (style === 'logo') {
+    return SPECIAL_TABS.map((g) => ({ key: g.key, label: g.label, cover: `ms:${g.cover}` }))
+  }
+  return ICON_GROUPS.map((g) => ({ key: g.key, label: g.label, cover: `ms:${g.cover}` }))
+}
+
 export default function IconPicker({ value, onPick, onClose, tone = '#16181D' }) {
+  const [style, setStyle] = useState(() => styleOf(value))
   const [tab, setTab] = useState(() => {
     const kind = typeof value === 'string' ? value.split(':')[0] : ''
     if (kind === 'brand') return '__brand'
     if (kind === 'bank') return '__bank'
-    return ICON_GROUPS[0].key
+    return groupsOfStyle(styleOf(value))[0].key
   })
   const [q, setQ] = useState('')
 
-  // รายการที่จะแสดง — พิมพ์ค้นหาแล้วข้ามการแบ่งกลุ่มไปเลย
-  // เพราะคนที่พิมพ์ "ค่าไฟ" ไม่รู้ว่ามันอยู่กลุ่มไหน ถ้ายังกรองตามกลุ่มอยู่จะหาไม่เจอ
+  const tabs = useMemo(() => groupsOfStyle(style), [style])
+
+  // เปลี่ยนแบบแล้วกลุ่มเดิมไม่มีอยู่ในแบบใหม่ ต้องเด้งไปกลุ่มแรกเสมอ
+  // ไม่งั้นตารางจะว่างเปล่าโดยที่ไม่มีอะไรบอกว่าทำไม
+  useEffect(() => {
+    if (!tabs.some((t) => t.key === tab)) setTab(tabs[0].key)
+  }, [tabs, tab])
+
+  // รายการที่จะแสดง — พิมพ์ค้นหาแล้วข้ามทั้งแบบและกลุ่มไปเลย
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase()
 
-    const general = ICON_GROUPS.flatMap((g) =>
-      g.items.map(([name, label]) => ({ value: `ms:${name}`, label, group: g.label, color: null })),
-    )
-    const brands = BRAND_ICONS.map(([name, label, color]) => ({
-      value: `brand:${name}`, label, group: 'โลโก้แบรนด์', color,
-    }))
-    const banks = BANK_ICONS.map(([code, label, color]) => ({
-      value: `bank:${code}`, label, group: 'ธนาคาร', color,
-    }))
-
     if (kw) {
+      const emojis = EMOJI_GROUPS.flatMap((g) =>
+        g.items.map(([name, label]) => ({ value: `emoji:${name}`, label, group: g.label })),
+      )
+      const general = ICON_GROUPS.flatMap((g) =>
+        g.items.map(([name, label]) => ({ value: `ms:${name}`, label, group: g.label })),
+      )
+      const brands = BRAND_ICONS.map(([name, label]) => ({
+        value: `brand:${name}`, label, group: 'โลโก้แบรนด์',
+      }))
+      const banks = BANK_ICONS.map(([code, label]) => ({
+        value: `bank:${code}`, label, group: 'ธนาคาร',
+      }))
+
       // ชื่อหมวดก็ค้นได้ — พิมพ์ "ธนาคาร" ต้องได้โลโก้ธนาคารทั้งชุด ทั้งที่ชื่อแต่ละตัว
       // เป็น "กสิกรไทย" "ไทยพาณิชย์" ซึ่งไม่มีคำว่าธนาคารอยู่เลย
       const hit = (r) =>
         r.label.toLowerCase().includes(kw) ||
         r.group.toLowerCase().includes(kw) ||
-        r.value.split(':')[1].replace(/_/g, ' ').includes(kw)
-      return [...general, ...brands, ...banks].filter(hit).slice(0, 120)
+        r.value.split(':')[1].replace(/[_-]/g, ' ').includes(kw)
+      return [...emojis, ...general, ...brands, ...banks].filter(hit).slice(0, 120)
     }
 
-    if (tab === '__brand') return brands
-    if (tab === '__bank') return banks
+    if (tab === '__brand') {
+      return BRAND_ICONS.map(([name, label]) => ({ value: `brand:${name}`, label, group: 'โลโก้แบรนด์' }))
+    }
+    if (tab === '__bank') {
+      return BANK_ICONS.map(([code, label]) => ({ value: `bank:${code}`, label, group: 'ธนาคาร' }))
+    }
+    if (style === 'color') {
+      const g = EMOJI_GROUPS.find((x) => x.key === tab)
+      return (g?.items ?? []).map(([name, label]) => ({ value: `emoji:${name}`, label, group: g.label }))
+    }
     const g = ICON_GROUPS.find((x) => x.key === tab)
-    return (g?.items ?? []).map(([name, label]) => ({
-      value: `ms:${name}`, label, group: g.label, color: null,
-    }))
-  }, [q, tab])
+    return (g?.items ?? []).map(([name, label]) => ({ value: `ms:${name}`, label, group: g.label }))
+  }, [q, tab, style])
 
   const searching = q.trim().length > 0
 
@@ -107,11 +155,28 @@ export default function IconPicker({ value, onPick, onClose, tone = '#16181D' })
         />
       </div>
 
+      {/* สลับแบบของไอคอน — ซ่อนตอนค้นหาเพราะผลลัพธ์รวมทุกแบบอยู่แล้ว */}
+      {!searching && (
+        <div className="flex-none flex items-center gap-1 p-[3px] rounded-[11px] bg-paper border border-hairline">
+          {STYLES.map((s) => (
+            <button
+              key={s.key}
+              onClick={() => setStyle(s.key)}
+              className={`flex-1 h-[30px] rounded-[9px] text-[12px] transition ${
+                style === s.key ? 'bg-white border border-hairline font-semibold shadow-sm' : 'text-muted hover:text-ink'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-[136px_minmax(0,1fr)] gap-3 min-h-0">
         {/* รายชื่อกลุ่ม — ซ่อนตอนค้นหาเพราะผลลัพธ์ข้ามกลุ่มอยู่แล้ว การคงไว้จะทำให้เข้าใจผิดว่ากรองอยู่ */}
         {!searching && (
           <div className="flex sm:flex-col gap-1 overflow-x-auto sm:overflow-x-visible sm:max-h-[330px] sm:overflow-y-auto sm:pr-1 -mx-0.5 px-0.5">
-            {[...ICON_GROUPS, ...SPECIAL_TABS].map((g) => {
+            {tabs.map((g) => {
               const on = tab === g.key
               return (
                 <button
@@ -121,7 +186,7 @@ export default function IconPicker({ value, onPick, onClose, tone = '#16181D' })
                     on ? 'bg-ink text-white font-semibold' : 'text-muted hover:bg-paper'
                   }`}
                 >
-                  <AppIcon value={`ms:${g.cover}`} size={16} color={on ? "#FFFFFF" : "#7A7F87"} />
+                  <AppIcon value={g.cover} size={16} color={on ? '#FFFFFF' : '#7A7F87'} />
                   <span className="truncate">{g.label}</span>
                 </button>
               )
@@ -149,7 +214,9 @@ export default function IconPicker({ value, onPick, onClose, tone = '#16181D' })
                         : 'border-hairline bg-white hover:bg-paper hover:border-ink/25'
                     }`}
                   >
-                    <AppIcon value={r.value} size={21} color={r.color ?? tone} />
+                    {/* ไม่บังคับสีในตาราง — แต่ละชุดต้องโชว์สีจริงที่จะออกมาตอนใช้งาน
+                        จะได้เห็นตั้งแต่ตอนเลือกว่าไอคอนนั้นจะหน้าตาแบบไหน */}
+                    <AppIcon value={r.value} size={22} />
                   </button>
                 )
               })}
@@ -193,7 +260,7 @@ export function IconPickerButton({
         }`}
       >
         {value ? (
-          <AppIcon value={value} size={Math.round(size * 0.55)} color={tone} />
+          <AppIcon value={value} size={Math.round(size * 0.55)} />
         ) : (
           <AppIcon value={`ms:${emptyIcon}`} size={Math.round(size * 0.55)} color="#8A8F97" />
         )}

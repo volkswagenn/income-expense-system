@@ -157,7 +157,7 @@ export default function SubWalletList() {
             return (
               <div key={id} className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl">
                 <span className="text-xs text-gray-400 w-5 text-center font-medium">{idx + 1}</span>
-                <AppIcon value={w.icon} size={17} color="#3A55C4" fallback="wallet" />
+                <AppIcon value={w.icon} size={17} fallback="wallet" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{w.name}</p>
                   <p className="text-xs text-gray-500">{w.balance.toLocaleString()} บาท</p>

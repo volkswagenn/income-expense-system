@@ -4,15 +4,15 @@
  * ★ ไฟล์นี้ถูกสร้างอัตโนมัติ อย่าแก้มือ ★
  * แก้ที่ scripts/icon-source.mjs แล้วรัน `npm run icons`
  *
- * ค่าที่เก็บลงฐานข้อมูลเป็นสตริงมี prefix เสมอ เช่น "ms:bolt" "brand:line" "bank:kbank"
- * มี prefix เพื่อให้ย้ายไอคอนข้ามกลุ่มได้โดยค่าที่บันทึกไว้เดิมยังใช้ได้อยู่
- * และเพื่อไม่ให้ชื่อชนกันเองระหว่างชุด (เช่น shell ที่เป็นทั้งไอคอนและแบรนด์)
+ * ค่าที่เก็บลงฐานข้อมูลเป็นสตริงมี prefix เสมอ เช่น "ms:bolt" "emoji:money-bag"
+ * "brand:line" "bank:kbank" มี prefix เพื่อให้ย้ายไอคอนข้ามกลุ่มได้โดยค่าที่บันทึกไว้
+ * เดิมยังใช้ได้อยู่ และเพื่อไม่ให้ชื่อชนกันเองระหว่างชุด (เช่น shell ที่เป็นทั้งไอคอนและแบรนด์)
  */
 
 /** ไอคอนทั่วไป แบ่งตามกลุ่ม — [ชื่อไฟล์, ชื่อไทย] */
 export const ICON_GROUPS = [
   {
-    key: "finance", label: "การเงิน", cover: "payments",
+    key: "finance", label: "การเงิน", cover: "payments", color: "#12795B",
     items: [
     ["payments", "ชำระเงิน"],
     ["wallet", "กระเป๋าเงิน"],
@@ -39,7 +39,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "food", label: "อาหารและเครื่องดื่ม", cover: "restaurant",
+    key: "food", label: "อาหารและเครื่องดื่ม", cover: "restaurant", color: "#E06A1F",
     items: [
     ["restaurant", "ร้านอาหาร"],
     ["lunch_dining", "เบอร์เกอร์"],
@@ -66,7 +66,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "shopping", label: "ช้อปปิ้ง", cover: "shopping_cart",
+    key: "shopping", label: "ช้อปปิ้ง", cover: "shopping_cart", color: "#D0483C",
     items: [
     ["shopping_cart", "ตะกร้าสินค้า"],
     ["shopping_bag", "ถุงช้อปปิ้ง"],
@@ -89,7 +89,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "home", label: "บ้านและที่พัก", cover: "home",
+    key: "home", label: "บ้านและที่พัก", cover: "home", color: "#2F8F6B",
     items: [
     ["home", "บ้าน"],
     ["apartment", "คอนโด"],
@@ -114,7 +114,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "build", label: "ก่อสร้างและซ่อมแซม", cover: "construction",
+    key: "build", label: "ก่อสร้างและซ่อมแซม", cover: "construction", color: "#8A6A15",
     items: [
     ["construction", "ก่อสร้าง"],
     ["handyman", "ช่างซ่อม"],
@@ -139,7 +139,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "transport", label: "เดินทางและยานพาหนะ", cover: "directions_car",
+    key: "transport", label: "เดินทางและยานพาหนะ", cover: "directions_car", color: "#3A55C4",
     items: [
     ["directions_car", "รถยนต์"],
     ["two_wheeler", "มอเตอร์ไซค์"],
@@ -164,7 +164,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "bills", label: "ค่าบ้านค่าบิล", cover: "bolt",
+    key: "bills", label: "ค่าบ้านค่าบิล", cover: "bolt", color: "#A8760B",
     items: [
     ["bolt", "ค่าไฟ"],
     ["water_drop", "ค่าน้ำ"],
@@ -189,7 +189,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "health", label: "สุขภาพ", cover: "local_hospital",
+    key: "health", label: "สุขภาพ", cover: "local_hospital", color: "#D9436F",
     items: [
     ["local_hospital", "โรงพยาบาล"],
     ["medical_services", "ค่ารักษา"],
@@ -212,7 +212,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "education", label: "การศึกษา", cover: "school",
+    key: "education", label: "การศึกษา", cover: "school", color: "#5E44A0",
     items: [
     ["school", "โรงเรียน"],
     ["menu_book", "หนังสือเรียน"],
@@ -232,7 +232,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "work", label: "ธุรกิจและงาน", cover: "work",
+    key: "work", label: "ธุรกิจและงาน", cover: "work", color: "#2A6A8A",
     items: [
     ["work", "งาน"],
     ["badge", "บัตรพนักงาน"],
@@ -257,7 +257,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "fun", label: "บันเทิงและไลฟ์สไตล์", cover: "sports_esports",
+    key: "fun", label: "บันเทิงและไลฟ์สไตล์", cover: "sports_esports", color: "#B3335C",
     items: [
     ["sports_esports", "เกม"],
     ["movie", "ภาพยนตร์"],
@@ -282,7 +282,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "family", label: "ครอบครัวและสัตว์เลี้ยง", cover: "pets",
+    key: "family", label: "ครอบครัวและสัตว์เลี้ยง", cover: "pets", color: "#C2571F",
     items: [
     ["pets", "สัตว์เลี้ยง"],
     ["family_restroom", "ครอบครัว"],
@@ -301,7 +301,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "tech", label: "เทคโนโลยี", cover: "computer",
+    key: "tech", label: "เทคโนโลยี", cover: "computer", color: "#4A5568",
     items: [
     ["computer", "คอมพิวเตอร์"],
     ["laptop_mac", "โน้ตบุ๊ก"],
@@ -326,7 +326,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "travel", label: "ท่องเที่ยว", cover: "luggage",
+    key: "travel", label: "ท่องเที่ยว", cover: "luggage", color: "#0E8AA8",
     items: [
     ["luggage", "กระเป๋าเดินทาง"],
     ["flight_takeoff", "ขึ้นเครื่อง"],
@@ -349,7 +349,7 @@ export const ICON_GROUPS = [
     ],
   },
   {
-    key: "misc", label: "ทั่วไป", cover: "label",
+    key: "misc", label: "ทั่วไป", cover: "label", color: "#7A7F87",
     items: [
     ["label", "ป้ายกำกับ"],
     ["star", "ดาว"],
@@ -373,6 +373,521 @@ export const ICON_GROUPS = [
     ["folder_open", "เปิดแฟ้ม"],
     ["sticky_note_2", "โน้ต"],
     ["group_work", "กลุ่มรวม"],
+    ],
+  },
+]
+
+/**
+ * ไอคอนสี (Fluent Emoji Flat) แบ่งตามกลุ่ม — [ชื่อไฟล์, ชื่อไทย]
+ * ระบายสีมาในไฟล์แล้ว ย้อมสีทับไม่ได้ ต้องแสดงด้วย <img> ดู iconIsColor()
+ */
+export const EMOJI_GROUPS = [
+  {
+    key: "e_money", label: "การเงิน", cover: "money-bag",
+    items: [
+    ["money-bag", "ถุงเงิน"],
+    ["dollar-banknote", "ธนบัตร"],
+    ["yen-banknote", "แบงก์เยน"],
+    ["coin", "เหรียญ"],
+    ["credit-card", "บัตรเครดิต"],
+    ["bank", "ธนาคาร"],
+    ["money-with-wings", "เงินหาย"],
+    ["chart-increasing", "ยอดขึ้น"],
+    ["chart-decreasing", "ยอดลง"],
+    ["bar-chart", "กราฟแท่ง"],
+    ["receipt", "ใบเสร็จ"],
+    ["ledger", "สมุดบัญชี"],
+    ["abacus", "ลูกคิด"],
+    ["gem-stone", "ของมีค่า"],
+    ["currency-exchange", "แลกเงิน"],
+    ["heavy-dollar-sign", "เครื่องหมายเงิน"],
+    ["atm-sign", "ตู้เอทีเอ็ม"],
+    ["briefcase", "กระเป๋างาน"],
+    ["handshake", "ปิดดีล"],
+    ["purse", "กระเป๋าสตางค์"],
+    ["hundred-points", "เต็มร้อย"],
+    ["locked-with-key", "เงินเก็บ"],
+    ],
+  },
+  {
+    key: "e_food", label: "อาหารและเครื่องดื่ม", cover: "steaming-bowl",
+    items: [
+    ["steaming-bowl", "ก๋วยเตี๋ยว"],
+    ["cooked-rice", "ข้าว"],
+    ["curry-rice", "ข้าวแกง"],
+    ["hamburger", "เบอร์เกอร์"],
+    ["pizza", "พิซซ่า"],
+    ["french-fries", "เฟรนช์ฟรายส์"],
+    ["hot-dog", "ฮอตดอก"],
+    ["sandwich", "แซนด์วิช"],
+    ["sushi", "ซูชิ"],
+    ["bento-box", "ข้าวกล่อง"],
+    ["takeout-box", "อาหารใส่กล่อง"],
+    ["dumpling", "เกี๊ยว"],
+    ["spaghetti", "สปาเกตตี"],
+    ["fried-shrimp", "กุ้งทอด"],
+    ["cut-of-meat", "เนื้อสัตว์"],
+    ["poultry-leg", "ไก่"],
+    ["egg", "ไข่"],
+    ["cooking", "ทำอาหาร"],
+    ["pot-of-food", "หม้อแกง"],
+    ["green-salad", "สลัด"],
+    ["bread", "ขนมปัง"],
+    ["croissant", "ครัวซองต์"],
+    ["shortcake", "เค้ก"],
+    ["birthday-cake", "เค้กวันเกิด"],
+    ["doughnut", "โดนัท"],
+    ["cookie", "คุกกี้"],
+    ["chocolate-bar", "ช็อกโกแลต"],
+    ["candy", "ลูกอม"],
+    ["popcorn", "ป๊อปคอร์น"],
+    ["ice-cream", "ไอศกรีมถ้วย"],
+    ["soft-ice-cream", "ไอศกรีมโคน"],
+    ["shaved-ice", "น้ำแข็งไส"],
+    ["hot-beverage", "กาแฟร้อน"],
+    ["cup-with-straw", "น้ำหวาน"],
+    ["bubble-tea", "ชานมไข่มุก"],
+    ["tropical-drink", "น้ำปั่น"],
+    ["glass-of-milk", "นม"],
+    ["teacup-without-handle", "ชา"],
+    ["beer-mug", "เบียร์"],
+    ["wine-glass", "ไวน์"],
+    ["cocktail-glass", "ค็อกเทล"],
+    ["watermelon", "แตงโม"],
+    ["banana", "กล้วย"],
+    ["red-apple", "แอปเปิล"],
+    ["grapes", "องุ่น"],
+    ["mango", "มะม่วง"],
+    ["strawberry", "สตรอว์เบอร์รี"],
+    ["cheese-wedge", "ชีส"],
+    ["canned-food", "อาหารกระป๋อง"],
+    ["hot-pepper", "พริก"],
+    ["carrot", "แครอท"],
+    ["garlic", "กระเทียม"],
+    ["onion", "หัวหอม"],
+    ["tomato", "มะเขือเทศ"],
+    ],
+  },
+  {
+    key: "e_shopping", label: "ช้อปปิ้งและของใช้", cover: "shopping-bags",
+    items: [
+    ["shopping-bags", "ถุงช้อปปิ้ง"],
+    ["shopping-cart", "รถเข็นซื้อของ"],
+    ["basket", "ตะกร้า"],
+    ["package", "พัสดุ"],
+    ["delivery-truck", "ส่งของ"],
+    ["convenience-store", "ร้านสะดวกซื้อ"],
+    ["department-store", "ห้างสรรพสินค้า"],
+    ["label", "ป้ายราคา"],
+    ["wrapped-gift", "ของขวัญ"],
+    ["ribbon", "โบว์"],
+    ["ticket", "ตั๋ว"],
+    ["admission-tickets", "บัตรเข้าชม"],
+    ["t-shirt", "เสื้อยืด"],
+    ["dress", "ชุดเดรส"],
+    ["jeans", "กางเกงยีนส์"],
+    ["shorts", "กางเกงขาสั้น"],
+    ["coat", "เสื้อโค้ต"],
+    ["socks", "ถุงเท้า"],
+    ["gloves", "ถุงมือ"],
+    ["scarf", "ผ้าพันคอ"],
+    ["top-hat", "หมวก"],
+    ["billed-cap", "หมวกแก๊ป"],
+    ["running-shoe", "รองเท้าผ้าใบ"],
+    ["high-heeled-shoe", "รองเท้าส้นสูง"],
+    ["mans-shoe", "รองเท้าหนัง"],
+    ["thong-sandal", "รองเท้าแตะ"],
+    ["handbag", "กระเป๋าถือ"],
+    ["backpack", "เป้"],
+    ["lipstick", "ลิปสติก"],
+    ["nail-polish", "ยาทาเล็บ"],
+    ["ring", "แหวน"],
+    ["watch", "นาฬิกาข้อมือ"],
+    ["glasses", "แว่นตา"],
+    ["sunglasses", "แว่นกันแดด"],
+    ["mobile-phone", "มือถือ"],
+    ["laptop", "โน้ตบุ๊ก"],
+    ["scissors", "กรรไกร"],
+    ["kitchen-knife", "มีด"],
+    ["spoon", "ช้อน"],
+    ["chopsticks", "ตะเกียบ"],
+    ["fork-and-knife-with-plate", "จานอาหาร"],
+    ],
+  },
+  {
+    key: "e_home", label: "บ้านและงานบ้าน", cover: "house-with-garden",
+    items: [
+    ["house-with-garden", "บ้าน"],
+    ["house", "บ้านเดี่ยว"],
+    ["houses", "หมู่บ้าน"],
+    ["office-building", "อาคาร"],
+    ["hotel", "โรงแรม"],
+    ["bed", "เตียงนอน"],
+    ["couch-and-lamp", "โซฟา"],
+    ["chair", "เก้าอี้"],
+    ["bathtub", "อ่างอาบน้ำ"],
+    ["shower", "ฝักบัว"],
+    ["toilet", "ห้องน้ำ"],
+    ["broom", "ไม้กวาด"],
+    ["sponge", "ฟองน้ำ"],
+    ["soap", "สบู่"],
+    ["bucket", "ถังน้ำ"],
+    ["toothbrush", "แปรงสีฟัน"],
+    ["roll-of-paper", "ทิชชู"],
+    ["wastebasket", "ถังขยะ"],
+    ["door", "ประตู"],
+    ["window", "หน้าต่าง"],
+    ["key", "กุญแจ"],
+    ["old-key", "ค่าเช่า"],
+    ["locked", "ล็อก"],
+    ["unlocked", "ปลดล็อก"],
+    ["light-bulb", "หลอดไฟ"],
+    ["electric-plug", "ปลั๊กไฟ"],
+    ["potted-plant", "ต้นไม้ในบ้าน"],
+    ["seedling", "ต้นกล้า"],
+    ["cactus", "กระบองเพชร"],
+    ["sunflower", "ดอกทานตะวัน"],
+    ["fire-extinguisher", "ถังดับเพลิง"],
+    ["mirror", "กระจก"],
+    ["plunger", "ที่ปั๊มส้วม"],
+    ["mouse-trap", "กับดักหนู"],
+    ["sewing-needle", "เข็มเย็บผ้า"],
+    ["thread", "ด้าย"],
+    ],
+  },
+  {
+    key: "e_build", label: "เครื่องมือและซ่อมแซม", cover: "hammer-and-wrench",
+    items: [
+    ["hammer-and-wrench", "ซ่อมแซม"],
+    ["hammer", "ค้อน"],
+    ["wrench", "ประแจ"],
+    ["screwdriver", "ไขควง"],
+    ["nut-and-bolt", "น็อต"],
+    ["gear", "เฟือง"],
+    ["toolbox", "กล่องเครื่องมือ"],
+    ["carpentry-saw", "เลื่อย"],
+    ["paintbrush", "พู่กัน"],
+    ["brick", "อิฐ"],
+    ["ladder", "บันได"],
+    ["construction", "ก่อสร้าง"],
+    ["straight-ruler", "ไม้บรรทัด"],
+    ["triangular-ruler", "ไม้ฉาก"],
+    ["oil-drum", "ถังน้ำมัน"],
+    ["magnet", "แม่เหล็ก"],
+    ["hammer-and-pick", "งานช่าง"],
+    ["safety-vest", "เสื้อกั๊กนิรภัย"],
+    ["goggles", "แว่นนิรภัย"],
+    ],
+  },
+  {
+    key: "e_transport", label: "เดินทางและขนส่ง", cover: "automobile",
+    items: [
+    ["automobile", "รถยนต์"],
+    ["taxi", "แท็กซี่"],
+    ["bus", "รถเมล์"],
+    ["minibus", "รถตู้"],
+    ["pickup-truck", "รถกระบะ"],
+    ["articulated-lorry", "รถบรรทุก"],
+    ["sport-utility-vehicle", "รถเอสยูวี"],
+    ["racing-car", "รถแข่ง"],
+    ["motorcycle", "มอเตอร์ไซค์"],
+    ["motor-scooter", "สกู๊ตเตอร์"],
+    ["auto-rickshaw", "ตุ๊กตุ๊ก"],
+    ["bicycle", "จักรยาน"],
+    ["kick-scooter", "สกู๊ตเตอร์ไฟฟ้า"],
+    ["fuel-pump", "ปั๊มน้ำมัน"],
+    ["train", "รถไฟ"],
+    ["metro", "รถไฟฟ้า"],
+    ["high-speed-train", "รถไฟความเร็วสูง"],
+    ["tram", "รถราง"],
+    ["airplane", "เครื่องบิน"],
+    ["airplane-departure", "ขาออก"],
+    ["airplane-arrival", "ขาเข้า"],
+    ["helicopter", "เฮลิคอปเตอร์"],
+    ["ship", "เรือใหญ่"],
+    ["speedboat", "เรือเร็ว"],
+    ["ferry", "เรือข้ามฟาก"],
+    ["sailboat", "เรือใบ"],
+    ["anchor", "สมอเรือ"],
+    ["luggage", "กระเป๋าเดินทาง"],
+    ["world-map", "แผนที่"],
+    ["round-pushpin", "หมุดสถานที่"],
+    ["compass", "เข็มทิศ"],
+    ["police-car-light", "ไฟฉุกเฉิน"],
+    ["motorway", "ทางหลวง"],
+    ["bus-stop", "ป้ายรถเมล์"],
+    ["station", "สถานี"],
+    ],
+  },
+  {
+    key: "e_bills", label: "บิลและเอกสาร", cover: "high-voltage",
+    items: [
+    ["high-voltage", "ค่าไฟ"],
+    ["droplet", "ค่าน้ำ"],
+    ["potable-water", "น้ำดื่ม"],
+    ["fire", "แก๊ส"],
+    ["telephone", "ค่าโทรศัพท์"],
+    ["telephone-receiver", "โทรศัพท์บ้าน"],
+    ["antenna-bars", "ค่าเน็ตมือถือ"],
+    ["satellite-antenna", "จานดาวเทียม"],
+    ["television", "ค่าทีวี"],
+    ["wireless", "ไวไฟ"],
+    ["calendar", "ปฏิทิน"],
+    ["tear-off-calendar", "กำหนดวัน"],
+    ["spiral-calendar", "ตารางเดือน"],
+    ["alarm-clock", "เตือนเวลา"],
+    ["stopwatch", "จับเวลา"],
+    ["hourglass-done", "หมดเวลา"],
+    ["hourglass-not-done", "รอเวลา"],
+    ["envelope", "จดหมาย"],
+    ["e-mail", "อีเมล"],
+    ["incoming-envelope", "เอกสารเข้า"],
+    ["inbox-tray", "รับเข้า"],
+    ["outbox-tray", "ส่งออก"],
+    ["page-facing-up", "เอกสาร"],
+    ["page-with-curl", "ใบแจ้งหนี้"],
+    ["clipboard", "คลิปบอร์ด"],
+    ["memo", "บันทึกข้อความ"],
+    ["spiral-notepad", "สมุดจด"],
+    ["bookmark-tabs", "เอกสารหลายใบ"],
+    ["pushpin", "ปักหมุด"],
+    ["paperclip", "คลิปหนีบ"],
+    ["file-folder", "แฟ้ม"],
+    ["open-file-folder", "แฟ้มเปิด"],
+    ["card-index-dividers", "แฟ้มแบ่งหมวด"],
+    ["file-cabinet", "ตู้เอกสาร"],
+    ["card-file-box", "กล่องเอกสาร"],
+    ["scroll", "สัญญา"],
+    ["shield", "ประกัน"],
+    ["warning", "เตือน"],
+    ["check-mark-button", "เสร็จแล้ว"],
+    ["cross-mark", "ยกเลิก"],
+    ["prohibited", "ห้าม"],
+    ["bell", "แจ้งเตือน"],
+    ["bell-with-slash", "ปิดเตือน"],
+    ["counterclockwise-arrows-button", "รายการประจำ"],
+    ["repeat-button", "ทำซ้ำ"],
+    ],
+  },
+  {
+    key: "e_health", label: "สุขภาพและความงาม", cover: "pill",
+    items: [
+    ["pill", "ยา"],
+    ["syringe", "ฉีดยา"],
+    ["stethoscope", "หมอ"],
+    ["hospital", "โรงพยาบาล"],
+    ["ambulance", "รถพยาบาล"],
+    ["adhesive-bandage", "พลาสเตอร์"],
+    ["thermometer", "วัดไข้"],
+    ["face-with-thermometer", "ไม่สบาย"],
+    ["drop-of-blood", "เลือด"],
+    ["dna", "ดีเอ็นเอ"],
+    ["microbe", "เชื้อโรค"],
+    ["tooth", "ทำฟัน"],
+    ["bone", "กระดูก"],
+    ["lungs", "ปอด"],
+    ["anatomical-heart", "หัวใจ"],
+    ["brain", "สมอง"],
+    ["eye", "ตา"],
+    ["crutch", "ไม้ค้ำ"],
+    ["wheelchair-symbol", "รถเข็น"],
+    ["lotion-bottle", "โลชั่น"],
+    ["razor", "มีดโกน"],
+    ["barber-pole", "ตัดผม"],
+    ["person-in-lotus-position", "นั่งสมาธิ"],
+    ["flexed-biceps", "ออกกำลังกาย"],
+    ["medical-symbol", "การแพทย์"],
+    ["red-heart", "หัวใจแดง"],
+    ["health-worker", "บุคลากรแพทย์"],
+    ["sneezing-face", "เป็นหวัด"],
+    ],
+  },
+  {
+    key: "e_work", label: "งานและการเรียน", cover: "briefcase",
+    items: [
+    ["office-worker", "พนักงานออฟฟิศ"],
+    ["busts-in-silhouette", "ทีมงาน"],
+    ["bust-in-silhouette", "พนักงาน"],
+    ["identification-card", "บัตรประจำตัว"],
+    ["name-badge", "ป้ายชื่อ"],
+    ["necktie", "เนกไท"],
+    ["factory", "โรงงาน"],
+    ["construction-worker", "ช่างก่อสร้าง"],
+    ["mechanic", "ช่างซ่อม"],
+    ["cook", "พ่อครัว"],
+    ["farmer", "เกษตรกร"],
+    ["technologist", "ไอที"],
+    ["artist", "นักออกแบบ"],
+    ["scientist", "นักวิทยาศาสตร์"],
+    ["judge", "ทนาย"],
+    ["pilot", "นักบิน"],
+    ["firefighter", "นักดับเพลิง"],
+    ["police-officer", "ตำรวจ"],
+    ["teacher", "ครู"],
+    ["student", "นักเรียน"],
+    ["school", "โรงเรียน"],
+    ["graduation-cap", "จบการศึกษา"],
+    ["books", "หนังสือหลายเล่ม"],
+    ["open-book", "หนังสือเปิด"],
+    ["closed-book", "หนังสือ"],
+    ["notebook", "สมุด"],
+    ["pencil", "ดินสอ"],
+    ["fountain-pen", "ปากกาหมึกซึม"],
+    ["pen", "ปากกา"],
+    ["crayon", "สีเทียน"],
+    ["microscope", "กล้องจุลทรรศน์"],
+    ["telescope", "กล้องดูดาว"],
+    ["test-tube", "หลอดทดลอง"],
+    ["globe-showing-asia-australia", "โลก"],
+    ["desktop-computer", "คอมพิวเตอร์"],
+    ["keyboard", "คีย์บอร์ด"],
+    ["computer-mouse", "เมาส์"],
+    ["printer", "เครื่องพิมพ์"],
+    ["robot", "หุ่นยนต์"],
+    ["link", "ลิงก์"],
+    ["magnifying-glass-tilted-left", "ค้นหา"],
+    ["floppy-disk", "บันทึกไฟล์"],
+    ["battery", "แบตเตอรี"],
+    ["flashlight", "ไฟฉาย"],
+    ],
+  },
+  {
+    key: "e_fun", label: "บันเทิงและกีฬา", cover: "party-popper",
+    items: [
+    ["party-popper", "ฉลอง"],
+    ["confetti-ball", "ลูกบอลปาร์ตี้"],
+    ["balloon", "ลูกโป่ง"],
+    ["fireworks", "พลุ"],
+    ["sparkler", "ประทัดไฟ"],
+    ["sparkles", "ประกาย"],
+    ["christmas-tree", "ต้นคริสต์มาส"],
+    ["video-game", "เกม"],
+    ["joystick", "จอยเกม"],
+    ["game-die", "ลูกเต๋า"],
+    ["slot-machine", "เสี่ยงโชค"],
+    ["clapper-board", "หนัง"],
+    ["movie-camera", "ถ่ายหนัง"],
+    ["performing-arts", "ละคร"],
+    ["artist-palette", "ศิลปะ"],
+    ["musical-note", "เพลง"],
+    ["musical-notes", "ดนตรี"],
+    ["guitar", "กีตาร์"],
+    ["microphone", "ไมโครโฟน"],
+    ["headphone", "หูฟัง"],
+    ["radio", "วิทยุ"],
+    ["camera", "กล้องถ่ายรูป"],
+    ["video-camera", "กล้องวิดีโอ"],
+    ["circus-tent", "ละครสัตว์"],
+    ["ferris-wheel", "ชิงช้าสวรรค์"],
+    ["roller-coaster", "รถไฟเหาะ"],
+    ["soccer-ball", "ฟุตบอล"],
+    ["basketball", "บาสเกตบอล"],
+    ["volleyball", "วอลเลย์บอล"],
+    ["tennis", "เทนนิส"],
+    ["badminton", "แบดมินตัน"],
+    ["ping-pong", "ปิงปอง"],
+    ["bowling", "โบว์ลิง"],
+    ["flag-in-hole", "กอล์ฟ"],
+    ["trophy", "ถ้วยรางวัล"],
+    ["sports-medal", "เหรียญรางวัล"],
+    ["1st-place-medal", "ที่หนึ่ง"],
+    ["boxing-glove", "มวย"],
+    ["person-running", "วิ่ง"],
+    ["person-swimming", "ว่ายน้ำ"],
+    ["person-biking", "ปั่นจักรยาน"],
+    ["skateboard", "สเกตบอร์ด"],
+    ["fishing-pole", "ตกปลา"],
+    ["kite", "ว่าว"],
+    ["teddy-bear", "ตุ๊กตาหมี"],
+    ["puzzle-piece", "จิ๊กซอว์"],
+    ["magic-wand", "ไม้กายสิทธิ์"],
+    ["crystal-ball", "ลูกแก้ว"],
+    ],
+  },
+  {
+    key: "e_family", label: "ครอบครัวและสัตว์เลี้ยง", cover: "people-hugging",
+    items: [
+    ["people-hugging", "ครอบครัว"],
+    ["baby", "ทารก"],
+    ["child", "เด็ก"],
+    ["boy", "เด็กผู้ชาย"],
+    ["girl", "เด็กผู้หญิง"],
+    ["man", "ผู้ชาย"],
+    ["woman", "ผู้หญิง"],
+    ["older-person", "ผู้สูงอายุ"],
+    ["old-man", "คุณตา"],
+    ["old-woman", "คุณยาย"],
+    ["pregnant-woman", "ตั้งครรภ์"],
+    ["love-letter", "จดหมายรัก"],
+    ["two-hearts", "สองหัวใจ"],
+    ["bouquet", "ช่อดอกไม้"],
+    ["rose", "กุหลาบ"],
+    ["tulip", "ทิวลิป"],
+    ["cherry-blossom", "ซากุระ"],
+    ["hibiscus", "ชบา"],
+    ["dog", "สุนัข"],
+    ["dog-face", "หน้าสุนัข"],
+    ["cat", "แมว"],
+    ["cat-face", "หน้าแมว"],
+    ["paw-prints", "รอยเท้าสัตว์"],
+    ["rabbit", "กระต่าย"],
+    ["hamster", "หนูแฮมสเตอร์"],
+    ["bird", "นก"],
+    ["fish", "ปลา"],
+    ["turtle", "เต่า"],
+    ["butterfly", "ผีเสื้อ"],
+    ["honeybee", "ผึ้ง"],
+    ["pig-face", "หมู"],
+    ["chicken", "ไก่"],
+    ["cow", "วัว"],
+    ],
+  },
+  {
+    key: "e_travel", label: "เที่ยวและธรรมชาติ", cover: "beach-with-umbrella",
+    items: [
+    ["beach-with-umbrella", "ชายหาด"],
+    ["desert-island", "เกาะ"],
+    ["camping", "ตั้งแคมป์"],
+    ["tent", "เต็นท์"],
+    ["mountain", "ภูเขา"],
+    ["snow-capped-mountain", "ภูเขาหิมะ"],
+    ["volcano", "ภูเขาไฟ"],
+    ["national-park", "อุทยาน"],
+    ["hot-springs", "น้ำพุร้อน"],
+    ["sunrise", "พระอาทิตย์ขึ้น"],
+    ["sunset", "พระอาทิตย์ตก"],
+    ["cityscape", "เมือง"],
+    ["night-with-stars", "กลางคืน"],
+    ["bridge-at-night", "สะพาน"],
+    ["fountain", "น้ำพุ"],
+    ["castle", "ปราสาท"],
+    ["classical-building", "อาคารเก่า"],
+    ["stadium", "สนามกีฬา"],
+    ["statue-of-liberty", "เทพีเสรีภาพ"],
+    ["mosque", "มัสยิด"],
+    ["church", "โบสถ์"],
+    ["hindu-temple", "วัด"],
+    ["passport-control", "ตรวจคนเข้าเมือง"],
+    ["customs", "ศุลกากร"],
+    ["baggage-claim", "รับกระเป๋า"],
+    ["passenger-ship", "เรือสำราญ"],
+    ["sun", "แดด"],
+    ["cloud", "เมฆ"],
+    ["sun-behind-cloud", "แดดมีเมฆ"],
+    ["cloud-with-rain", "ฝนตก"],
+    ["umbrella-with-rain-drops", "ร่ม"],
+    ["rainbow", "สายรุ้ง"],
+    ["snowflake", "หิมะ"],
+    ["palm-tree", "ต้นปาล์ม"],
+    ["evergreen-tree", "ต้นสน"],
+    ["deciduous-tree", "ต้นไม้ใหญ่"],
+    ["four-leaf-clover", "โคลเวอร์"],
+    ["herb", "สมุนไพร"],
+    ["mushroom", "เห็ด"],
+    ["star", "ดาว"],
+    ["glowing-star", "ดาวเปล่งแสง"],
+    ["crescent-moon", "พระจันทร์"],
+    ["rocket", "จรวด"],
     ],
   },
 ]
@@ -415,6 +930,33 @@ export const BRAND_ICONS = [
   ["paypal", "PayPal", "#002991"],
   ["visa", "Visa", "#1A1F71"],
   ["mastercard", "Mastercard", "#EB001B"],
+  ["jcb", "JCB", "#0B4EA2"],
+  ["americanexpress", "American Express", "#2E77BC"],
+  ["discover", "Discover", "#FF6000"],
+  ["googlepay", "Google Pay", "#4285F4"],
+  ["applepay", "Apple Pay", "#000000"],
+  ["samsungpay", "Samsung Pay", "#1428A0"],
+  ["alipay", "Alipay", "#1677FF"],
+  ["wechat", "WeChat Pay", "#07C160"],
+  ["wise", "Wise", "#9FE870"],
+  ["klarna", "Klarna", "#FFB3C7"],
+  ["foodpanda", "foodpanda", "#D70F64"],
+  ["kfc", "KFC", "#F40027"],
+  ["burgerking", "Burger King", "#D62300"],
+  ["cocacola", "Coca-Cola", "#D00013"],
+  ["unilever", "Unilever", "#1F36C7"],
+  ["dhl", "DHL", "#FFCC00"],
+  ["fedex", "FedEx", "#4D148C"],
+  ["ups", "UPS", "#150400"],
+  ["shopify", "Shopify", "#7AB55C"],
+  ["woocommerce", "WooCommerce", "#96588A"],
+  ["stripe", "Stripe", "#635BFF"],
+  ["xero", "Xero", "#13B5EA"],
+  ["quickbooks", "QuickBooks", "#2CA01C"],
+  ["wordpress", "WordPress", "#21759B"],
+  ["trello", "Trello", "#0052CC"],
+  ["asana", "Asana", "#F06A6A"],
+  ["airtable", "Airtable", "#18BFFF"],
   ["claude", "Claude", "#D97757"],
   ["steam", "Steam", "#000000"],
   ["playstation", "PlayStation", "#0070D1"],
@@ -455,6 +997,11 @@ const GROUP_OF = Object.fromEntries(
   ICON_GROUPS.flatMap((g) => g.items.map(([name]) => [name, g.key])),
 )
 
+/** ชื่อไอคอนสีที่มีอยู่จริง — ไอคอนสีเก็บรวมโฟลเดอร์เดียว จึงเช็กแค่ว่ามีชื่อนี้ไหม */
+const EMOJI_OF = Object.fromEntries(
+  EMOJI_GROUPS.flatMap((g) => g.items.map(([name]) => [name, g.key])),
+)
+
 /**
  * แปลงค่าที่เก็บในฐานข้อมูลเป็น URL ของไฟล์ SVG
  * คืน null ถ้าค่าว่างหรือชี้ไปยังไอคอนที่ถูกถอดออกจากชุดไปแล้ว
@@ -466,6 +1013,7 @@ export function iconUrl(value) {
   if (!name) return null
   if (kind === 'bank') return `bank-logos/${name}.svg`
   if (kind === 'brand') return `icons/brand/${name}.svg`
+  if (kind === 'emoji') return EMOJI_OF[name] ? `icons/emoji/${name}.svg` : null
   if (kind === 'ms') {
     const group = GROUP_OF[name]
     return group ? `icons/${group}/${name}.svg` : null
@@ -482,12 +1030,41 @@ export function iconBrandColor(value) {
   return null
 }
 
+/**
+ * สีประจำกลุ่มของไอคอนทั่วไป — คืน null สำหรับแบรนด์/ธนาคาร (พวกนั้นใช้ iconBrandColor)
+ * ไอคอนที่ผู้ใช้เลือกจึงมีสีของตัวเองตามหมวด (อาหารส้ม เดินทางฟ้า สุขภาพชมพู)
+ * โดยไม่ต้องเพิ่มคอลัมน์สีในฐานข้อมูล
+ */
+export function iconGroupColor(value) {
+  if (!value || typeof value !== 'string') return null
+  const [kind, name] = value.split(':')
+  if (kind !== 'ms') return null
+  const group = ICON_GROUPS.find((g) => g.key === GROUP_OF[name])
+  return group?.color ?? null
+}
+
+/**
+ * ไอคอนตัวนี้ระบายสีมาในไฟล์แล้วหรือไม่
+ * ที่ต้องรู้เพราะไอคอนสีย้อมทับไม่ได้ ต้องวาดด้วย <img> ส่วนชุดอื่นวาดด้วย mask
+ * เพื่อให้เปลี่ยนสีตามบริบทได้ (ขาวบนแถบเข้ม เขียวในหมวดรายรับ)
+ */
+export function iconIsColor(value) {
+  return typeof value === 'string' && value.startsWith('emoji:')
+}
+
 /** ชื่อไทยของไอคอน ใช้เป็น tooltip และข้อความบอกว่าเลือกอะไรอยู่ */
 export function iconLabel(value) {
   if (!value || typeof value !== 'string') return ''
   const [kind, name] = value.split(':')
   if (kind === 'brand') return BRAND_ICONS.find((b) => b[0] === name)?.[1] ?? name
   if (kind === 'bank') return BANK_ICONS.find((b) => b[0] === name)?.[1] ?? name
+  if (kind === 'emoji') {
+    for (const g of EMOJI_GROUPS) {
+      const hit = g.items.find(([n]) => n === name)
+      if (hit) return hit[1]
+    }
+    return name
+  }
   for (const g of ICON_GROUPS) {
     const hit = g.items.find(([n]) => n === name)
     if (hit) return hit[1]
@@ -497,4 +1074,7 @@ export function iconLabel(value) {
 
 /** จำนวนไอคอนทั้งหมดในชุด ใช้แสดงในหน้าตั้งค่า */
 export const ICON_TOTAL =
-  ICON_GROUPS.reduce((s, g) => s + g.items.length, 0) + BRAND_ICONS.length + BANK_ICONS.length
+  ICON_GROUPS.reduce((s, g) => s + g.items.length, 0) +
+  EMOJI_GROUPS.reduce((s, g) => s + g.items.length, 0) +
+  BRAND_ICONS.length +
+  BANK_ICONS.length

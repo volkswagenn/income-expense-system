@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import useWalletStore from '../../store/useWalletStore'
-import BankLogo from './BankLogo'
+import AppIcon from './AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from './Icon'
 
 export function formatAccount(account) {
@@ -71,7 +72,7 @@ export default function TransferAccountPicker({
       <div>
         <label className="label">{label}</label>
         <div className="px-3 py-2 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-900 flex items-center gap-2">
-          <BankLogo bankName={a.bankName} size="sm" />
+          <span className="w-6 h-6 flex-none rounded-md bg-paper flex items-center justify-center"><AppIcon value={a.icon} size={15} fallback={DEFAULT_ICONS.account} /></span>
           <span className="truncate flex-1">{formatAccount(a)}</span>
           {showBalance && (
             <span className="text-xs text-blue-600 tabular-nums shrink-0">{money(a.balance)}</span>
@@ -97,7 +98,7 @@ export default function TransferAccountPicker({
       >
         {selected ? (
           <>
-            <BankLogo bankName={selected.bankName} size="sm" />
+            <span className="w-6 h-6 flex-none rounded-md bg-paper flex items-center justify-center"><AppIcon value={selected.icon} size={15} fallback={DEFAULT_ICONS.account} /></span>
             <span className="flex-1 min-w-0 truncate text-[13px]">{formatAccount(selected)}</span>
             {showBalance && (
               <span className="flex-none tabular-nums text-[12px] text-muted">{money(selected.balance)}</span>
@@ -131,7 +132,7 @@ export default function TransferAccountPicker({
                   on ? 'bg-[#F2FAD9]' : 'hover:bg-paper'
                 }`}
               >
-                <BankLogo bankName={a.bankName} size="sm" />
+                <span className="w-6 h-6 flex-none rounded-md bg-paper flex items-center justify-center"><AppIcon value={a.icon} size={15} fallback={DEFAULT_ICONS.account} /></span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-[13px] font-medium truncate">{a.name}</span>
                   <span className="block text-[11px] text-faint truncate">

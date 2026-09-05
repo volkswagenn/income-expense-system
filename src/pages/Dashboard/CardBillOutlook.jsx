@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import { formatIsoThai, formatThaiDate, daysUntil } from '../../lib/cardCycle'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import SectionCard from '../../components/shared/SectionCard'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -15,13 +16,15 @@ function monthLabel(date) {
   return `${THAI_MONTHS[date.getMonth()]} ${date.getFullYear() + 543}`
 }
 
-function BillRow({ row, cardLabel, bankName }) {
+function BillRow({ row, cardLabel, cardIcon }) {
   const left = daysUntil(row.due)
   const isClosed = row.kind === 'closed'
 
   return (
     <div className="flex items-center gap-3 py-2.5">
-      <BankLogo bankName={bankName} size="sm" />
+      <span className="w-6 h-6 flex-none rounded-md bg-white border border-hairline flex items-center justify-center">
+        <AppIcon value={cardIcon} size={15} fallback={DEFAULT_ICONS.card} />
+      </span>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
@@ -143,7 +146,7 @@ export default function CardBillOutlook({ months = 2 }) {
                       key={row.key}
                       row={row}
                       cardLabel={getCardLabel(row.cardId)}
-                      bankName={card?.bankName}
+                      cardIcon={card?.icon}
                     />
                   )
                 })}

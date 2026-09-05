@@ -3,7 +3,8 @@ import Popup from './Popup'
 import { Link } from 'react-router-dom'
 import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
-import BankLogo from './BankLogo'
+import AppIcon from './AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from './Icon'
 import UiIcon from './UiIcon'
 import DatePicker from './DatePicker'
@@ -55,10 +56,10 @@ export default function PayFromPicker({
     const m = value.method
     if (m === 'cash') return { icon: '💵', t: 'เงินสด', sub: `คงเหลือ ${fmt(cash)}`, tone: cash < 0 ? 'text-red-600' : 'text-gray-500' }
     if (m === 'transfer') return account
-      ? { icon: <BankLogo bankName={account.bankName} size="sm" />, t: account.bankName ? `${account.bankName} — ${account.name}` : account.name, sub: `เงินโอน · คงเหลือ ${fmt(account.balance)}`, tone: account.balance < 0 ? 'text-red-600' : 'text-gray-500' }
+      ? { icon: <AppIcon value={account.icon} size={18} fallback={DEFAULT_ICONS.account} />, t: account.bankName ? `${account.bankName} — ${account.name}` : account.name, sub: `เงินโอน · คงเหลือ ${fmt(account.balance)}`, tone: account.balance < 0 ? 'text-red-600' : 'text-gray-500' }
       : { icon: '🏦', t: 'เงินโอน', sub: 'ยังไม่ได้เลือกบัญชี', tone: 'text-amber-700' }
     if (m === 'card') return card
-      ? { icon: <BankLogo bankName={card.bankName} size="sm" />, t: formatCard(card), sub: `บัตรเครดิต · ค้าง ${fmt(card.outstanding)}`, tone: 'text-rose-600' }
+      ? { icon: <AppIcon value={card.icon} size={18} fallback={DEFAULT_ICONS.card} />, t: formatCard(card), sub: `บัตรเครดิต · ค้าง ${fmt(card.outstanding)}`, tone: 'text-rose-600' }
       : { icon: '💳', t: 'บัตรเครดิต', sub: 'ยังไม่ได้เลือกบัตร', tone: 'text-amber-700' }
     if (m === 'debt') {
       const c = debt ? computeDebt({ ...debt, name: itemName }) : null
@@ -263,7 +264,7 @@ export default function PayFromPicker({
                   ? <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">ยังไม่มีบัญชีเงินโอน เพิ่มได้ที่หน้ากระเป๋าเงิน</p>
                   : accounts.map((a) => (
                     <Row key={a.id} on={draft.transferAccountId === a.id}
-                      icon={<BankLogo bankName={a.bankName} size="lg" />}
+                      icon={<span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center"><AppIcon value={a.icon} size={22} fallback={DEFAULT_ICONS.account} /></span>}
                       title={a.bankName ? `${a.bankName} — ${a.name}` : a.name}
                       sub={a.accountNumber ? `${a.accountType ?? 'บัญชี'} · ${a.accountNumber}` : null}
                       balLabel="คงเหลือ"
@@ -288,7 +289,7 @@ export default function PayFromPicker({
                     ].filter(Boolean).join(' · ')
                     return (
                       <Row key={c.id} on={draft.cardId === c.id}
-                        icon={<BankLogo bankName={c.bankName} size="lg" />}
+                        icon={<span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center"><AppIcon value={c.icon} size={22} fallback={DEFAULT_ICONS.card} /></span>}
                         title={formatCard(c)} sub={sub || null}
                         balLabel="ยอดค้าง"
                         right={fmt(c.outstanding)} rightTone="text-expense"

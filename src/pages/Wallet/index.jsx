@@ -149,7 +149,7 @@ export default function WalletPage() {
               {recRows.map((r) => (
                 <div key={r.id} className="flex items-center gap-[11px] py-2.5 border-t border-[#F2F0EA] mt-2">
                   <span className="w-8 h-8 flex-none rounded-[10px] bg-recurring-soft flex items-center justify-center">
-                    <AppIcon value={r.item?.icon} size={17} color="#6D4AA8" fallback="event_repeat" />
+                    <AppIcon value={r.item?.icon} size={17} fallback="event_repeat" />
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-[12.5px] font-semibold truncate">{r.item?.name ?? 'รายการประจำ'}</span>

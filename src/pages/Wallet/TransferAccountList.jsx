@@ -6,7 +6,8 @@ import useWalletStore from '../../store/useWalletStore'
 import { moveBetweenTransferAccounts } from '../../lib/walletEngine'
 import { formatAccount } from '../../components/shared/TransferAccountPicker'
 import AmountDisplay from '../../components/shared/AmountDisplay'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
 import AccountMenuPopup from './AccountMenuPopup'
 import { kindLabel } from '../Manage/AccountManage'
@@ -107,7 +108,9 @@ export default function TransferAccountList() {
                 a.balance < 0 ? 'border-red-200 bg-red-50' : 'border-blue-100 bg-blue-50/50'
               }`}
             >
-              <BankLogo bankName={a.bankName} size="lg" />
+              <span className="w-10 h-10 flex-none rounded-lg bg-white border border-hairline flex items-center justify-center">
+                <AppIcon value={a.icon} size={22} fallback={DEFAULT_ICONS.account} />
+              </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate">{a.name}</p>
                 <p className="text-xs text-gray-500 truncate">

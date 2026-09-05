@@ -8,7 +8,6 @@ import { formatAccount } from '../../components/shared/TransferAccountPicker'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import AmountDisplay from '../../components/shared/AmountDisplay'
 import BankSelect from '../../components/shared/BankSelect'
-import BankLogo from '../../components/shared/BankLogo'
 import { BANKS } from '../../lib/banks'
 import { useRegisterManageAdd } from './manageHeader'
 import { IconPickerButton } from '../../components/shared/IconPicker'
@@ -246,14 +245,11 @@ export default function AccountManage() {
             // จอแคบวางยอดกับปุ่มลงมาแถวล่าง ไม่งั้นชื่อบัญชีถูกบีบเหลือ "บัญ…" อ่านไม่ออก
             <div key={a.id} className="rounded-xl border border-gray-200 p-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                {/* เลือกไอคอนเองไว้ = ใช้ตัวนั้น ไม่ได้เลือก = โลโก้ธนาคารตามชื่อธนาคาร */}
-                {a.icon ? (
-                  <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
-                    <AppIcon value={a.icon} size={22} color="#3A55C4" fallback={DEFAULT_ICONS.account} />
-                  </span>
-                ) : (
-                  <BankLogo bankName={a.bankName} size="lg" />
-                )}
+                {/* ไอคอนที่ผู้ใช้เลือก (สีตามกลุ่ม/แบรนด์ของมันเอง) — ไม่ได้เลือกใช้รูปธนาคารกลางๆ
+                    ไม่เดาโลโก้จากชื่อธนาคารให้แล้ว ผู้ใช้อยากได้โลโก้ธนาคารก็เลือกจากกลุ่ม "ธนาคารไทย" เอง */}
+                <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
+                  <AppIcon value={a.icon} size={22} fallback={DEFAULT_ICONS.account} />
+                </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{a.name}</p>
                   <p className="text-xs text-gray-500 truncate">

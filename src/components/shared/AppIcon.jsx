@@ -1,4 +1,4 @@
-import { iconUrl, iconBrandColor } from '../../lib/iconCatalog'
+import { iconUrl, iconBrandColor, iconGroupColor, iconIsColor, iconLabel } from '../../lib/iconCatalog'
 import Icon from './Icon'
 
 /**
@@ -13,8 +13,11 @@ import Icon from './Icon'
  * โลโก้แบรนด์กับธนาคารเป็นข้อยกเว้น — บังคับใช้สีประจำแบรนด์
  * เพราะคนจำ LINE จากสีเขียวและ Facebook จากสีน้ำเงิน ถ้าเป็นสีเทาหมดจะแยกไม่ออก
  *
+ * ไอคอนสี ("emoji:") เป็นอีกข้อยกเว้น — ระบายหลายสีมาในไฟล์แล้ว mask จะทำให้เหลือ
+ * เงาสีเดียวซึ่งทิ้งเหตุผลของชุดนี้ไปหมด จึงวาดด้วย <img> และ prop color ไม่มีผล
+ *
  * props
- *   value    – ค่าที่เก็บไว้ เช่น "ms:bolt" "brand:line" "bank:kbank"
+ *   value    – ค่าที่เก็บไว้ เช่น "ms:bolt" "emoji:money-bag" "brand:line" "bank:kbank"
  *   size     – ความกว้าง/สูงเป็น px
  *   color    – บังคับสี (ทับสีแบรนด์); ไม่ส่ง = ใช้สีแบรนด์ ถ้าไม่มีก็ใช้ currentColor
  *   fallback – ชื่อไอคอนฟอนต์ที่ใช้เมื่อ value ว่างหรือชี้ไปยังไอคอนที่ถูกถอดออกแล้ว
@@ -33,10 +36,34 @@ export default function AppIcon({
   // ตัวสำรองใช้ไฟล์ SVG ในชุดก่อนเสมอ ไม่ใช่ฟอนต์ไอคอน
   // เพราะฟอนต์โหลดมาเฉพาะชื่อที่ระบุไว้ใน index.html ถ้าชื่อไม่อยู่ในนั้น
   // เบราว์เซอร์จะพ่นชื่อไอคอนออกมาเป็นตัวหนังสือแทนรูป (เช่นขึ้นคำว่า "folder")
-  const url = iconUrl(value) ?? iconUrl(`ms:${fallback}`)
+  // ค่าที่จะแสดงจริง — ถ้าค่าที่เก็บไว้ใช้ไม่ได้ ให้ถือว่ากำลังแสดงไอคอนสำรอง
+  // สีก็ต้องคิดจากตัวสำรองด้วย ไม่งั้นไอคอนตั้งต้นของบัญชี/บัตรจะได้สีตัวอักษรแทนสีกลุ่ม
+  const shown = iconUrl(value) ? value : `ms:${fallback}`
+  const url = iconUrl(shown)
   if (!url) return <Icon name={fallback} size={size} fill className={className} {...rest} />
 
-  const tint = color ?? iconBrandColor(value) ?? 'currentColor'
+  // ไอคอนสีระบายมาในไฟล์แล้ว ย้อมทับไม่ได้ ต้องวาดเป็นรูปจริง
+  // โหลดแบบ lazy เพราะบางหน้าวางไว้เป็นร้อยตัวพร้อมกัน (คลังไอคอน ตัวเลือกไอคอน)
+  if (iconIsColor(shown)) {
+    return (
+      <img
+        src={url}
+        alt={iconLabel(shown)}
+        width={size}
+        height={size}
+        loading="lazy"
+        draggable={false}
+        className={`inline-block flex-none object-contain ${className}`}
+        style={{ width: size, height: size }}
+        {...rest}
+      />
+    )
+  }
+
+  // ลำดับสี: ที่บังคับมา > สีแบรนด์/ธนาคาร > สีประจำกลุ่มของไอคอนทั่วไป > สีตัวอักษรรอบๆ
+  // สีประจำกลุ่มทำให้ไอคอนที่ผู้ใช้เลือกมีสีของตัวเองโดยไม่ต้องตั้งค่าเพิ่ม (อาหารส้ม เดินทางฟ้า)
+  // ที่ไหนต้องการสีเดียว (เช่นบนพื้นเข้ม) ยังส่ง color มาบังคับได้เหมือนเดิม
+  const tint = color ?? iconBrandColor(shown) ?? iconGroupColor(shown) ?? 'currentColor'
 
   return (
     <span

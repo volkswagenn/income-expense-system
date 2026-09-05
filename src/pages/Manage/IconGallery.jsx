@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import Icon from '../../components/shared/Icon'
 import AppIcon from '../../components/shared/AppIcon'
-import { ICON_GROUPS, BRAND_ICONS, BANK_ICONS, ICON_TOTAL } from '../../lib/iconCatalog'
+import { ICON_GROUPS, EMOJI_GROUPS, BRAND_ICONS, BANK_ICONS, ICON_TOTAL } from '../../lib/iconCatalog'
 
 /**
  * คลังไอคอน — ดูว่าในระบบมีไอคอนอะไรให้เลือกใช้บ้าง
@@ -14,8 +14,8 @@ import { ICON_GROUPS, BRAND_ICONS, BANK_ICONS, ICON_TOTAL } from '../../lib/icon
  * (บอกไว้ในกล่อง "ไอคอนถูกใช้ที่ไหน" ท้ายหน้า)
  */
 
-const BRAND_GROUP = { key: '__brand', label: 'โลโก้แบรนด์', cover: 'public' }
-const BANK_GROUP = { key: '__bank', label: 'ธนาคารไทย', cover: 'account_balance' }
+const BRAND_GROUP = { key: '__brand', label: 'โลโก้แบรนด์', cover: 'ms:public' }
+const BANK_GROUP = { key: '__bank', label: 'ธนาคารไทย', cover: 'ms:account_balance' }
 
 const USED_AT = [
   { icon: 'folder', label: 'หมวดหมู่รายรับ-รายจ่าย', where: 'จัดการข้อมูล › หมวดหมู่' },
@@ -28,10 +28,19 @@ export default function IconGallery() {
   const [q, setQ] = useState('')
   const [group, setGroup] = useState('all')
 
-  const groups = useMemo(() => [...ICON_GROUPS, BRAND_GROUP, BANK_GROUP], [])
+  // ไอคอนสีขึ้นก่อน เพราะเป็นชุดที่คนมองหาบ่อยที่สุดเวลาเปิดมาดูว่ามีอะไรให้ใช้
+  const groups = useMemo(() => [
+    ...EMOJI_GROUPS.map((g) => ({ key: g.key, label: g.label, cover: `emoji:${g.cover}` })),
+    ...ICON_GROUPS.map((g) => ({ key: g.key, label: g.label, cover: `ms:${g.cover}` })),
+    BRAND_GROUP,
+    BANK_GROUP,
+  ], [])
 
   // รายการไอคอนทั้งหมดแบนเป็นชุดเดียว แล้วค่อยกรองด้วยกลุ่มกับคำค้น
   const all = useMemo(() => [
+    ...EMOJI_GROUPS.flatMap((g) =>
+      g.items.map(([name, label]) => ({ value: `emoji:${name}`, label, group: g.key, groupLabel: g.label, color: null })),
+    ),
     ...ICON_GROUPS.flatMap((g) =>
       g.items.map(([name, label]) => ({ value: `ms:${name}`, label, group: g.key, groupLabel: g.label, color: null })),
     ),
@@ -53,7 +62,7 @@ export default function IconGallery() {
         (r) =>
           r.label.toLowerCase().includes(kw) ||
           r.groupLabel.toLowerCase().includes(kw) ||
-          r.value.split(':')[1].replace(/_/g, ' ').includes(kw),
+          r.value.split(':')[1].replace(/[_-]/g, ' ').includes(kw),
       )
     }
     return rows
@@ -97,7 +106,7 @@ export default function IconGallery() {
                   on ? 'border-ink bg-[#F2FAD9] font-semibold' : 'border-hairline bg-white hover:bg-paper'
                 }`}
               >
-                <AppIcon value={`ms:${g.cover}`} size={16} color="#5C6068" />
+                <AppIcon value={g.cover} size={16} color="#5C6068" />
                 {g.label}
               </button>
             )
@@ -116,7 +125,8 @@ export default function IconGallery() {
                 title={`${r.label} · ${r.value}`}
                 className="border border-transparent rounded-[10px] px-1 py-[7px] flex flex-col items-center gap-[3px] hover:bg-[#FAF9F6] hover:border-hairline"
               >
-                <AppIcon value={r.value} size={22} color={r.color ?? '#16181D'} />
+                {/* ไม่บังคับสี — คลังต้องโชว์สีจริงที่ไอคอนจะออกมาเป็น (แบรนด์ใช้สีแบรนด์ ทั่วไปใช้สีกลุ่ม) */}
+                <AppIcon value={r.value} size={22} />
                 <span className="text-[10px] text-faint text-center leading-[1.25] line-clamp-2">{r.label}</span>
               </span>
             ))}

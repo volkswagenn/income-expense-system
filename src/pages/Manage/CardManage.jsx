@@ -4,7 +4,8 @@ import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { formatCard } from '../../components/shared/CreditCardPicker'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import CardFormPopup, { autopayLabel, MONTHS_TH } from './CardFormPopup'
 import { useRegisterManageAdd } from './manageHeader'
 
@@ -110,7 +111,10 @@ export default function CardManage() {
               // จอแคบวางยอดกับปุ่มลงมาแถวล่าง ไม่งั้นชื่อบัตรถูกบีบจนอ่านไม่ออก
               <div key={card.id} className="rounded-xl border border-gray-200 p-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                <BankLogo bankName={card.bankName} size="lg" />
+                {/* ไอคอนที่เลือกไว้ หรือรูปบัตรกลางๆ ถ้ายังไม่เลือก — ไม่เดาโลโก้ธนาคารให้ */}
+                <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
+                  <AppIcon value={card.icon} size={22} fallback={DEFAULT_ICONS.card} />
+                </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{formatCard(card)}</p>
                   <p className="text-xs text-gray-500 truncate">

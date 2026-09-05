@@ -6,7 +6,8 @@ import DebtView from './DebtView'
 import Icon from '../../components/shared/Icon'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useDebtStore from '../../store/useDebtStore'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -46,7 +47,7 @@ export default function CardsPage() {
       sub: fmt(cards.reduce((n, c) => n + (Number(c.outstanding) || 0), 0)), unit: 'บาท',
     },
     ...cards.map((c) => ({
-      key: c.id, grow: 1.2, bank: c.bankName,
+      key: c.id, grow: 1.2, cardIcon: c.icon ?? null, isCard: true,
       label: c.last4 ? `${c.bankName || c.name} · ${c.last4}` : (c.name || 'บัตร'),
       kicker: c.name || 'บัตรเครดิต',
       sub: fmt(Number(c.outstanding) || 0), unit: 'ยอดหนี้คงค้าง',
@@ -85,8 +86,13 @@ export default function CardsPage() {
       </div>
 
       {/* ตัวเลือกบัตรเป็นการ์ดเต็มความกว้าง ไม่ใช่ชิปเล็ก — ยอดหนี้ของทุกใบจึงอ่านได้
-          พร้อมกันโดยไม่ต้องกดเข้าไปดูทีละใบ */}
-      <div className="flex gap-2 flex-none flex-wrap md:flex-nowrap">
+          พร้อมกันโดยไม่ต้องกดเข้าไปดูทีละใบ
+
+          ขึ้นบรรทัดใหม่ได้ทุกขนาดจอ ของเดิมบังคับแถวเดียวตั้งแต่ md ขึ้นไป
+          พอมีบัตรหลายใบ (เช่น 7 ใบ = 9 การ์ด × อย่างน้อย 190px ≈ 1,800px)
+          จะกว้างเกินพื้นที่เนื้อหาแล้วล้นออกนอกจอ เพราะไม่มีตัวรับการเลื่อน
+          ส่วน max-w กันไม่ให้การ์ดใบสุดท้ายที่เหลืออยู่ตัวเดียวในบรรทัดยืดเต็มแถว */}
+      <div className="flex gap-2 flex-none flex-wrap">
         {tabs.map((t) => {
           const on = t.key === view || (t.key === 'all' && !isCard && view !== 'debt')
           return (
@@ -94,12 +100,15 @@ export default function CardsPage() {
               key={t.key}
               onClick={() => setView(t.key)}
               style={{ flex: `${t.grow} 1 0` }}
-              className={`min-w-[190px] flex items-center gap-2.5 rounded-[14px] border px-[11px] py-[9px] text-left transition ${
+              className={`min-w-[190px] max-w-[340px] flex items-center gap-2.5 rounded-[14px] border px-[11px] py-[9px] text-left transition ${
                 on ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-white' : 'border-hairline bg-white hover:border-ink'
               }`}
             >
-              {t.bank ? (
-                <BankLogo bankName={t.bank} size="lg" className="flex-none" />
+              {t.isCard ? (
+                // ไอคอนที่ตั้งไว้กับบัตร หรือรูปบัตรกลางๆ ถ้ายังไม่เลือก — ไม่เดาโลโก้จากชื่อธนาคาร
+                <span className="w-[34px] h-[34px] flex-none rounded-[10px] bg-paper flex items-center justify-center">
+                  <AppIcon value={t.cardIcon} size={20} fallback={DEFAULT_ICONS.card} />
+                </span>
               ) : (
                 <span className="w-[34px] h-[34px] flex-none rounded-[10px] bg-paper flex items-center justify-center">
                   <Icon name={t.icon} size={19} style={{ color: t.iconFg }} />

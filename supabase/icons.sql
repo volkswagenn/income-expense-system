@@ -17,9 +17,10 @@
 -- ── คอลัมน์เก็บไอคอนที่ผู้ใช้เลือก ─────────────────────────────────────────
 --
 -- เก็บเป็นข้อความสั้นที่มีคำนำหน้าบอกชุด เช่น
---   'ms:bolt'      ไอคอนทั่วไปจากชุด Material Symbols
---   'brand:line'   โลโก้แบรนด์จากชุด Simple Icons
---   'bank:kbank'   โลโก้ธนาคารไทยที่มีอยู่เดิมในแอป
+--   'ms:bolt'          ไอคอนทั่วไปจากชุด Material Symbols
+--   'emoji:money-bag'  ไอคอนสีจากชุด Fluent Emoji Flat
+--   'brand:line'       โลโก้แบรนด์จากชุด Simple Icons
+--   'bank:kbank'       โลโก้ธนาคารไทยที่มีอยู่เดิมในแอป
 --
 -- ทำไมเก็บชื่อ ไม่เก็บไฟล์
 --   ไฟล์ SVG ทั้งชุดอยู่ในตัวแอปอยู่แล้ว (public/icons) ถ้าเก็บเป็นไฟล์ในฐานข้อมูล
@@ -51,22 +52,21 @@ alter table credit_cards      add column if not exists icon text;
 -- ตรวจแค่รูปแบบว่าเป็น '<ชุด>:<ชื่อ>' ที่ชุดถูกต้อง พอกันค่าขยะที่หลุดเข้ามา
 -- ส่วนชื่อที่ถูกถอดออกจากชุดไปแล้ว ฝั่งหน้าจอจะแสดงไอคอนสำรองให้เอง
 
+-- เพิ่มชุด 'emoji' ทีหลัง และชื่อของชุดนั้นมีขีดกลาง (money-bag) กฎเดิมจึงกันของใหม่ทิ้ง
+-- ต้องถอดกฎเดิมออกก่อนใส่ของใหม่ ไม่ใช่ข้ามเมื่อมีอยู่แล้ว ไม่งั้นฐานข้อมูลที่เคยรัน
+-- ไฟล์นี้ไปแล้วจะค้างกฎเก่าไว้ตลอด แล้วบันทึกไอคอนสีไม่ได้โดยไม่มีอะไรบอกสาเหตุ
+
 do $$
 declare
   t text;
 begin
   foreach t in array array['categories', 'sub_wallets', 'recurring_items', 'vendors',
                            'transfer_accounts', 'credit_cards'] loop
-    if not exists (
-      select 1 from pg_constraint
-       where conname = t || '_icon_format'
-         and conrelid = t::regclass
-    ) then
-      execute format(
-        'alter table %I add constraint %I check (icon is null or icon ~ ''^(ms|brand|bank):[a-z0-9_]+$'')',
-        t, t || '_icon_format'
-      );
-    end if;
+    execute format('alter table %I drop constraint if exists %I', t, t || '_icon_format');
+    execute format(
+      'alter table %I add constraint %I check (icon is null or icon ~ ''^(ms|brand|bank|emoji):[a-z0-9_-]+$'')',
+      t, t || '_icon_format'
+    );
   end loop;
 end $$;
 

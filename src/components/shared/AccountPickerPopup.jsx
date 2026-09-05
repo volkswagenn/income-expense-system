@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import Popup from './Popup'
 import Icon from './Icon'
-import BankLogo from './BankLogo'
+import AppIcon from './AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import useWalletStore from '../../store/useWalletStore'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
@@ -42,7 +43,9 @@ export default function AccountPickerPopup({ title = 'เลือกบัญ�
                   on ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-[#F2FAD9]' : 'border-hairline bg-white hover:border-ink'
                 }`}
               >
-                <span className="flex-none"><BankLogo bankName={a.bankName} size="lg" /></span>
+                <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
+                  <AppIcon value={a.icon} size={22} fallback={DEFAULT_ICONS.account} />
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[12.5px] font-semibold truncate">
                     {a.bankName ? `${a.bankName} — ${a.name}` : a.name}

@@ -368,7 +368,7 @@ export default function CategoriesPage({ embedded = false }) {
                 <div>
                   <div className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 border ${theme.rowHover} border-transparent cursor-grab active:cursor-grabbing`}>
                     <span className="text-gray-300 select-none">⋮⋮</span>
-                    <AppIcon value={main.icon} size={17} color={theme.iconTone} fallback="folder" />
+                    <AppIcon value={main.icon} size={17} fallback={defaultCategoryIcon(catType, true)} />
                     <span className={`flex-1 text-sm font-medium truncate ${theme.mainText}`}>{main.name}</span>
                     {main.children.length > 0 && (
                       <span className={`text-xs shrink-0 ${theme.countText}`}>{main.children.length} ย่อย</span>
@@ -383,7 +383,7 @@ export default function CategoriesPage({ embedded = false }) {
                         renderItem={(sub) => (
                           <div className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 border border-transparent ${theme.rowHover} cursor-grab active:cursor-grabbing`}>
                             <span className="text-gray-300 select-none">⋮⋮</span>
-                            <AppIcon value={sub.icon} size={16} color={theme.iconTone} fallback="description" />
+                            <AppIcon value={sub.icon} size={16} fallback={defaultCategoryIcon(catType, false)} />
                             <span className={`flex-1 text-sm truncate ${theme.subText}`}>{sub.name}</span>
                           </div>
                         )}
@@ -393,7 +393,7 @@ export default function CategoriesPage({ embedded = false }) {
 
                   {main.children.length === 1 && (
                     <div className="ml-[26px] flex items-center gap-2.5 rounded-lg px-2.5 py-2 opacity-60">
-                      <AppIcon value={main.children[0].icon} size={16} color={theme.iconTone} fallback="description" />
+                      <AppIcon value={main.children[0].icon} size={16} fallback={defaultCategoryIcon(catType, false)} />
                       <span className={`flex-1 text-sm truncate ${theme.subText}`}>{main.children[0].name}</span>
                     </div>
                   )}

@@ -14,7 +14,7 @@
 /** ไอคอนทั่วไป — Material Symbols Rounded (Apache-2.0) แบบทึบ */
 export const GROUPS = [
   {
-    key: 'finance', label: 'การเงิน', cover: 'payments',
+    key: 'finance', label: 'การเงิน', cover: 'payments', color: '#12795B',
     items: [
       ['payments', 'ชำระเงิน'], ['wallet', 'กระเป๋าเงิน'], ['savings', 'เงินออม'],
       ['account_balance', 'ธนาคาร'], ['credit_card', 'บัตรเครดิต'], ['currency_exchange', 'แลกเปลี่ยนเงิน'],
@@ -27,7 +27,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'food', label: 'อาหารและเครื่องดื่ม', cover: 'restaurant',
+    key: 'food', label: 'อาหารและเครื่องดื่ม', cover: 'restaurant', color: '#E06A1F',
     items: [
       ['restaurant', 'ร้านอาหาร'], ['lunch_dining', 'เบอร์เกอร์'], ['ramen_dining', 'ก๋วยเตี๋ยว'],
       ['rice_bowl', 'ข้าว'], ['local_cafe', 'กาแฟ'], ['local_bar', 'เครื่องดื่มแอลกอฮอล์'],
@@ -40,7 +40,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'shopping', label: 'ช้อปปิ้ง', cover: 'shopping_cart',
+    key: 'shopping', label: 'ช้อปปิ้ง', cover: 'shopping_cart', color: '#D0483C',
     items: [
       ['shopping_cart', 'ตะกร้าสินค้า'], ['shopping_bag', 'ถุงช้อปปิ้ง'], ['storefront', 'หน้าร้าน'],
       ['local_convenience_store', 'ร้านสะดวกซื้อ'], ['local_mall', 'ห้างสรรพสินค้า'], ['label_important', 'ป้ายโปรโมชัน'],
@@ -51,7 +51,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'home', label: 'บ้านและที่พัก', cover: 'home',
+    key: 'home', label: 'บ้านและที่พัก', cover: 'home', color: '#2F8F6B',
     items: [
       ['home', 'บ้าน'], ['apartment', 'คอนโด'], ['house', 'บ้านเดี่ยว'],
       ['villa', 'บ้านพัก'], ['bed', 'ห้องนอน'], ['chair', 'เฟอร์นิเจอร์'],
@@ -63,7 +63,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'build', label: 'ก่อสร้างและซ่อมแซม', cover: 'construction',
+    key: 'build', label: 'ก่อสร้างและซ่อมแซม', cover: 'construction', color: '#8A6A15',
     items: [
       ['construction', 'ก่อสร้าง'], ['handyman', 'ช่างซ่อม'], ['engineering', 'วิศวกรรม'],
       ['hardware', 'เครื่องมือช่าง'], ['carpenter', 'งานไม้'], ['plumbing', 'งานประปา'],
@@ -75,7 +75,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'transport', label: 'เดินทางและยานพาหนะ', cover: 'directions_car',
+    key: 'transport', label: 'เดินทางและยานพาหนะ', cover: 'directions_car', color: '#3A55C4',
     items: [
       ['directions_car', 'รถยนต์'], ['two_wheeler', 'มอเตอร์ไซค์'], ['local_gas_station', 'ปั๊มน้ำมัน'],
       ['ev_station', 'ชาร์จรถไฟฟ้า'], ['local_taxi', 'แท็กซี่'], ['directions_bus', 'รถเมล์'],
@@ -87,7 +87,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'bills', label: 'ค่าบ้านค่าบิล', cover: 'bolt',
+    key: 'bills', label: 'ค่าบ้านค่าบิล', cover: 'bolt', color: '#A8760B',
     items: [
       ['bolt', 'ค่าไฟ'], ['water_drop', 'ค่าน้ำ'], ['wifi', 'ค่าอินเทอร์เน็ต'],
       ['router', 'เราเตอร์'], ['mobile', 'ค่าโทรศัพท์'], ['tv', 'ค่าทีวี'],
@@ -99,7 +99,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'health', label: 'สุขภาพ', cover: 'local_hospital',
+    key: 'health', label: 'สุขภาพ', cover: 'local_hospital', color: '#D9436F',
     items: [
       ['local_hospital', 'โรงพยาบาล'], ['medical_services', 'ค่ารักษา'], ['medication', 'ค่ายา'],
       ['vaccines', 'วัคซีน'], ['monitor_heart', 'ตรวจสุขภาพ'], ['favorite', 'หัวใจ'],
@@ -110,7 +110,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'education', label: 'การศึกษา', cover: 'school',
+    key: 'education', label: 'การศึกษา', cover: 'school', color: '#5E44A0',
     items: [
       ['school', 'โรงเรียน'], ['menu_book', 'หนังสือเรียน'], ['book', 'หนังสือ'],
       ['auto_stories', 'อ่านหนังสือ'], ['backpack', 'กระเป๋านักเรียน'], ['science', 'วิทยาศาสตร์'],
@@ -120,7 +120,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'work', label: 'ธุรกิจและงาน', cover: 'work',
+    key: 'work', label: 'ธุรกิจและงาน', cover: 'work', color: '#2A6A8A',
     items: [
       ['work', 'งาน'], ['badge', 'บัตรพนักงาน'], ['groups', 'ทีมงาน'],
       ['person', 'บุคคล'], ['business_center', 'ธุรกิจ'], ['corporate_fare', 'บริษัท'],
@@ -132,7 +132,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'fun', label: 'บันเทิงและไลฟ์สไตล์', cover: 'sports_esports',
+    key: 'fun', label: 'บันเทิงและไลฟ์สไตล์', cover: 'sports_esports', color: '#B3335C',
     items: [
       ['sports_esports', 'เกม'], ['movie', 'ภาพยนตร์'], ['theaters', 'โรงหนัง'],
       ['music_note', 'ดนตรี'], ['headphones', 'หูฟัง'], ['mic', 'ร้องเพลง'],
@@ -144,7 +144,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'family', label: 'ครอบครัวและสัตว์เลี้ยง', cover: 'pets',
+    key: 'family', label: 'ครอบครัวและสัตว์เลี้ยง', cover: 'pets', color: '#C2571F',
     items: [
       ['pets', 'สัตว์เลี้ยง'], ['family_restroom', 'ครอบครัว'], ['child_care', 'เด็กเล็ก'],
       ['stroller', 'รถเข็นเด็ก'], ['volunteer_activism', 'บริจาค'], ['diversity_3', 'ชุมชน'],
@@ -154,7 +154,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'tech', label: 'เทคโนโลยี', cover: 'computer',
+    key: 'tech', label: 'เทคโนโลยี', cover: 'computer', color: '#4A5568',
     items: [
       ['computer', 'คอมพิวเตอร์'], ['laptop_mac', 'โน้ตบุ๊ก'], ['devices', 'อุปกรณ์'],
       ['keyboard', 'คีย์บอร์ด'], ['mouse', 'เมาส์'], ['memory', 'ชิป'],
@@ -166,7 +166,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'travel', label: 'ท่องเที่ยว', cover: 'luggage',
+    key: 'travel', label: 'ท่องเที่ยว', cover: 'luggage', color: '#0E8AA8',
     items: [
       ['luggage', 'กระเป๋าเดินทาง'], ['flight_takeoff', 'ขึ้นเครื่อง'], ['hotel', 'โรงแรม'],
       ['beach_access', 'ทะเล'], ['hiking', 'เดินป่า'], ['map', 'แผนที่'],
@@ -177,7 +177,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: 'misc', label: 'ทั่วไป', cover: 'label',
+    key: 'misc', label: 'ทั่วไป', cover: 'label', color: '#7A7F87',
     items: [
       ['label', 'ป้ายกำกับ'], ['star', 'ดาว'], ['bookmark', 'คั่นหน้า'],
       ['flag', 'ธง'], ['keep', 'ปักหมุด'], ['more_horiz', 'อื่นๆ'],
@@ -211,6 +211,18 @@ export const BRANDS = [
   ['github', 'GitHub'], ['notion', 'Notion'], ['dropbox', 'Dropbox'],
   ['zoom', 'Zoom'], ['paypal', 'PayPal'],
   ['visa', 'Visa'], ['mastercard', 'Mastercard'],
+  // บัตรและช่องทางจ่ายเงิน — เพิ่มภายหลัง ใช้ติดหน้าบัตรเครดิตและกระเป๋าเงินอิเล็กทรอนิกส์
+  ['jcb', 'JCB'], ['americanexpress', 'American Express'], ['discover', 'Discover'],
+  ['googlepay', 'Google Pay'], ['applepay', 'Apple Pay'], ['samsungpay', 'Samsung Pay'],
+  ['alipay', 'Alipay'], ['wechat', 'WeChat Pay'], ['wise', 'Wise'], ['klarna', 'Klarna'],
+  // ร้านค้าและบริการที่ร้านใช้บ่อย
+  ['foodpanda', 'foodpanda'], ['kfc', 'KFC'], ['burgerking', 'Burger King'],
+  ['cocacola', 'Coca-Cola'], ['unilever', 'Unilever'],
+  // ขนส่งและเครื่องมือทำร้าน
+  ['dhl', 'DHL'], ['fedex', 'FedEx'], ['ups', 'UPS'],
+  ['shopify', 'Shopify'], ['woocommerce', 'WooCommerce'], ['stripe', 'Stripe'],
+  ['xero', 'Xero'], ['quickbooks', 'QuickBooks'], ['wordpress', 'WordPress'],
+  ['trello', 'Trello'], ['asana', 'Asana'], ['airtable', 'Airtable'],
   ['claude', 'Claude'], ['steam', 'Steam'], ['playstation', 'PlayStation'],
   ['shell', 'Shell'], ['toyota', 'Toyota'],
   ['honda', 'Honda'], ['tesla', 'Tesla'], ['ikea', 'IKEA'],
