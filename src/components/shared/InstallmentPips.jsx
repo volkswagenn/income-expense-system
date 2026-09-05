@@ -46,7 +46,11 @@ export default function InstallmentPips({
         )}
       </p>
 
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-1">
+      {/* ป้ายกว้างเท่าที่ข้อความต้องการ ไม่ใช่หารความกว้างที่มีตามจำนวนคอลัมน์ตายตัว
+          สามคอลัมน์บนกล่องกว้างเกือบพันพิกเซล ทำให้ป้ายที่มีแค่ งวด/วันที่/ค่างวด
+          ยืดเป็นสามเท่าของเนื้อหา เหลือที่ว่างจนอ่านเป็นตารางไม่ออก
+          auto-fill จึงใส่ป้ายเท่าที่ความกว้างจริงรับไหว จอแคบก็ลดคอลัมน์ให้เอง */}
+      <div className="grid gap-1 grid-cols-[repeat(auto-fill,minmax(88px,1fr))]">
         {rows.map((r) => {
           const isPaid = r.seq <= paid
           const isNext = r.seq === paid + 1
