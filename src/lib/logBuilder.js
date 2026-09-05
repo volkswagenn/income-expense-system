@@ -46,6 +46,8 @@ export const ACTIVITY_LABELS = {
   INSTALLMENT_PAY_UNDO: 'ย้อนการจ่ายค่างวด',
   INSTALLMENT_SETTLE: 'ปิดยอดผ่อนก่อนกำหนด',
   INSTALLMENT_CANCEL: 'ยกเลิกการผ่อน',
+  INSTALLMENT_EDIT: 'แก้ไขรายการผ่อน',
+  INSTALLMENT_DELETE: 'ลบรายการผ่อน',
   CARD_CASHBACK: 'เงินคืนเข้าบัตร',
   CARD_AUTOPAY: 'ยืนยันหักบัญชีอัตโนมัติ',
   CARD_ADVANCE: 'กดเงินสดจากบัตร',

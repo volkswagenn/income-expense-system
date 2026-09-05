@@ -7,10 +7,12 @@ import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import DatePicker from '../../components/shared/DatePicker'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
 import PickBillPopup from './PickBillPopup'
 import PayInstallmentPopup from './PayInstallmentPopup'
+import InstallmentFormPopup from '../../components/shared/InstallmentFormPopup'
 import useWalletStore from '../../store/useWalletStore'
 import { formatIsoThai } from '../../lib/cardCycle'
 import SourceTag from '../../components/shared/SourceTag'
@@ -71,7 +73,7 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
   )
 }
 
-function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry, onUndoEntry }) {
+function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry, onUndoEntry, onEdit, onDelete }) {
   const [open, setOpen] = useState(false)
   const progress = useCreditCardStore((s) => s.getInstallmentProgress(installment.id))
   const cardLabel = useCreditCardStore((s) => s.getCardLabel(installment.cardId))
@@ -94,7 +96,9 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
   return (
     <div className={`rounded-xl border p-4 space-y-3 ${isActive ? 'border-gray-200' : 'border-gray-100 bg-gray-50'}`}>
       <div className="flex items-start gap-3">
-        <BankLogo bankName={card?.bankName} size="md" />
+        <span className="w-8 h-8 flex-none rounded-lg bg-paper flex items-center justify-center">
+          <AppIcon value={card?.icon} size={18} fallback={DEFAULT_ICONS.card} />
+        </span>
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm truncate">
             {installment.name}
@@ -161,6 +165,16 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
         >
           {open ? '▲ ซ่อนตารางงวด' : `▼ ดูตารางงวด (${installment.months} งวด)`}
         </button>
+        {isActive && onEdit && (
+          <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onEdit(installment)}>
+            แก้ไข
+          </button>
+        )}
+        {isActive && onDelete && progress.billedCount === 0 && (
+          <button className="btn btn-secondary text-xs py-1 px-2.5 text-red-600" onClick={() => onDelete(installment, progress)}>
+            ลบทิ้ง
+          </button>
+        )}
         {isActive && progress.remainingCount > 0 && (
           <>
             <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onSettle(installment, progress)}>
@@ -228,6 +242,7 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
 export default function InstallmentList({ bare = false }) {
   const installments = useCreditCardStore((s) => s.installments)
   const { settleInstallment, cancelInstallment, payStatement, payEntry, undoEntry } = useCreditCardStore()
+  const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
   const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
@@ -238,6 +253,8 @@ export default function InstallmentList({ bare = false }) {
   const [showDone, setShowDone] = useState(false)
   const [settleTarget, setSettleTarget] = useState(null)
   const [cancelTarget, setCancelTarget] = useState(null)
+  const [editTarget, setEditTarget] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
   const [payTarget, setPayTarget] = useState(null)   // ใบแจ้งยอดที่กำลังจ่าย
   const [pickBill, setPickBill] = useState(false)   // หน้าต่างเลือกบิล
   const [payEntryTarget, setPayEntryTarget] = useState(null) // { installment, entry }
@@ -378,6 +395,29 @@ export default function InstallmentList({ bare = false }) {
     }
   }
 
+  /** ลบทั้งรายการ — ฐานข้อมูลคืนเงินงวดที่จ่ายผ่านแอปให้ ยอดกระเป๋าจึงต้องดึงใหม่ */
+  const handleDeleteInstallment = async () => {
+    const { installment, progress } = deleteTarget
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await deleteInstallment(installment.id, buildLogEntry({
+        activityType: 'INSTALLMENT_DELETE',
+        description:
+          `ลบรายการผ่อน "${installment.name}" ${installment.months} งวด รวม ${fmt(installment.totalAmount)} บาท` +
+          (progress.paidCount > 0 ? ` · คืนเงินงวดที่จ่ายไปแล้ว ${progress.paidCount} งวด` : ''),
+        oldValue: installment,
+      }))
+      await refreshWallet()
+      setDeleteTarget(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const monthlyTotal = active.reduce((s, i) => s + Number(i.monthlyAmount || 0), 0)
 
   return (
@@ -431,6 +471,8 @@ export default function InstallmentList({ bare = false }) {
                 onUndoEntry={(ins, row) => setUndoEntryTarget({ installment: ins, entry: row })}
                 onSettle={(ins, progress) => setSettleTarget({ installment: ins, progress })}
                 onCancelInstallment={(ins, progress) => setCancelTarget({ installment: ins, progress })}
+                onEdit={(ins) => setEditTarget(ins)}
+                onDelete={(ins, progress) => setDeleteTarget({ installment: ins, progress })}
               />
             ))}
           </div>
@@ -531,6 +573,29 @@ export default function InstallmentList({ bare = false }) {
         onConfirm={handleCancel}
         onCancel={() => setCancelTarget(null)}
         confirmLabel="ยกเลิกการผ่อน"
+        danger
+      />
+
+      {editTarget && (
+        <InstallmentFormPopup installment={editTarget} onClose={() => setEditTarget(null)} />
+      )}
+
+      {/* ลบทิ้ง = บันทึกผิด ไม่ควรมีรายการนี้ตั้งแต่แรก ต่างจากยกเลิกที่เก็บไว้เป็นประวัติ */}
+      <ConfirmPopup
+        open={!!deleteTarget}
+        title="ลบรายการผ่อนทิ้ง"
+        message={
+          deleteTarget
+            ? `"${deleteTarget.installment.name}" จะถูกลบออกทั้งรายการ พร้อมตารางงวดทั้งหมด\n\n` +
+              (deleteTarget.progress.paidCount > 0
+                ? `เงินของงวดที่จ่ายผ่านแอปไปแล้ว ${deleteTarget.progress.paidCount} งวด จะถูกคืนเข้ากระเป๋าต้นทางให้\n\n`
+                : '') +
+              'ใช้เมื่อบันทึกผิดเท่านั้น ถ้าผ่อนไปจริงแล้วแต่จะเลิกกลางคัน ให้ใช้ "ยกเลิก" แทน'
+            : ''
+        }
+        onConfirm={handleDeleteInstallment}
+        onCancel={() => setDeleteTarget(null)}
+        confirmLabel="ลบทิ้ง"
         danger
       />
     </div>

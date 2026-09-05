@@ -1282,3 +1282,170 @@ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+
+-- ###########################################################################
+-- ##  12. แก้ไขและลบสัญญาผ่อน  (เพิ่มภายหลัง — รันทับได้)
+-- ###########################################################################
+--
+-- ก่อนหน้านี้สัญญาผ่อนที่บันทึกไปแล้วแก้ได้แค่ชื่อ/ผู้ขาย/หมวดหมู่/หมายเหตุ
+-- ส่วนจำนวนงวด ยอดต่องวด วันที่ซื้อ และบัตรที่ใช้รูด แก้ไม่ได้เลย
+-- คนที่พิมพ์ผิดจึงต้องยกเลิกทิ้งแล้วสร้างใหม่ ซึ่งทิ้งสัญญาที่ยกเลิกไว้เป็นขยะ
+-- และถ้าเคยจ่ายค่างวดผ่านแอปไปแล้ว เงินก้อนนั้นก็ค้างอยู่โดยไม่มีอะไรคืนให้
+--
+-- แนวคิด: แยกของที่ "ยังไม่เกิดขึ้นจริง" ออกจากของที่ "เกิดไปแล้ว"
+--   • งวดที่ยัง pending/prepaid = ยังไม่มีเงินไหน ขยับได้อิสระ
+--   • งวดที่ billed = เข้าบิลบัตรไปแล้ว เป็นหนี้จริงที่ธนาคารเรียกเก็บ ห้ามแตะ
+--   • งวดที่ paid = จ่ายผ่านแอปไปแล้ว ต้องคืนเงินเข้ากระเป๋าต้นทางก่อนถึงจะลบได้
+
+-- ── 12.1 แก้ไขสัญญาผ่อน ────────────────────────────────────────────────────
+--
+-- p_entries = null  → แก้เฉพาะข้อมูลอธิบาย (ทำได้เสมอ แม้เรียกเก็บไปแล้ว)
+-- p_entries != null → แก้ทั้งแผน สร้างตารางงวดใหม่ทั้งชุด
+--                     ทำได้เฉพาะตอนยังไม่มีงวดไหนถูกเรียกเก็บหรือจ่าย
+--
+-- ทำไมต้องลบงวดเก่าทิ้งทั้งชุดแล้วใส่ใหม่ ไม่ค่อยๆ แก้ทีละแถว
+--   จำนวนงวดเปลี่ยนได้ (12 → 6) และเลขงวดกับรอบบิลเลื่อนตามวันที่ซื้อทั้งแถว
+--   การจับคู่ทีละแถวจึงมีแต่จะเหลืองวดกำพร้าที่ไม่มีใครอ้างถึง
+
+create or replace function public.update_card_installment(
+  p_installment uuid,
+  p_card        uuid    default null,
+  p_data        jsonb   default null,
+  p_entries     jsonb   default null,
+  p_log         jsonb   default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare
+  v_ins    card_installments;
+  v_e      jsonb;
+  v_locked int;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then raise exception 'ไม่พบรายการผ่อนนี้'; end if;
+  perform assert_can_edit(v_ins.shop_id);
+
+  if v_ins.status <> 'active' then
+    raise exception 'สัญญานี้ปิดหรือยกเลิกไปแล้ว แก้ไขไม่ได้';
+  end if;
+
+  -- ข้อมูลอธิบาย แก้ได้เสมอ ไม่กระทบเงินสักบาท
+  update card_installments
+     set name        = coalesce(p_data->>'name', name),
+         vendor      = case when p_data ? 'vendor'      then nullif(p_data->>'vendor', '')                else vendor end,
+         category_id = case when p_data ? 'category_id' then nullif(p_data->>'category_id', '')::uuid     else category_id end,
+         note        = case when p_data ? 'note'        then nullif(p_data->>'note', '')                  else note end,
+         updated_at  = now()
+   where id = p_installment
+   returning * into v_ins;
+
+  if p_entries is null then
+    perform write_log(v_ins.shop_id, p_log);
+    return v_ins;
+  end if;
+
+  -- ตั้งแต่บรรทัดนี้ลงไปคือแก้ทั้งแผน ต้องไม่มีงวดไหนเกิดขึ้นจริงไปแล้ว
+  select count(*) into v_locked
+    from card_installment_entries
+   where installment_id = p_installment and status in ('billed', 'paid');
+  if v_locked > 0 then
+    raise exception 'มีงวดที่เรียกเก็บหรือจ่ายไปแล้ว % งวด แก้จำนวนงวดหรือยอดต่องวดไม่ได้ — ย้อนงวดที่จ่ายไว้ก่อน', v_locked;
+  end if;
+
+  if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
+    raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
+  end if;
+
+  if p_card is not null then
+    if not exists (select 1 from credit_cards where id = p_card and shop_id = v_ins.shop_id) then
+      raise exception 'ไม่พบบัตรเครดิตของร้านนี้';
+    end if;
+  end if;
+
+  update card_installments
+     set card_id          = coalesce(p_card, card_id),
+         principal_amount = coalesce((p_data->>'principal_amount')::numeric, (p_data->>'total_amount')::numeric, principal_amount),
+         total_amount     = coalesce((p_data->>'total_amount')::numeric, total_amount),
+         months           = coalesce((p_data->>'months')::int, months),
+         monthly_amount   = coalesce((p_data->>'monthly_amount')::numeric, monthly_amount),
+         interest_rate    = coalesce((p_data->>'interest_rate')::numeric, interest_rate),
+         tiers            = case when p_data ? 'tiers' then p_data->'tiers' else tiers end,
+         prepaid_count    = coalesce((p_data->>'prepaid_count')::int, prepaid_count),
+         purchase_date    = coalesce((p_data->>'purchase_date')::date, purchase_date),
+         first_cycle      = coalesce(p_data->>'first_cycle', first_cycle),
+         updated_at       = now()
+   where id = p_installment
+   returning * into v_ins;
+
+  delete from card_installment_entries where installment_id = p_installment;
+
+  for v_e in select * from jsonb_array_elements(p_entries) loop
+    insert into card_installment_entries (shop_id, installment_id, seq, cycle, due_date, amount, status)
+    values (
+      v_ins.shop_id, v_ins.id,
+      (v_e->>'seq')::int,
+      v_e->>'cycle',
+      (v_e->>'due_date')::date,
+      (v_e->>'amount')::numeric,
+      coalesce(v_e->>'status', 'pending')
+    );
+  end loop;
+
+  perform write_log(v_ins.shop_id, p_log);
+  return v_ins;
+end;
+$$;
+
+
+-- ── 12.2 ลบสัญญาผ่อนทิ้งทั้งฉบับ ───────────────────────────────────────────
+--
+-- ต่างจาก cancel_card_installment ที่เก็บสัญญาไว้เป็นประวัติ (ใช้ตอนเลิกผ่อนกลางคัน
+-- ทั้งที่ผ่อนไปแล้วจริง) อันนี้คือ "บันทึกผิด ไม่ควรมีรายการนี้ตั้งแต่แรก"
+--
+-- งวดที่จ่ายผ่านแอปไปแล้วจะถูกคืนเงินเข้ากระเป๋าต้นทางและลบรายจ่ายที่ผูกไว้ให้ครบ
+-- ก่อนลบสัญญา — เหมือนกดย้อนทีละงวดเอง แต่จบในทรานแซกชันเดียวจึงไม่มีทางค้างครึ่งทาง
+--
+-- งวดที่ billed แล้วลบไม่ได้ เพราะมันกลายเป็นยอดในบิลบัตรที่ธนาคารเรียกเก็บไปแล้ว
+-- ถ้าลบตรงนี้ ยอดบิลกับยอดหนี้จะขัดกันทันทีโดยไม่มีอะไรบอก ให้ใช้ "ยกเลิก" แทน
+
+create or replace function public.delete_card_installment(
+  p_installment uuid,
+  p_log         jsonb default null
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_ins    card_installments;
+  v_entry  card_installment_entries;
+  v_billed int;
+  v_src    text;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then raise exception 'ไม่พบรายการผ่อนนี้'; end if;
+  perform assert_can_edit(v_ins.shop_id);
+
+  select count(*) into v_billed
+    from card_installment_entries
+   where installment_id = p_installment and status = 'billed';
+  if v_billed > 0 then
+    raise exception 'มีงวดที่เข้าบิลบัตรไปแล้ว % งวด ลบทิ้งไม่ได้ — ใช้ "ยกเลิกสัญญา" แทน', v_billed;
+  end if;
+
+  -- คืนเงินงวดที่จ่ายผ่านแอปไปแล้ว ทีละงวด ตามกระเป๋าที่ตัดไปจริง
+  for v_entry in
+    select * from card_installment_entries
+     where installment_id = p_installment and status = 'paid'
+  loop
+    v_src := case when v_entry.paid_method = 'cash' then 'cash'
+                  else 'transfer:' || v_entry.transfer_account_id end;
+    perform apply_wallet_effect(v_entry.shop_id, v_src, v_entry.amount);
+    if v_entry.transaction_id is not null then
+      delete from transactions where id = v_entry.transaction_id;
+    end if;
+  end loop;
+
+  delete from card_installment_entries where installment_id = p_installment;
+  delete from card_installments where id = p_installment;
+
+  perform write_log(v_ins.shop_id, p_log);
+end;
+$$;
+
+notify pgrst, 'reload schema';

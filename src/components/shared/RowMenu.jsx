@@ -13,9 +13,15 @@ import Icon from './Icon'
  * ใช้เปลือก Popup ไม่ใช่เมนูลอย เพราะเมนูลอยจะถูกขอบกล่องที่เลื่อนได้ตัดหายไปครึ่งหนึ่ง
  * (การ์ดในหน้าจัดการข้อมูลและป๊อปอัปหลายตัวมี overflow ของตัวเอง)
  *
+ * ห้ามครอบปุ่มนี้ด้วยกล่องที่มี transform (เช่น scale-*) — Popup ข้างในวางตัวแบบ
+ * fixed ซึ่งจะยึดกับกล่องที่มี transform แทนที่จะยึดกับหน้าจอ ผลคือกล่องไปโผล่
+ * ในกรอบเล็กๆ นั้นจนกดอะไรไม่ได้ ถ้าต้องการปุ่มเล็กลงให้ใช้ compact
+ *
  * @param items [{ icon, label, desc, onClick, danger }]
  */
-export default function RowMenu({ title, sub, icon = 'more_vert', items = [], buttonTitle = 'เพิ่มเติม' }) {
+export default function RowMenu({
+  title, sub, icon = 'more_vert', items = [], buttonTitle = 'เพิ่มเติม', compact = false,
+}) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -24,9 +30,11 @@ export default function RowMenu({ title, sub, icon = 'more_vert', items = [], bu
         type="button"
         onClick={() => setOpen(true)}
         title={buttonTitle}
-        className="flex-none w-9 h-9 rounded-ctl border border-hairline bg-white flex items-center justify-center text-muted hover:text-ink hover:bg-paper"
+        className={`flex-none rounded-ctl border border-hairline bg-white flex items-center justify-center text-muted hover:text-ink hover:bg-paper ${
+          compact ? 'w-7 h-7' : 'w-9 h-9'
+        }`}
       >
-        <Icon name="more_vert" size={18} />
+        <Icon name="more_vert" size={compact ? 16 : 18} />
       </button>
 
       {open && (

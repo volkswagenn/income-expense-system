@@ -108,20 +108,64 @@ export async function cancelInstallment(installmentId, log = null) {
   return fromRow('card_installments', row)
 }
 
-/** แก้ได้เฉพาะข้อมูลอธิบาย — ยอดและงวดที่เรียกเก็บไปแล้วแตะไม่ได้ */
-export async function updateInstallment(id, { name, vendor, categoryId, note }) {
-  const row = await unwrap(
-    supabase
-      .from('card_installments')
-      .update({
-        name, vendor: vendor || null, category_id: categoryId || null, note: note || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single()
-  )
+/** แก้เฉพาะข้อมูลอธิบาย — ทำได้เสมอ ไม่ว่างวดจะเดินไปถึงไหนแล้ว */
+export async function updateInstallment(id, { name, vendor, categoryId, note }, log = null) {
+  const row = await unwrap(supabase.rpc('update_card_installment', {
+    p_installment: id,
+    p_card: null,
+    p_data: { name, vendor: vendor || null, category_id: categoryId || null, note: note || null },
+    p_entries: null,
+    p_log: log,
+  }))
   return fromRow('card_installments', row)
+}
+
+/**
+ * แก้ทั้งแผน — บัตร วันที่ซื้อ จำนวนงวด ยอดต่องวด แล้วสร้างตารางงวดใหม่ทั้งชุด
+ *
+ * ฐานข้อมูลจะปฏิเสธถ้ามีงวดไหนถูกเรียกเก็บเข้าบิลหรือจ่ายไปแล้ว เพราะงวดพวกนั้น
+ * เป็นเงินที่เกิดขึ้นจริงไปแล้ว การรื้อตารางใหม่จะทำให้ยอดที่บันทึกไว้ลอยทันที
+ *
+ * @param schedule ผลจาก installmentSchedule()/tieredSchedule() ใน cardCycle.js
+ */
+export async function updateInstallmentPlan(id, cardId, data, schedule, log = null) {
+  const row = await unwrap(supabase.rpc('update_card_installment', {
+    p_installment: id,
+    p_card: cardId,
+    p_data: {
+      name: data.name,
+      vendor: data.vendor || null,
+      category_id: data.categoryId || null,
+      note: data.note || null,
+      principal_amount: data.principalAmount ?? data.totalAmount,
+      total_amount: data.totalAmount,
+      months: data.months,
+      monthly_amount: data.monthlyAmount,
+      interest_rate: data.interestRate ?? 0,
+      tiers: data.tiers ?? null,
+      prepaid_count: data.prepaidCount ?? 0,
+      purchase_date: data.purchaseDate,
+      first_cycle: schedule[0].cycle,
+    },
+    p_entries: schedule.map((e) => ({
+      seq: e.seq,
+      cycle: e.cycle,
+      due_date: toDateString(e.dueDate),
+      amount: e.amount,
+      status: e.seq <= (data.prepaidCount ?? 0) ? 'prepaid' : 'pending',
+    })),
+    p_log: log,
+  }))
+  return fromRow('card_installments', row)
+}
+
+/**
+ * ลบสัญญาทิ้งทั้งฉบับ — ใช้กับรายการที่บันทึกผิด ไม่ควรมีตั้งแต่แรก
+ * งวดที่จ่ายผ่านแอปไปแล้วจะถูกคืนเงินเข้ากระเป๋าต้นทางและลบรายจ่ายที่ผูกไว้ให้ครบ
+ * ต่างจาก cancelInstallment ที่เก็บสัญญาไว้เป็นประวัติเพราะผ่อนไปจริงแล้ว
+ */
+export async function deleteInstallment(id, log = null) {
+  await unwrap(supabase.rpc('delete_card_installment', { p_installment: id, p_log: log }))
 }
 
 /**

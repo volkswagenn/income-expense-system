@@ -192,6 +192,29 @@ export function scheduleTotal(rows) {
 }
 
 /**
+ * ทำช่วงราคาให้ต่อกันสนิทเสมอ
+ *
+ * ต้นช่วงถัดไปถูกคำนวณจากปลายช่วงก่อนหน้า ผู้ใช้แก้เองไม่ได้ และช่วงสุดท้าย
+ * ยืดไปจบที่งวดสุดท้ายให้อัตโนมัติ จึงไม่มีทางกรอกให้ขาดตอนหรือทับกันได้เลย
+ *
+ * อยู่ที่นี่เพราะทั้งฟอร์มบันทึกรายจ่ายและฟอร์มแก้ไขสัญญาผ่อนต้องคิดแบบเดียวกัน
+ * ถ้าแยกกันเขียน วันหนึ่งจะได้ตารางงวดคนละชุดจากค่างวดชุดเดียวกัน
+ */
+export function normalizedTiers(tiers, months) {
+  const out = []
+  let from = 1
+  tiers.forEach((t, i) => {
+    if (from > months) return
+    const isLast = i === tiers.length - 1
+    const to = isLast ? months : Math.min(Math.max(Number(t.to) || from, from), months)
+    out.push({ from, to, amount: t.amount })
+    from = to + 1
+  })
+  if (out.length > 0) out[out.length - 1].to = months
+  return out
+}
+
+/**
  * ช่วงราคาต่อกันสนิทและจบพอดีที่งวดสุดท้ายไหม
  * คืนข้อความบอกปัญหา หรือ null ถ้าผ่าน
  */

@@ -19,7 +19,7 @@ import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import {
   nextDueDate, formatThaiDate, installmentSchedule, installmentTotal,
-  tieredSchedule, scheduleTotal, validateTiers, maxPrepaidCount, latestPurchaseDateFor, toDateString,
+  tieredSchedule, scheduleTotal, validateTiers, normalizedTiers, maxPrepaidCount, latestPurchaseDateFor, toDateString,
 } from '../../lib/cardCycle'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
@@ -46,35 +46,16 @@ const EMPTY = {
   cardId: '', installment: false, installmentMonths: '6', installmentRate: '0',
   // 'even' = หารเท่ากันทุกงวด, 'tiered' = ค่างวดตามโปรโมชั่น (ขั้นบันได)
   installmentMode: 'even',
-  installmentTiers: [{ from: 1, to: 6, amount: '' }, { from: 7, to: 6, amount: '' }],
+  // เริ่มด้วยช่วงเดียวที่กินทุกงวด ผู้ใช้ค่อยกด "เพิ่มช่วงราคา" แบ่งเองตามโปรของบัตร
+  installmentTiers: [{ from: 1, to: 6, amount: '' }],
   installmentPrepaid: false, installmentPrepaidCount: '',
   debt: { ...EMPTY_DEBT },
   vendor: '', receiptNo: '', taxStatus: 'none', dueDate: '', taxDueDate: '', note: ''
 }
 
-const MONTH_PRESETS = [3, 6, 10]
+const MONTH_PRESETS = [3, 6, 10, 12]
 
 const fmtBaht = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
-
-/**
- * ทำช่วงราคาให้ต่อกันสนิทเสมอ
- *
- * ต้นช่วงถัดไปถูกคำนวณจากปลายช่วงก่อนหน้า ผู้ใช้แก้เองไม่ได้ และช่วงสุดท้าย
- * ยืดไปจบที่งวดสุดท้ายให้อัตโนมัติ จึงไม่มีทางกรอกให้ขาดตอนหรือทับกันได้เลย
- */
-function normalizedTiers(tiers, months) {
-  const out = []
-  let from = 1
-  tiers.forEach((t, i) => {
-    if (from > months) return
-    const isLast = i === tiers.length - 1
-    const to = isLast ? months : Math.min(Math.max(Number(t.to) || from, from), months)
-    out.push({ from, to, amount: t.amount })
-    from = to + 1
-  })
-  if (out.length > 0) out[out.length - 1].to = months
-  return out
-}
 
 export default function ExpenseForm({ onPreviewChange }) {
   const navigate = useNavigate()
@@ -120,6 +101,25 @@ export default function ExpenseForm({ onPreviewChange }) {
   const setMany = (patch) => {
     savedRef.current = { tx: null, pending: null, installment: null }
     setForm((f) => ({ ...f, ...patch }))
+  }
+
+  /**
+   * เปลี่ยนจำนวนงวดทั้งหมด แล้วตัดช่วงราคาที่เลยออกไปทิ้งทันที
+   *
+   * ถ้าไม่ตัดตรงนี้ ช่องเลขงวดจะยังค้างเลขเก่าที่เกินจำนวนงวดใหม่อยู่
+   * (ตั้ง 12 งวดแล้วแบ่ง 1–6 / 7–12 พอลดเหลือ 6 งวด ช่องแรกยังเขียนว่า 6
+   * แต่ช่วงหลังหายไปเงียบๆ) ผู้ใช้จะอ่านไม่ออกว่าตกลงระบบใช้ค่าไหน
+   */
+  const setInstallmentMonths = (v) => {
+    savedRef.current = { tx: null, pending: null, installment: null }
+    const m = Math.round(Number(v) || 0)
+    setForm((f) => ({
+      ...f,
+      installmentMonths: v,
+      installmentTiers: m >= 1
+        ? normalizedTiers(f.installmentTiers, m).map((t) => ({ ...t, to: String(t.to) }))
+        : f.installmentTiers,
+    }))
   }
 
   const logVendorAdd = async (name) => {
@@ -802,16 +802,16 @@ export default function ExpenseForm({ onPreviewChange }) {
                       min="1"
                       max="120"
                       value={form.installmentMonths}
-                      onChange={(e) => set('installmentMonths', e.target.value)}
+                      onChange={(e) => setInstallmentMonths(e.target.value)}
                     />
                   </div>
-                  <div className="flex gap-1.5 pb-0.5">
+                  <div className="flex gap-1.5 pb-0.5 flex-wrap">
                     {MONTH_PRESETS.map((m) => (
                       <button
                         key={m}
                         type="button"
                         className={`btn text-xs py-1 px-2.5 ${String(m) === String(form.installmentMonths) ? 'btn-primary' : 'btn-secondary'}`}
-                        onClick={() => set('installmentMonths', String(m))}
+                        onClick={() => setInstallmentMonths(String(m))}
                       >
                         {m} งวด
                       </button>
@@ -820,10 +820,16 @@ export default function ExpenseForm({ onPreviewChange }) {
                 </div>
 
                 {/* ── ค่างวดตามโปรโมชั่น (ขั้นบันได) ── */}
-                {form.installmentMode === 'tiered' && (
+                {form.installmentMode === 'tiered' && (() => {
+                  const months = Math.max(1, Math.round(Number(form.installmentMonths) || 1))
+                  const rows = normalizedTiers(form.installmentTiers, months)
+                  // ช่วงสุดท้ายกินงวดสุดท้ายอยู่แล้ว = ไม่เหลืองวดให้แบ่งอีก
+                  // ต้องปิดปุ่มไว้ ไม่ใช่ให้กดแล้วเงียบ เพราะช่วงใหม่จะถูกตัดทิ้งทันทีที่สร้าง
+                  const roomLeft = rows.length === 0 || rows[rows.length - 1].from < months
+                  return (
                   <div>
                     <label className="label">ค่างวดตามโปรโมชั่น</label>
-                    {normalizedTiers(form.installmentTiers, Math.round(Number(form.installmentMonths) || 1)).map((t, i, arr) => (
+                    {rows.map((t, i, arr) => (
                       <div key={i} className="flex items-center gap-1.5 flex-wrap bg-white/70 border border-rose-200 rounded-lg px-2 py-1.5 mb-1.5">
                         <span className="text-xs text-rose-800">งวดที่</span>
                         {/* ต้นช่วงคำนวณจากช่วงก่อนหน้าเสมอ แก้เองไม่ได้ กันกรอกขาดตอน */}
@@ -836,10 +842,17 @@ export default function ExpenseForm({ onPreviewChange }) {
                             className="input !h-7 w-16 text-xs text-center px-1"
                             type="number"
                             min={t.from}
-                            max={form.installmentMonths}
+                            max={months}
                             value={form.installmentTiers[i]?.to ?? ''}
                             onChange={(e) => {
-                              const next = form.installmentTiers.map((x, k) => (k === i ? { ...x, to: e.target.value } : x))
+                              // บีบให้อยู่ในช่วง [งวดเริ่ม, จำนวนงวดทั้งหมด] ตั้งแต่ตอนพิมพ์
+                              // ปล่อยให้พิมพ์เกินไปก่อนแล้วค่อยตัดตอนคำนวณ จะเห็นเลขบนจอ
+                              // ไม่ตรงกับตารางงวดที่ระบบสร้างจริง ซึ่งอ่านแล้วนึกว่าระบบคิดผิด
+                              const raw = e.target.value
+                              const v = raw === ''
+                                ? ''
+                                : String(Math.min(Math.max(Math.round(Number(raw)) || t.from, t.from), months))
+                              const next = form.installmentTiers.map((x, k) => (k === i ? { ...x, to: v } : x))
                               set('installmentTiers', next)
                             }}
                           />
@@ -871,16 +884,17 @@ export default function ExpenseForm({ onPreviewChange }) {
                     ))}
                     <button
                       type="button"
-                      className="w-full text-xs text-rose-700 border border-dashed border-rose-300 rounded-lg py-1.5 hover:bg-white/60"
+                      disabled={!roomLeft}
+                      className="w-full text-xs text-rose-700 border border-dashed border-rose-300 rounded-lg py-1.5 hover:bg-white/60 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                       onClick={() => {
-                        const m = Math.round(Number(form.installmentMonths) || 1)
-                        const cur = normalizedTiers(form.installmentTiers, m)
-                        const last = cur[cur.length - 1]
-                        const split = Math.min(last.from + 5, m)
+                        const last = rows[rows.length - 1]
+                        // แบ่งช่วงสุดท้ายออกเป็นสอง ปลายช่วงแรกต้องไม่ถึงงวดสุดท้าย
+                        // ไม่งั้นช่วงที่เพิ่งเพิ่มจะเริ่มเลยงวดสุดท้ายไปแล้วและถูกตัดทิ้งทันที
+                        const split = Math.min(last.from + 5, months - 1)
                         set('installmentTiers', [
-                          ...cur.slice(0, -1),
+                          ...rows.slice(0, -1),
                           { from: last.from, to: String(split), amount: last.amount },
-                          { from: split + 1, to: m, amount: '' },
+                          { from: split + 1, to: months, amount: '' },
                         ])
                       }}
                     >
@@ -890,10 +904,17 @@ export default function ExpenseForm({ onPreviewChange }) {
                       <p className="text-xs text-red-600 mt-1">⚠️ {installmentPreview.tierError}</p>
                     )}
                     <p className="text-xs text-rose-600 mt-1">
+                      แบ่งได้ {rows.length} ช่วง ครอบคลุมงวด 1–{months} ครบพอดี
+                      {roomLeft
+                        ? ' · กด “เพิ่มช่วงราคา” แล้วแก้เลขงวดปิดท้ายของแต่ละช่วงได้เอง'
+                        : ' · แบ่งจนครบทุกงวดแล้ว เพิ่มช่วงต่อไม่ได้'}
+                    </p>
+                    <p className="text-xs text-rose-600">
                       ไม่ต้องกรอกราคาสินค้า ระบบรวมยอดจากค่างวดให้เอง
                     </p>
                   </div>
-                )}
+                  )
+                })()}
 
                 {form.installmentMode === 'even' && (
                 <div>

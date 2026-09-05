@@ -182,10 +182,23 @@ const useCreditCardStore = create((set, get) => ({
     return ins
   },
 
-  updateInstallment: async (id, changes) => {
-    const ins = await instApi.updateInstallment(id, changes)
+  updateInstallment: async (id, changes, log) => {
+    const ins = await instApi.updateInstallment(id, changes, log)
     set((s) => ({ installments: s.installments.map((x) => (x.id === id ? { ...x, ...ins } : x)) }))
     return ins
+  },
+
+  /** แก้ทั้งแผน — ตารางงวดถูกสร้างใหม่ทั้งชุด จึงต้องดึงข้อมูลใหม่ทั้งก้อน */
+  updateInstallmentPlan: async (id, cardId, data, schedule, log) => {
+    const ins = await instApi.updateInstallmentPlan(id, cardId, data, schedule, log)
+    await get().refresh()
+    return ins
+  },
+
+  /** ลบสัญญาทิ้ง — คืนเงินงวดที่จ่ายผ่านแอปไปแล้วให้ด้วย ยอดกระเป๋าจึงต้องดึงใหม่ */
+  deleteInstallment: async (id, log) => {
+    await instApi.deleteInstallment(id, log)
+    await get().refresh()
   },
 
   /** งวดของสัญญาหนึ่ง เรียงตามลำดับงวด */

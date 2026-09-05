@@ -4,21 +4,27 @@ import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
 import useTransactionStore from '../../store/useTransactionStore'
 import useCategoryStore from '../../store/useCategoryStore'
+import usePendingStore from '../../store/usePendingStore'
 import useAppStore from '../../store/useAppStore'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { walletTarget } from '../../lib/api/transactions'
 import { formatCard } from '../../components/shared/CreditCardPicker'
 import { nextClosingDate, formatThaiDate, formatIsoThai, daysUntil, cyclePeriod, toDateString } from '../../lib/cardCycle'
-import BankLogo from '../../components/shared/BankLogo'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
 import CardCashbackPopup from '../../components/shared/CardCashbackPopup'
 import CardAdvancePopup from '../../components/shared/CardAdvancePopup'
 import CardFeePopup from '../../components/shared/CardFeePopup'
+import CardChargePopup from '../../components/shared/CardChargePopup'
 import EditTransactionPopup from '../../components/shared/EditTransactionPopup'
+import { cancelTransaction as cancelTx, describeTxCancelEffects } from '../../lib/transactionActions'
 import PayInstallmentPopup from '../Recurring/PayInstallmentPopup'
+import InstallmentFormPopup from '../../components/shared/InstallmentFormPopup'
+import RowMenu from '../../components/shared/RowMenu'
 import { MONTHS_TH } from '../Manage/CardFormPopup'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
@@ -94,10 +100,13 @@ export default function CardDetailView({ cardId }) {
   const notifyDays = useAppStore((s) => s.notifyDaysBefore)
   const transactions = useTransactionStore((s) => s.transactions)
   const getCategoryName = useCategoryStore((s) => s.getCategoryName)
+  const { pendingPayments, taxInvoices, pendingIncomes } = usePendingStore()
 
   const {
     ensureStatements, payStatement, undoPayment, cashAdvance, undoAdvance, payEntry,
   } = useCreditCardStore()
+  const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
+  const cancelInstallment = useCreditCardStore((s) => s.cancelInstallment)
   const refreshCards = useCreditCardStore((s) => s.refresh)
   const refreshWallet = useWalletStore((s) => s.refresh)
   const refreshTransactions = useTransactionStore((s) => s.refresh)
@@ -114,6 +123,11 @@ export default function CardDetailView({ cardId }) {
   const [undoAdvanceTarget, setUndoAdvanceTarget] = useState(null)
   const [feeTarget, setFeeTarget] = useState(null)
   const [payEntryTarget, setPayEntryTarget] = useState(null)
+  // null = ปิดอยู่, { installment } = แก้ใบนั้น, { installment: null } = เพิ่มใหม่บนบัตรใบนี้
+  const [insForm, setInsForm] = useState(null)
+  const [insDeleteTarget, setInsDeleteTarget] = useState(null)
+  const [chargeOpen, setChargeOpen] = useState(false)
+  const [cancelTxTarget, setCancelTxTarget] = useState(null)
   const [editingTx, setEditingTx] = useState(null)
   // ติ๊กรายแถวในบิล — { row, on } ; on = กำลังจะติ๊ก, false = กำลังจะเอาเครื่องหมายออก
   const [markTarget, setMarkTarget] = useState(null)
@@ -154,7 +168,7 @@ export default function CardDetailView({ cardId }) {
     for (const a of advances) {
       if (a.date < from || a.date > to) continue
       rows.push({
-        key: `a-${a.id}`, tx: null, date: a.date, name: 'กดเงินสดจากบัตร',
+        key: `a-${a.id}`, tx: null, advance: a, date: a.date, name: 'กดเงินสดจากบัตร',
         cat: Number(a.fee) > 0 ? `ค่าธรรมเนียม ${fmt(a.fee)}` : 'ไม่มีค่าธรรมเนียม',
         tag: 'กดเงินสด', amount: Number(a.amount || 0) + Number(a.fee || 0),
       })
@@ -293,6 +307,87 @@ export default function CardDetailView({ cardId }) {
     setFeeTarget(null)
   })
 
+  /** คีย์ยอดรูดจากหน้าบัตร — เป็นรายจ่ายบนบัตรเหมือนบันทึกจากฟอร์มรายจ่ายทุกประการ */
+  const handleCharge = ({ date, amount, itemName, categoryId, vendor, note }) => run(async () => {
+    await addTransaction({
+      date, type: 'expense', amount, method: 'card', cardId: card.id,
+      category: categoryId, itemName, vendor, note,
+    }, {
+      effect: { target: walletTarget('card', { cardId: card.id }), delta: -amount },
+      log: buildLogEntry({
+        activityType: 'ADD_EXPENSE',
+        description: `รูดบัตร "${itemName}" ${fmt(amount)} บาท บัตร "${formatCard(card)}"`,
+        walletEffect: { target: 'card', delta: -amount, cardId: card.id },
+        newValue: { cardId: card.id, amount, date, itemName },
+      }),
+    })
+    await Promise.all([refreshCards(), refreshTransactions()])
+    setChargeOpen(false)
+  })
+
+  /**
+   * เมนูท้ายแถวของบิล — เปลี่ยนตามชนิดของแถว
+   * แถวในบิลมาจากสามที่ (รายจ่ายจริง / ยอดกดเงินสด / งวดผ่อนที่รอเรียกเก็บ)
+   * ซึ่งย้อนคนละวิธีกัน จึงต้องแยกเมนู ไม่ใช่โชว์ปุ่มแก้ไขอันเดียวแล้วซ่อนที่เหลือ
+   */
+  const rowMenuItems = (r, ins) => {
+    if (r.tx) {
+      return [
+        {
+          icon: 'edit_note',
+          label: 'แก้ไขรายการ',
+          desc: 'แก้ยอด วันที่ หมวดหมู่ หรือย้ายไปช่องทางอื่น',
+          onClick: () => setEditingTx(r.tx),
+        },
+        {
+          icon: 'delete',
+          label: 'ลบรายการนี้',
+          desc: 'คืนยอดกลับให้บัตร และลบรายการออกจากประวัติ',
+          danger: true,
+          onClick: () => setCancelTxTarget(r.tx),
+        },
+      ]
+    }
+    if (r.advance) {
+      return [
+        {
+          icon: 'undo',
+          label: 'ย้อนการกดเงินสด',
+          desc: 'คืนเงินออกจากกระเป๋าปลายทางและลดหนี้บัตรกลับ',
+          danger: true,
+          onClick: () => setUndoAdvanceTarget(r.advance),
+        },
+      ]
+    }
+    if (ins) {
+      const next = r.entry
+      return [
+        next && {
+          icon: 'payments',
+          label: `จ่ายค่างวดที่ ${next.seq}`,
+          desc: 'ตัดเงินจากเงินสด/บัญชี โดยไม่รอบิลบัตร',
+          onClick: () => setPayEntryTarget({ installment: ins, entry: next }),
+        },
+        {
+          icon: 'edit_note',
+          label: 'แก้ไขรายการผ่อน',
+          desc: 'แก้ยอด จำนวนงวด วันที่ หรือบัตรที่ใช้ผ่อน',
+          onClick: () => setInsForm({ installment: ins }),
+        },
+        {
+          icon: 'delete',
+          label: 'ลบรายการผ่อนทิ้ง',
+          desc: 'ใช้เมื่อบันทึกผิด — คืนเงินงวดที่จ่ายไปแล้วให้ด้วย',
+          danger: true,
+          onClick: () => setInsDeleteTarget({
+            installment: ins, progress: getInstallmentProgress(ins.id), mode: 'delete',
+          }),
+        },
+      ].filter(Boolean)
+    }
+    return [{ icon: 'info', label: 'รายการนี้จัดการที่อื่น', desc: 'ดูรายละเอียดได้ที่หน้าประวัติทั้งหมด', onClick: () => {} }]
+  }
+
   const handleAdvance = ({ amount, fee, target, date, note }) => run(async () => {
     const toCash = target === 'cash'
     await cashAdvance(card.id, {
@@ -379,7 +474,9 @@ export default function CardDetailView({ cardId }) {
         )}
 
         <div className="card px-4 py-3.5 flex items-center gap-3">
-          <BankLogo bankName={card.bankName} size="lg" />
+          <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
+            <AppIcon value={card.icon} size={22} fallback={DEFAULT_ICONS.card} />
+          </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[14.5px] font-semibold truncate">{formatCard(card)}</span>
             <span className="block text-[11.5px] text-faint truncate">
@@ -554,12 +651,20 @@ export default function CardDetailView({ cardId }) {
             <span className="tabular-nums text-[11px] font-semibold bg-expense-soft text-[#A93A2E] rounded-md px-2 py-0.5">
               {cycleRows.length} รายการ
             </span>
-            <span className="ml-auto text-xs text-faint">
+            {/* คีย์ยอดรูดจากตรงนี้ได้เลย — คนที่กำลังไล่บิลอยู่ไม่ควรต้องเด้งไปหน้าอื่นทุกบรรทัด */}
+            <button
+              className="ml-auto flex-none h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs font-semibold hover:bg-paper flex items-center gap-1"
+              onClick={() => setChargeOpen(true)}
+            >
+              <Icon name="add" size={16} />
+              เพิ่มรายการรูดบัตร
+            </button>
+            <span className="text-xs text-faint w-full sm:w-auto">
               {current ? `รอบ ${current.cycle} · สรุปยอด ${formatThaiDate(current.end)}` : ''}
             </span>
           </div>
           <div className="px-4 pb-1 text-[11px] text-faint">
-            รายการที่รูดหลังวันสรุปยอดจะย้ายไปอยู่บิลรอบถัดไปให้เอง · กดไอคอนท้ายแถวเพื่อแก้ไขรายการ ·
+            รายการที่รูดหลังวันสรุปยอดจะย้ายไปอยู่บิลรอบถัดไปให้เอง · กดปุ่ม ⋮ ท้ายแถวเพื่อจัดการรายการนั้น ·
             ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) ·
             งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด
           </div>
@@ -616,16 +721,17 @@ export default function CardDetailView({ cardId }) {
                   }`}>
                     {r.amount < 0 ? `−${fmt(-r.amount)}` : fmt(r.amount)}
                   </span>
+                  {/* ทุกแถวต้องจัดการได้ ไม่ใช่เฉพาะแถวที่เป็นรายจ่ายจริง —
+                      งวดผ่อนที่รอเรียกเก็บกับยอดกดเงินสดก็คือของที่ผู้ใช้บันทึกไว้เหมือนกัน
+                      เมนูจึงเปลี่ยนตามชนิดของแถว แทนที่จะซ่อนปุ่มไปเฉยๆ */}
                   <span className="justify-self-end">
-                    {r.tx && (
-                      <button
-                        onClick={() => setEditingTx(r.tx)}
-                        title="แก้ไขรายการนี้"
-                        className="w-6 h-6 rounded-[7px] border border-[#D8D4C9] flex items-center justify-center text-faint hover:border-ink hover:text-ink"
-                      >
-                        <Icon name="edit_note" size={15} />
-                      </button>
-                    )}
+                    <RowMenu
+                      compact
+                      title={r.name}
+                      sub={`${formatIsoThai(r.date)} · ${r.tag} · ${fmt(Math.abs(r.amount))} บาท`}
+                      icon="credit_card"
+                      items={rowMenuItems(r, insEntry?.i ?? null)}
+                    />
                   </span>
                 </div>
               )
@@ -686,6 +792,15 @@ export default function CardDetailView({ cardId }) {
             <span className="tabular-nums text-[11px] font-semibold bg-recurring-soft text-[#5A3C90] rounded-full px-2 py-0.5">
               {installments.length} รายการ
             </span>
+            {/* เพิ่มจากตรงนี้ได้เลย ไม่ต้องอ้อมไปหน้าบันทึกรายจ่าย —
+                คนที่มาบันทึกสัญญาที่ผ่อนอยู่ก่อนแล้วไม่ได้กำลังจะรูดอะไรวันนี้ */}
+            <button
+              className="ml-auto flex-none h-[28px] px-2.5 rounded-lg border border-hairline bg-white text-[11.5px] font-semibold hover:bg-paper flex items-center gap-1"
+              onClick={() => setInsForm({ installment: null })}
+            >
+              <Icon name="add" size={16} />
+              เพิ่มรายการผ่อน
+            </button>
           </div>
           {installments.length === 0 ? (
             <p className="text-[11.5px] text-faint mt-2">ยังไม่มีรายการผ่อนบนบัตรใบนี้</p>
@@ -699,6 +814,37 @@ export default function CardDetailView({ cardId }) {
                 <div className="flex items-baseline gap-2">
                   <span className="flex-1 min-w-0 text-[12.5px] font-medium truncate">{i.name}</span>
                   <span className="tabular-nums flex-none text-[12.5px] font-semibold text-expense">{fmt(p.remainingAmount)}</span>
+                  <span className="flex-none self-center">
+                    <RowMenu
+                      compact
+                      title={i.name}
+                      sub={`ผ่อน ${i.months} งวด · เหลือ ${fmt(p.remainingAmount)} บาท`}
+                      icon="credit_card"
+                      items={[
+                        {
+                          icon: 'edit_note',
+                          label: 'แก้ไขรายการผ่อน',
+                          desc: p.billedCount + p.paidCount > 0
+                            ? 'มีงวดที่เกิดขึ้นแล้ว แก้ได้เฉพาะรายละเอียด'
+                            : 'แก้ยอด จำนวนงวด วันที่ และบัตรได้',
+                          onClick: () => setInsForm({ installment: i }),
+                        },
+                        {
+                          icon: 'cancel',
+                          label: 'ยกเลิกสัญญา',
+                          desc: 'หยุดงวดที่เหลือ เก็บงวดที่เกิดไปแล้วไว้เป็นประวัติ',
+                          onClick: () => setInsDeleteTarget({ installment: i, progress: p, mode: 'cancel' }),
+                        },
+                        {
+                          icon: 'delete',
+                          label: 'ลบทิ้งทั้งรายการ',
+                          desc: 'ใช้เมื่อบันทึกผิด — คืนเงินงวดที่จ่ายไปแล้วให้ด้วย',
+                          danger: true,
+                          onClick: () => setInsDeleteTarget({ installment: i, progress: p, mode: 'delete' }),
+                        },
+                      ]}
+                    />
+                  </span>
                 </div>
                 <div className="flex justify-between gap-2 text-[11px] text-faint mt-0.5">
                   <span>งวดละ {fmt(next?.amount ?? 0)}</span>
@@ -775,6 +921,83 @@ export default function CardDetailView({ cardId }) {
         />
       )}
       {editingTx && <EditTransactionPopup transaction={editingTx} onClose={() => setEditingTx(null)} />}
+
+      {insForm && (
+        <InstallmentFormPopup
+          installment={insForm.installment}
+          cardId={cardId}
+          onClose={() => setInsForm(null)}
+        />
+      )}
+
+      {chargeOpen && (
+        <CardChargePopup
+          cardLabel={formatCard(card)}
+          onConfirm={handleCharge}
+          onCancel={() => setChargeOpen(false)}
+          busy={busy}
+        />
+      )}
+
+      {/* ลบรายจ่ายบนบัตร — บอกให้ครบว่าอะไรจะย้อนตามไปบ้าง ไม่ใช่แค่ "ลบไหม" */}
+      <ConfirmPopup
+        open={!!cancelTxTarget}
+        danger
+        title="ลบรายการนี้"
+        message={cancelTxTarget
+          ? `"${cancelTxTarget.itemName}" ${fmt(cancelTxTarget.amount)} บาท (${formatIsoThai(cancelTxTarget.date)})\n\n` +
+            describeTxCancelEffects(cancelTxTarget, { pendingPayments, taxInvoices, pendingIncomes })
+              .map((t) => `· ${t}`).join('\n')
+          : ''}
+        confirmLabel="ลบรายการ"
+        onCancel={() => setCancelTxTarget(null)}
+        onConfirm={() => run(async () => {
+          await cancelTx(cancelTxTarget)
+          setCancelTxTarget(null)
+        })}
+      />
+
+      {/* ยกเลิก = หยุดงวดที่เหลือ เก็บของที่เกิดไปแล้วไว้ · ลบ = ไม่ควรมีรายการนี้ตั้งแต่แรก
+          สองอย่างนี้ต่างกันที่ปลายทางของเงิน จึงต้องบอกให้ชัดก่อนกดยืนยัน */}
+      <ConfirmPopup
+        open={!!insDeleteTarget}
+        danger
+        title={insDeleteTarget?.mode === 'delete' ? 'ลบรายการผ่อนทิ้ง' : 'ยกเลิกสัญญาผ่อน'}
+        message={insDeleteTarget
+          ? insDeleteTarget.mode === 'delete'
+            ? `"${insDeleteTarget.installment.name}"\n` +
+              `จะถูกลบออกทั้งรายการ พร้อมตารางงวดทั้งหมด\n` +
+              (insDeleteTarget.progress.paidCount > 0
+                ? `เงินของงวดที่จ่ายผ่านแอปไปแล้ว ${insDeleteTarget.progress.paidCount} งวด จะถูกคืนเข้ากระเป๋าต้นทางให้\n`
+                : '') +
+              `\nถ้ามีงวดที่เข้าบิลบัตรไปแล้ว จะลบไม่ได้ ให้ใช้ "ยกเลิกสัญญา" แทน`
+            : `"${insDeleteTarget.installment.name}"\n` +
+              `งวดที่เหลืออีก ${insDeleteTarget.progress.remainingCount} งวด (${fmt(insDeleteTarget.progress.remainingAmount)} บาท) จะถูกยกเลิก\n` +
+              `งวดที่เรียกเก็บหรือจ่ายไปแล้วยังอยู่ตามเดิม เพราะเกิดขึ้นจริงแล้ว`
+          : ''}
+        confirmLabel={insDeleteTarget?.mode === 'delete' ? 'ลบทิ้ง' : 'ยกเลิกสัญญา'}
+        onCancel={() => setInsDeleteTarget(null)}
+        onConfirm={() => run(async () => {
+          const { installment: ins, progress, mode } = insDeleteTarget
+          if (mode === 'delete') {
+            await deleteInstallment(ins.id, buildLogEntry({
+              activityType: 'INSTALLMENT_DELETE',
+              description:
+                `ลบรายการผ่อน "${ins.name}" ${ins.months} งวด รวม ${fmt(ins.totalAmount)} บาท` +
+                (progress.paidCount > 0 ? ` · คืนเงินงวดที่จ่ายไปแล้ว ${progress.paidCount} งวด` : ''),
+              oldValue: ins,
+            }))
+          } else {
+            await cancelInstallment(ins.id, buildLogEntry({
+              activityType: 'INSTALLMENT_CANCEL',
+              description: `ยกเลิกการผ่อน "${ins.name}" · เหลือ ${progress.remainingCount} งวด ${fmt(progress.remainingAmount)} บาท`,
+              oldValue: ins,
+            }))
+          }
+          await refreshWallet()
+          setInsDeleteTarget(null)
+        })}
+      />
 
       {/* ติ๊ก/ถอนเครื่องหมายรายแถว — ถามก่อนทั้งสองทาง ตามที่แบบกำหนดไว้
           ข้อความบอกชัดว่าไม่ตัดเงิน เพราะปุ่มติ๊กในบิลชวนให้เข้าใจว่าเป็นการจ่าย */}
