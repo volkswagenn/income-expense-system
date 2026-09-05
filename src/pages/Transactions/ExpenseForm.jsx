@@ -19,7 +19,8 @@ import useWalletStore from '../../store/useWalletStore'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import {
   nextDueDate, formatThaiDate, installmentSchedule, installmentTotal,
-  tieredSchedule, scheduleTotal, validateTiers, normalizedTiers, maxPrepaidCount, latestPurchaseDateFor, toDateString,
+  tieredSchedule, scheduleTotal, validateTiers, normalizedTiers, tiersTotal, fitTiersToTotal,
+  maxPrepaidCount, latestPurchaseDateFor, toDateString,
 } from '../../lib/cardCycle'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
@@ -113,13 +114,54 @@ export default function ExpenseForm({ onPreviewChange }) {
   const setInstallmentMonths = (v) => {
     savedRef.current = { tx: null, pending: null, installment: null }
     const m = Math.round(Number(v) || 0)
-    setForm((f) => ({
-      ...f,
-      installmentMonths: v,
-      installmentTiers: m >= 1
-        ? normalizedTiers(f.installmentTiers, m).map((t) => ({ ...t, to: String(t.to) }))
-        : f.installmentTiers,
-    }))
+    setForm((f) => {
+      const next = {
+        ...f,
+        installmentMonths: v,
+        installmentTiers: m >= 1
+          ? normalizedTiers(f.installmentTiers, m).map((t) => ({ ...t, to: String(t.to) }))
+          : f.installmentTiers,
+      }
+      // เปลี่ยนจำนวนงวด = จำนวนงวดในแต่ละช่วงเปลี่ยน ยอดรวมจึงเปลี่ยนตามทันที
+      return withTierSync(next, m)
+    })
+  }
+
+  /**
+   * ผูกช่องยอดเงินเข้ากับค่างวดขั้นบันได (ทิศทาง ค่างวด → ยอดรวม)
+   *
+   * โหมดนี้ยอดรวมเกิดจากค่างวด ไม่ใช่หารจากยอดรวม ช่องยอดเงินจึงต้องเป็น
+   * ผลรวมของค่างวดเสมอ ไม่งั้นหน้าจอจะบอกสองยอดที่ขัดกันเอง (เคยเป็น: กรอก
+   * ค่างวดครบแล้วแต่ช่องยอดยังเป็น 0 จนกดบันทึกไม่ผ่านเพราะ "กรุณาใส่จำนวนเงิน")
+   *
+   * เขียนทับให้เฉพาะตอนที่ค่างวดครบทุกช่วงแล้วเท่านั้น ระหว่างที่ยังกรอกไม่ครบ
+   * ยอดที่ผู้ใช้พิมพ์ไว้ก่อนต้องอยู่เดิม เพราะเป็นตัวตั้งของการเกลี่ยกลับ
+   */
+  const withTierSync = (f, months) => {
+    if (!f.installment || f.installmentMode !== 'tiered') return f
+    const m = Math.max(1, Math.round(Number(months ?? f.installmentMonths) || 1))
+    const rows = normalizedTiers(f.installmentTiers, m)
+    if (rows.length === 0 || !rows.every((t) => Number(t.amount) > 0)) return f
+    const total = tiersTotal(rows, m)
+    return total > 0 ? { ...f, amount: String(total) } : f
+  }
+
+  const setTiers = (next) => {
+    savedRef.current = { tx: null, pending: null, installment: null }
+    setForm((f) => withTierSync({ ...f, installmentTiers: next }))
+  }
+
+  /** เกลี่ยยอดที่กรอกไว้ลงค่างวด (ทิศทาง ยอดรวม → ค่างวด) แล้วซิงค์ยอดกลับ */
+  const spreadAmountToTiers = () => {
+    savedRef.current = { tx: null, pending: null, installment: null }
+    setForm((f) => {
+      const m = Math.max(1, Math.round(Number(f.installmentMonths) || 1))
+      const fitted = fitTiersToTotal(f.installmentTiers, m, Number(f.amount) || 0)
+      if (!fitted) return f
+      // ค่างวดต่องวดในช่วงเดียวกันต้องเท่ากัน ผลรวมหลังปัดจึงอาจต่างจากยอดที่กรอก
+      // ไม่กี่สตางค์ — ยึดผลรวมจากค่างวดเป็นยอดจริง ช่องยอดเงินตามมาให้ตรงกัน
+      return withTierSync({ ...f, installmentTiers: fitted.map((t) => ({ ...t, to: String(t.to) })) }, m)
+    })
   }
 
   const logVendorAdd = async (name) => {
@@ -363,7 +405,11 @@ export default function ExpenseForm({ onPreviewChange }) {
       execute()
       return
     }
-    if (!form.amount || Number(form.amount) <= 0) return setErrMsg('กรุณาใส่จำนวนเงิน')
+    // โหมดค่างวดตามโปรฯ ยอดเงินมาจากค่างวด ช่องยอดว่างแปลว่าค่างวดยังกรอกไม่ครบ
+    // บอกให้ไปกรอกค่างวด ไม่ใช่ไล่ให้กรอกช่องที่ระบบเป็นคนเติมเอง
+    if (!form.amount || Number(form.amount) <= 0) {
+      return setErrMsg(tieredSync ? 'กรอกยอดต่องวดให้ครบทุกช่วง ระบบจะรวมเป็นยอดเงินให้เอง' : 'กรุณาใส่จำนวนเงิน')
+    }
     if (form.method === 'transfer' && !resolveAccount(form.transferAccountId)) {
       return setErrMsg('กรุณาเลือกบัญชีที่จะจ่ายเงินโอน')
     }
@@ -378,6 +424,15 @@ export default function ExpenseForm({ onPreviewChange }) {
         const err = validateTiers(tiers, m)
         if (err) return setErrMsg(err)
         if (!tiers.every((t) => Number(t.amount) > 0)) return setErrMsg('กรอกยอดต่องวดให้ครบทุกช่วงราคา')
+        // ยอดบนหัวรายการกับผลรวมค่างวดต้องเป็นตัวเลขเดียวกัน ไม่งั้นใบเดียวกัน
+        // จะอ่านได้สองยอด ปกติซิงค์ให้อัตโนมัติอยู่แล้ว จะไม่ตรงได้ก็ต่อเมื่อ
+        // ผู้ใช้มาแก้ช่องยอดเงินทีหลัง — ให้เลือกเองว่าจะยึดฝั่งไหน
+        if (tieredSync && !tieredSync.matched) {
+          return setErrMsg(
+            `ยอดเงินยังไม่ตรงกับค่างวด — ช่องยอดเงิน ${fmtBaht(tieredSync.amount)} แต่ค่างวดรวมได้ ` +
+            `${fmtBaht(tieredSync.total)} บาท กดปุ่มซิงค์ในส่วนผ่อนชำระก่อน`
+          )
+        }
       }
       // งวดที่บอกว่าจ่ายมาแล้วต้องครบกำหนดไปแล้วจริง ไม่งั้นยอดคงเหลือจะผิดตั้งแต่ต้น
       if (installmentPreview?.prepaidOver) {
@@ -459,6 +514,28 @@ export default function ExpenseForm({ onPreviewChange }) {
       remainingTotal: scheduleTotal(remainingRows),
       nextRow: remainingRows[0] ?? null,
       tierError,
+    }
+  })()
+
+  /**
+   * สถานะการซิงค์ระหว่างช่องยอดเงินกับค่างวดขั้นบันได
+   *
+   * ไม่ต้องรอเลือกบัตรเหมือน installmentPreview เพราะช่องยอดเงินอยู่ขั้นที่ 1
+   * ส่วนช่องบัตรอยู่ขั้นที่ 3 ถ้ารอบัตร ผู้ใช้จะกรอกค่างวดแล้วไม่เห็นยอดรวมเลย
+   */
+  const tieredSync = (() => {
+    if (!form.installment || form.installmentMode !== 'tiered') return null
+    const months = Math.max(1, Math.round(Number(form.installmentMonths) || 1))
+    const rows = normalizedTiers(form.installmentTiers, months)
+    const filled = rows.length > 0 && rows.every((t) => Number(t.amount) > 0)
+    const total = tiersTotal(rows, months)
+    const amount = Number(form.amount) || 0
+    const diff = Math.round((amount - total) * 100) / 100
+    return {
+      months, rows, filled, total, amount, diff,
+      // ต่างกันไม่ถึงครึ่งสตางค์ = ตรงกันแล้ว (เศษจากการปัดค่างวด)
+      matched: filled && Math.abs(diff) < 0.005,
+      canSpread: amount > 0 && !!fitTiersToTotal(form.installmentTiers, months, amount),
     }
   })()
 
@@ -599,6 +676,15 @@ export default function ExpenseForm({ onPreviewChange }) {
                   <UiIcon name="numpad" size={17} />
                 </button>
               </div>
+              {/* ผ่อนแบบค่างวดตามโปรฯ ยอดนี้ไม่ได้พิมพ์เอง แต่รวมมาจากค่างวดข้างล่าง
+                  ถ้าไม่บอกไว้ ผู้ใช้จะงงว่าเลขเปลี่ยนเองตอนแก้ค่างวด */}
+              {tieredSync?.filled && (
+                <p className={`mt-1 text-[11.5px] ${tieredSync.matched ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {tieredSync.matched
+                    ? `รวมจากค่างวดผ่อน ${tieredSync.rows.length} ช่วง ${tieredSync.months} งวดให้อัตโนมัติ`
+                    : `⚠️ ค่างวดผ่อนรวมได้ ${fmtBaht(tieredSync.total)} บาท ไม่ตรงกับยอดนี้`}
+                </p>
+              )}
             </div>
             <div className="flex gap-1.5 pb-1.5 flex-wrap">
               {QUICK_AMOUNTS.map((a) => (
@@ -785,7 +871,11 @@ export default function ExpenseForm({ onPreviewChange }) {
                         key={o.v}
                         type="button"
                         className={`btn text-xs py-1 px-3 ${form.installmentMode === o.v ? 'btn-primary' : 'btn-secondary'}`}
-                        onClick={() => set('installmentMode', o.v)}
+                        onClick={() => {
+                          savedRef.current = { tx: null, pending: null, installment: null }
+                          // สลับมาโหมดขั้นบันไดทั้งที่ค่างวดกรอกไว้ครบแล้ว = ยอดต้องตามมาทันที
+                          setForm((f) => withTierSync({ ...f, installmentMode: o.v }))
+                        }}
                       >
                         {o.t}
                       </button>
@@ -853,7 +943,7 @@ export default function ExpenseForm({ onPreviewChange }) {
                                 ? ''
                                 : String(Math.min(Math.max(Math.round(Number(raw)) || t.from, t.from), months))
                               const next = form.installmentTiers.map((x, k) => (k === i ? { ...x, to: v } : x))
-                              set('installmentTiers', next)
+                              setTiers(next)
                             }}
                           />
                         )}
@@ -866,7 +956,7 @@ export default function ExpenseForm({ onPreviewChange }) {
                           value={form.installmentTiers[i]?.amount ?? ''}
                           onChange={(e) => {
                             const next = form.installmentTiers.map((x, k) => (k === i ? { ...x, amount: e.target.value } : x))
-                            set('installmentTiers', next)
+                            setTiers(next)
                           }}
                         />
                         <span className="text-xs text-rose-800">บาท</span>
@@ -874,7 +964,7 @@ export default function ExpenseForm({ onPreviewChange }) {
                           <button
                             type="button"
                             className="ml-auto text-rose-400 hover:text-rose-700 text-sm leading-none px-1"
-                            onClick={() => set('installmentTiers', form.installmentTiers.filter((_, k) => k !== i))}
+                            onClick={() => setTiers(form.installmentTiers.filter((_, k) => k !== i))}
                             title="ลบช่วงนี้"
                           >
                             ✕
@@ -891,7 +981,7 @@ export default function ExpenseForm({ onPreviewChange }) {
                         // แบ่งช่วงสุดท้ายออกเป็นสอง ปลายช่วงแรกต้องไม่ถึงงวดสุดท้าย
                         // ไม่งั้นช่วงที่เพิ่งเพิ่มจะเริ่มเลยงวดสุดท้ายไปแล้วและถูกตัดทิ้งทันที
                         const split = Math.min(last.from + 5, months - 1)
-                        set('installmentTiers', [
+                        setTiers([
                           ...rows.slice(0, -1),
                           { from: last.from, to: String(split), amount: last.amount },
                           { from: split + 1, to: months, amount: '' },
@@ -909,9 +999,63 @@ export default function ExpenseForm({ onPreviewChange }) {
                         ? ' · กด “เพิ่มช่วงราคา” แล้วแก้เลขงวดปิดท้ายของแต่ละช่วงได้เอง'
                         : ' · แบ่งจนครบทุกงวดแล้ว เพิ่มช่วงต่อไม่ได้'}
                     </p>
-                    <p className="text-xs text-rose-600">
-                      ไม่ต้องกรอกราคาสินค้า ระบบรวมยอดจากค่างวดให้เอง
-                    </p>
+                    {/* ── แถบซิงค์ยอดเงิน ↔ ค่างวด ──
+                        สองช่องนี้เป็นตัวเลขชุดเดียวกันคนละมุม กรอกฝั่งไหนก่อนก็ได้
+                        แต่ต้องเดินไปหากันเสมอ ไม่ใช่ปล่อยให้ขัดกันแล้วมาโดนบล็อก
+                        ตอนกดบันทึกโดยไม่บอกว่าต้องแก้ตรงไหน */}
+                    {tieredSync?.matched ? (
+                      <p className="text-xs text-emerald-700 mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span>✓ รวมจากค่างวดแล้ว</span>
+                        <strong className="tabular-nums">{fmtBaht(tieredSync.total)} บาท</strong>
+                        <span className="text-emerald-600">— ใส่ให้ในช่องยอดเงินด้านบนเรียบร้อย</span>
+                      </p>
+                    ) : tieredSync?.filled ? (
+                      <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2">
+                        <p className="text-xs text-amber-900">
+                          ยอดยังไม่ตรงกัน — ช่องยอดเงิน{' '}
+                          <strong className="tabular-nums">{fmtBaht(tieredSync.amount)}</strong>{' '}
+                          แต่ค่างวดรวมได้{' '}
+                          <strong className="tabular-nums">{fmtBaht(tieredSync.total)}</strong> บาท
+                          {' '}(ต่างกัน {fmtBaht(Math.abs(tieredSync.diff))})
+                        </p>
+                        <div className="flex gap-1.5 flex-wrap mt-1.5">
+                          <button
+                            type="button"
+                            className="btn btn-primary text-xs py-1 px-2.5"
+                            onClick={() => set('amount', String(tieredSync.total))}
+                          >
+                            ใช้ยอดจากค่างวด {fmtBaht(tieredSync.total)}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-xs py-1 px-2.5 disabled:opacity-40"
+                            disabled={!tieredSync.canSpread}
+                            title={tieredSync.canSpread ? '' : 'ยอดที่กรอกน้อยกว่าค่างวดช่วงอื่นรวมกัน เกลี่ยไม่ได้'}
+                            onClick={spreadAmountToTiers}
+                          >
+                            เกลี่ยค่างวดให้ตรง {fmtBaht(tieredSync.amount)}
+                          </button>
+                        </div>
+                      </div>
+                    ) : tieredSync?.canSpread ? (
+                      <div className="mt-1 rounded-lg border border-rose-200 bg-white/70 px-2.5 py-2">
+                        <p className="text-xs text-rose-700">
+                          มียอดเงิน <strong className="tabular-nums">{fmtBaht(tieredSync.amount)}</strong> บาท
+                          {' '}อยู่แล้ว แต่ยังกรอกค่างวดไม่ครบทุกช่วง
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btn-secondary text-xs py-1 px-2.5 mt-1.5"
+                          onClick={spreadAmountToTiers}
+                        >
+                          เกลี่ยยอดลงช่วงที่ยังว่างให้เลย
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-rose-600">
+                        ไม่ต้องกรอกราคาสินค้า กรอกค่างวดให้ครบทุกช่วง ระบบรวมเป็นยอดเงินให้เอง
+                      </p>
+                    )}
                   </div>
                   )
                 })()}

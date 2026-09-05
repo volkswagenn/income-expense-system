@@ -192,6 +192,50 @@ export function scheduleTotal(rows) {
 }
 
 /**
+ * ยอดรวมของค่างวดขั้นบันได — ค่างวด × จำนวนงวดในช่วง รวมทุกช่วง
+ *
+ * คิดจากช่วงราคาตรงๆ ไม่ต้องรู้จักบัตรหรือวันเปิดบิลเหมือน tieredSchedule
+ * เพราะฟอร์มต้องรู้ยอดรวมตั้งแต่ยังไม่ได้เลือกบัตร (ช่องยอดเงินอยู่ก่อนช่องบัตร)
+ */
+export function tiersTotal(tiers, months) {
+  const rows = normalizedTiers(tiers, months)
+  const sum = rows.reduce((s, t) => s + (Number(t.amount) || 0) * (t.to - t.from + 1), 0)
+  return Math.round(sum * 100) / 100
+}
+
+/**
+ * เกลี่ยยอดรวมที่กรอกไว้ลงในค่างวด (ทางกลับของ tiersTotal)
+ *
+ * ยอดลงที่ "ช่วงที่ยังว่าง" ก่อน เพราะนั่นคือช่องที่ผู้ใช้ตั้งใจให้ระบบเติม
+ * ถ้ากรอกครบทุกช่วงแล้ว ส่วนต่างจะไปลงช่วงสุดท้ายช่วงเดียว — ช่วงที่ผู้ใช้
+ * กรอกเองไว้แล้วต้องไม่ถูกขยับ ไม่งั้นค่างวดตามโปรฯ ที่จำมาจะเพี้ยนไปทั้งชุด
+ *
+ * เศษการปัดกองอยู่ที่ช่วงสุดท้ายของกลุ่มที่เติม ค่างวดต่องวดในช่วงเดียวกัน
+ * ต้องเท่ากันเสมอ ผลรวมจึงอาจต่างจากยอดที่กรอกได้ไม่กี่สตางค์ — ผู้เรียกต้อง
+ * ถือผลรวมจริงจากค่างวดเป็นยอดสุดท้าย ไม่ใช่ยอดที่กรอกมา
+ *
+ * คืน null เมื่อเกลี่ยไม่ได้ (ยอดน้อยกว่าช่วงที่กรอกไว้แล้ว)
+ */
+export function fitTiersToTotal(tiers, months, total) {
+  const rows = normalizedTiers(tiers, months)
+  if (rows.length === 0 || !(Number(total) > 0)) return null
+  const span = (t) => t.to - t.from + 1
+  const blanks = rows.filter((t) => !(Number(t.amount) > 0))
+  const targets = blanks.length > 0 ? blanks : [rows[rows.length - 1]]
+  const isTarget = (t) => targets.includes(t)
+  const fixed = rows.reduce((s, t) => (isTarget(t) ? s : s + (Number(t.amount) || 0) * span(t)), 0)
+  const remain = Math.round((Number(total) - fixed) * 100) / 100
+  const slots = targets.reduce((s, t) => s + span(t), 0)
+  if (!(remain > 0)) return null
+  const per = Math.floor((remain / slots) * 100) / 100
+  if (!(per > 0)) return null
+  const tail = targets[targets.length - 1]
+  const tailPer = Math.round(((remain - per * (slots - span(tail))) / span(tail)) * 100) / 100
+  if (!(tailPer > 0)) return null
+  return rows.map((t) => (isTarget(t) ? { ...t, amount: String(t === tail ? tailPer : per) } : { ...t }))
+}
+
+/**
  * ทำช่วงราคาให้ต่อกันสนิทเสมอ
  *
  * ต้นช่วงถัดไปถูกคำนวณจากปลายช่วงก่อนหน้า ผู้ใช้แก้เองไม่ได้ และช่วงสุดท้าย
