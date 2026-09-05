@@ -9,10 +9,12 @@ import ConfirmPopup from './ConfirmPopup'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
 import { buildLogEntry } from '../../lib/logBuilder'
+import InstallmentPips from './InstallmentPips'
+import PerInstallmentPopup from './PerInstallmentPopup'
 import {
   installmentSchedule, installmentTotal, tieredSchedule, scheduleTotal,
   validateTiers, normalizedTiers, maxPrepaidCount, latestPurchaseDateFor,
-  formatThaiDate,
+  tiersFromAmounts, amountsFromTiers, formatThaiDate,
 } from '../../lib/cardCycle'
 
 /**
@@ -91,6 +93,7 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirm, setConfirm] = useState(false)
+  const [tierEditOpen, setTierEditOpen] = useState(false)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -244,6 +247,23 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
 
   const rows = normalizedTiers(form.tiers, months)
   const roomLeft = rows.length === 0 || rows[rows.length - 1].from < months
+
+  /**
+   * วันครบกำหนดของทุกงวด คิดจากบัตร + วันเปิดบิลอย่างเดียว
+   * preview ต้องรอค่างวดครบก่อน แต่ช่วงที่ยังกรอกอยู่คือช่วงที่อยากเห็นวันที่ที่สุด
+   */
+  const dateRows = useMemo(() => {
+    if (planLocked || !card) return null
+    const buyDate = new Date(form.purchaseDate + 'T00:00:00')
+    if (Number.isNaN(buyDate.getTime())) return null
+    return {
+      rows: tieredSchedule(card, buyDate, months, [{ from: 1, to: months, amount: 0 }]),
+      maxPaid: Math.min(maxPrepaidCount(card, buyDate), months),
+    }
+  }, [planLocked, card, form.purchaseDate, months])
+
+  const pipRows = preview && !preview.invalid ? preview.rows : dateRows?.rows
+  const pipMaxPaid = preview && !preview.invalid ? preview.maxPrepaid : dateRows?.maxPaid
 
   return (
     <>
@@ -419,6 +439,14 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
                     )}
                   </div>
                 ))}
+                {/* กรอกทีละงวดตามที่โปรฯ ประกาศมา แล้วยุบเป็นช่วงให้เอง */}
+                <button
+                  type="button"
+                  className="w-full text-xs font-semibold text-expense border border-expense-line bg-white/70 rounded-lg py-1.5 mb-1.5 hover:bg-white"
+                  onClick={() => setTierEditOpen(true)}
+                >
+                  ⚙ ปรับแต่งค่างวดทีละงวด ({months} งวด)
+                </button>
                 <button
                   type="button"
                   disabled={!roomLeft}
@@ -458,6 +486,17 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
                   onChange={(e) => set('prepaidCount', e.target.value)}
                 />
               </div>
+            )}
+
+            {/* ป้ายงวด — บันทึกสัญญาเก่าแล้วตรวจได้ทันทีว่างวดถัดไปตรงกับสลิปในมือไหม */}
+            {pipRows && (
+              <InstallmentPips
+                rows={pipRows}
+                showAmount={!!(preview && !preview.invalid)}
+                paidCount={preview && !preview.invalid ? preview.prepaidCount : Number(form.prepaidCount) || 0}
+                maxPaid={pipMaxPaid}
+                onPickPaid={(n) => setForm((f) => ({ ...f, prepaid: n > 0, prepaidCount: n > 0 ? String(n) : '' }))}
+              />
             )}
           </div>
         )}
@@ -505,6 +544,25 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
           </p>
         )}
       </Popup>
+
+      {tierEditOpen && (() => {
+        const filled = rows.find((t) => Number(t.amount) > 0)
+        const base = filled ? Number(filled.amount) : Math.round(((Number(form.amount) || 0) / months) * 100) / 100
+        return (
+          <PerInstallmentPopup
+            months={months}
+            amounts={amountsFromTiers(form.tiers, months)}
+            base={base}
+            target={preview && !preview.invalid ? preview.total : (Number(form.amount) || null)}
+            dueDates={pipRows?.map((r) => r.dueDate) ?? null}
+            onClose={() => setTierEditOpen(false)}
+            onSave={(values) => {
+              set('tiers', tiersFromAmounts(values).map((t) => ({ ...t, to: String(t.to) })))
+              setTierEditOpen(false)
+            }}
+          />
+        )
+      })()}
 
       <ConfirmPopup
         open={confirm}

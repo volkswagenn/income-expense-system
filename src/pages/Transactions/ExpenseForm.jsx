@@ -20,8 +20,10 @@ import useCreditCardStore from '../../store/useCreditCardStore'
 import {
   nextDueDate, formatThaiDate, installmentSchedule, installmentTotal,
   tieredSchedule, scheduleTotal, validateTiers, normalizedTiers, tiersTotal, fitTiersToTotal,
-  maxPrepaidCount, latestPurchaseDateFor, toDateString,
+  tiersFromAmounts, amountsFromTiers, maxPrepaidCount, latestPurchaseDateFor, toDateString,
 } from '../../lib/cardCycle'
+import InstallmentPips from '../../components/shared/InstallmentPips'
+import PerInstallmentPopup from '../../components/shared/PerInstallmentPopup'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -70,6 +72,7 @@ export default function ExpenseForm({ onPreviewChange }) {
   const [saving, setSaving] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [numpadOpen, setNumpadOpen] = useState(false)
+  const [tierEditOpen, setTierEditOpen] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [attachments, setAttachments] = useState([])
   const { warning, check, proceed, cancel } = useNegativeConfirm()
@@ -539,6 +542,23 @@ export default function ExpenseForm({ onPreviewChange }) {
     }
   })()
 
+  /**
+   * วันครบกำหนดของทุกงวด คิดจากบัตรกับวันเปิดบิลอย่างเดียว
+   *
+   * installmentPreview ต้องรอค่างวดครบก่อนถึงจะมีตารางให้ดู แต่ช่วงที่ยังกรอกอยู่
+   * คือช่วงที่อยากเห็นวันที่มากที่สุด (จะได้รู้ว่างวดถัดไปตกเดือนไหน) จึงคิดแยก
+   */
+  const installmentDates = (() => {
+    if (!form.installment || !selectedCard) return null
+    const m = Math.round(Number(form.installmentMonths) || 0)
+    if (!(m >= 1) || m > 120) return null
+    const buyDate = new Date(date + 'T00:00:00')
+    return {
+      rows: tieredSchedule(selectedCard, buyDate, m, [{ from: 1, to: m, amount: 0 }]),
+      maxPaid: Math.min(maxPrepaidCount(selectedCard, buyDate), m),
+    }
+  })()
+
   const recurringAllItems = useRecurringStore((s) => s.items)
   const recurringEntries = useRecurringStore((s) => s.entries)
   const currentMonth = format(new Date(), 'yyyy-MM')
@@ -972,6 +992,15 @@ export default function ExpenseForm({ onPreviewChange }) {
                         )}
                       </div>
                     ))}
+                    {/* โปรฯ ผ่อนประกาศเป็นรายงวด คนกรอกจึงถือตัวเลขรายงวดมา ไม่ได้ถือ "ช่วง" มา
+                        ให้กรอกแบบที่ถืออยู่จริงแล้วยุบเป็นช่วงให้เอง จะได้ไม่ต้องนั่งแปลงเอง */}
+                    <button
+                      type="button"
+                      className="w-full text-xs font-semibold text-rose-800 border border-rose-300 bg-white/70 rounded-lg py-1.5 mb-1.5 hover:bg-white"
+                      onClick={() => setTierEditOpen(true)}
+                    >
+                      ⚙ ปรับแต่งค่างวดทีละงวด ({months} งวด)
+                    </button>
                     <button
                       type="button"
                       disabled={!roomLeft}
@@ -1155,6 +1184,26 @@ export default function ExpenseForm({ onPreviewChange }) {
                     </div>
                   )}
                 </div>
+
+                {/* ป้ายงวดทั้งสัญญา — บอกวันครบกำหนดของทุกงวด และกดเลือกงวดที่จ่ายมาแล้วได้
+                    ตรงนี้คือที่ที่ตรวจได้ว่า "จ่ายมาแล้วกี่งวด" ที่กรอกไป ตรงกับสลิปในมือไหม */}
+                {(() => {
+                  const ready = installmentPreview && !installmentPreview.invalid
+                  const rows = ready ? installmentPreview.rows : installmentDates?.rows
+                  if (!rows) return null
+                  return (
+                    <InstallmentPips
+                      rows={rows}
+                      showAmount={!!ready}
+                      paidCount={ready ? installmentPreview.prepaidCount : Number(form.installmentPrepaidCount) || 0}
+                      maxPaid={ready ? installmentPreview.maxPrepaid : installmentDates.maxPaid}
+                      onPickPaid={(n) => setMany({
+                        installmentPrepaid: n > 0,
+                        installmentPrepaidCount: n > 0 ? String(n) : '',
+                      })}
+                    />
+                  )
+                })()}
 
                 {installmentPreview && !installmentPreview.invalid ? (
                   <div className="text-xs text-rose-800 bg-white/70 rounded-lg px-3 py-2 leading-relaxed space-y-0.5">
@@ -1414,6 +1463,29 @@ export default function ExpenseForm({ onPreviewChange }) {
           onClose={() => setRecentsOpen(false)}
         />
       )}
+
+      {tierEditOpen && (() => {
+        const m = Math.max(1, Math.round(Number(form.installmentMonths) || 1))
+        const rows = normalizedTiers(form.installmentTiers, m)
+        // ค่าเริ่มต้นของงวดที่ไม่ได้กำหนดเอง — ใช้ค่างวดช่วงแรกที่กรอกไว้ ถ้ายังไม่กรอก
+        // เลยก็หารจากยอดที่ใส่ไว้ในช่องจำนวนเงิน จะได้มีตัวตั้งให้แก้ ไม่ใช่เริ่มจาก 0
+        const filled = rows.find((t) => Number(t.amount) > 0)
+        const base = filled ? Number(filled.amount) : Math.round(((Number(form.amount) || 0) / m) * 100) / 100
+        return (
+          <PerInstallmentPopup
+            months={m}
+            amounts={amountsFromTiers(form.installmentTiers, m)}
+            base={base}
+            target={Number(form.amount) || null}
+            dueDates={(installmentPreview?.rows ?? installmentDates?.rows)?.map((r) => r.dueDate) ?? null}
+            onClose={() => setTierEditOpen(false)}
+            onSave={(values) => {
+              setTiers(tiersFromAmounts(values).map((t) => ({ ...t, to: String(t.to) })))
+              setTierEditOpen(false)
+            }}
+          />
+        )
+      })()}
 
       {numpadOpen && (
         <AmountNumpadPopup

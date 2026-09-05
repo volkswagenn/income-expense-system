@@ -204,6 +204,34 @@ export function tiersTotal(tiers, months) {
 }
 
 /**
+ * ค่างวดรายตัว → ช่วงราคา
+ *
+ * ฐานข้อมูลเก็บค่างวดเป็น "ช่วง" (งวด 1–6 ละเท่านี้) ไม่ได้เก็บทีละงวด แต่คน
+ * อ่านโปรฯ ผ่อนมาเป็นทีละงวด การให้กรอกทีละงวดแล้วยุบเป็นช่วงให้เอง จึงตรงกับ
+ * ทั้งสองฝั่งโดยไม่ต้องเปลี่ยนโครงข้อมูลที่ตารางงวดใช้อยู่
+ */
+export function tiersFromAmounts(amounts) {
+  const key = (a) => (a === '' || a == null ? '' : String(Number(a) || 0))
+  const out = []
+  amounts.forEach((a, i) => {
+    const last = out[out.length - 1]
+    if (last && key(last.amount) === key(a)) last.to = i + 1
+    else out.push({ from: i + 1, to: i + 1, amount: key(a) })
+  })
+  return out
+}
+
+/** ช่วงราคา → ค่างวดรายตัว (ทางกลับของ tiersFromAmounts) */
+export function amountsFromTiers(tiers, months) {
+  const rows = normalizedTiers(tiers, months)
+  const out = new Array(months).fill('')
+  rows.forEach((t) => {
+    for (let s = t.from; s <= t.to; s++) out[s - 1] = t.amount === '' || t.amount == null ? '' : String(t.amount)
+  })
+  return out
+}
+
+/**
  * เกลี่ยยอดรวมที่กรอกไว้ลงในค่างวด (ทางกลับของ tiersTotal)
  *
  * ยอดลงที่ "ช่วงที่ยังว่าง" ก่อน เพราะนั่นคือช่องที่ผู้ใช้ตั้งใจให้ระบบเติม
@@ -369,6 +397,12 @@ export function daysUntil(date, from = new Date()) {
 export function formatThaiDate(date) {
   if (!date) return '-'
   return `${date.getDate()} ${THAI_MONTHS[date.getMonth()]} ${date.getFullYear() + 543}`
+}
+
+/** วันที่แบบสั้นสำหรับป้ายงวด — "5 ต.ค. 69" ปีสองหลักพอ ป้ายจะได้ไม่ล้น */
+export function formatThaiShort(date) {
+  if (!date) return '-'
+  return `${date.getDate()} ${THAI_MONTHS[date.getMonth()]} ${String((date.getFullYear() + 543) % 100).padStart(2, '0')}`
 }
 
 /** '2026-10-15' → '15 ต.ค. 2569' — ใช้กับวันที่ที่อ่านมาจากฐานข้อมูล */

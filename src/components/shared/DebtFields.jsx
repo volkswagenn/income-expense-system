@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import DatePicker from './DatePicker'
 import TransferAccountPicker from './TransferAccountPicker'
+import InstallmentPips from './InstallmentPips'
 import CategorySelect from './CategorySelect'
 import {
   debtSchedule, scheduleTotal, installmentTotal, maxPrepaidForDebt, latestFirstDueFor,
@@ -271,6 +272,18 @@ export default function DebtFields({ value: v, onChange, hideName = false, hideC
             <TransferAccountPicker value={v.accountId} onChange={(id) => set('accountId', id)} label="" />
           )}
         </div>
+
+        {/* ป้ายงวด — บันทึกหนี้ที่ผ่อนมาก่อนแล้ว ต้องเห็นวันที่ของแต่ละงวดถึงจะรู้ว่า
+            "จ่ายมาแล้วกี่งวด" ที่กรอกไป ทำให้งวดถัดไปตรงกับใบแจ้งหนี้จริงหรือเปล่า */}
+        {calc && !calc.prepaidOver && (
+          <InstallmentPips
+            rows={calc.rows}
+            paidCount={calc.prepaidCount}
+            maxPaid={calc.maxPrepaid}
+            tone="amber"
+            onPickPaid={(n) => onChange({ ...v, prepaid: n > 0, prepaidCount: n > 0 ? String(n) : '' })}
+          />
+        )}
 
         {calc && !calc.prepaidOver && (
           <div className="text-xs text-amber-900 bg-white/70 rounded-lg px-3 py-2 space-y-0.5">
