@@ -8,6 +8,7 @@ import LogDownloader from '../Backup/LogDownloader'
 import Icon from '../../components/shared/Icon'
 import useFormDefaults, { setFormDefaults, formMethodLabel } from '../../hooks/useFormDefaults'
 import Popup from '../../components/shared/Popup'
+import ResetDataPopup from './ResetDataPopup'
 import AccountPanel from '../../auth/AccountPanel'
 import { useAuth } from '../../auth/AuthProvider'
 
@@ -146,6 +147,20 @@ export default function SettingsPage() {
         onClick={() => setPanel('form')}
       />
 
+      {/* รีเซ็ตข้อมูล — แยกการ์ดของตัวเอง ไม่ซ่อนอยู่ในป๊อปอัปสำรองข้อมูลเหมือนเดิม
+          เพราะเป็นงานที่ตั้งใจมาทำ ไม่ใช่ของแถมของการดาวน์โหลดไฟล์ */}
+      <SettingCard
+        icon="delete_sweep"
+        title="รีเซ็ตข้อมูล"
+        desc="ล้างข้อมูลเพื่อเริ่มใหม่ — เลือกได้ว่าจะล้างเฉพาะรายการเดินบัญชี หรือล้างทั้งหมด"
+        rows={[
+          { label: 'ล้างแล้วกู้คืนไม่ได้', value: 'โหลดไฟล์สำรองก่อน', tone: 'muted' },
+          { label: 'สิทธิ์ที่ทำได้', value: role === 'owner' ? 'คุณทำได้' : 'เจ้าของร้านเท่านั้น', tone: role === 'owner' ? 'default' : 'muted' },
+        ]}
+        action="เปิดหน้ารีเซ็ตข้อมูล"
+        onClick={() => setPanel('reset')}
+      />
+
       <SettingCard
         icon="info"
         title="เกี่ยวกับแอป"
@@ -195,6 +210,10 @@ export default function SettingsPage() {
             <LogDownloader />
           </div>
         </Popup>
+      )}
+
+      {panel === 'reset' && (
+        <ResetDataPopup isOwner={role === 'owner'} onClose={() => setPanel(null)} />
       )}
 
       {panel === 'form' && (

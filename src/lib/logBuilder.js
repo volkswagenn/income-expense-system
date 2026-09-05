@@ -69,6 +69,8 @@ export const ACTIVITY_LABELS = {
   RECEIVE_TAX_INVOICE: 'รับใบกำกับภาษี',
   IMPORT_DATA: 'นำเข้าข้อมูล',
   BACKUP_DATA: 'สำรองข้อมูล',
+  RESET_LEDGER: 'ล้างรายการเดินบัญชี',
+  RESET_ALL: 'ล้างข้อมูลทั้งหมด',
   RESTORE_BACKUP: 'กู้คืนข้อมูล',
   ADD_INCOME_MAIN: 'รับเงิน',
   OPEN_BILL: 'เปิดบิลค้างชำระ',

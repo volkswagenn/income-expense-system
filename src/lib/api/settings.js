@@ -26,3 +26,12 @@ export async function saveNotifyDaysBefore(days) {
 export async function clearShopData() {
   await unwrap(supabase.rpc('clear_shop_data', { p_shop: getShopId() }))
 }
+
+/**
+ * ล้างเฉพาะรายการเดินบัญชี — เก็บหมวดหมู่ บัญชีธนาคาร บัตร กระเป๋าย่อย
+ * และแม่แบบรายการประจำไว้ แล้วตั้งยอดทุกก้อนเป็น 0 เพื่อเริ่มใส่ใหม่
+ * (ดู reset_shop_ledger ใน supabase/reset-data.sql)
+ */
+export async function resetShopLedger() {
+  await unwrap(supabase.rpc('reset_shop_ledger', { p_shop: getShopId() }))
+}

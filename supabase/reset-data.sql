@@ -1,120 +1,115 @@
 -- ###########################################################################
--- ##  ล้างข้อมูลของร้าน กลับไปเป็นร้านที่เพิ่งสร้างใหม่
+-- ##  ล้างข้อมูลของร้าน — RPC เบื้องหลังปุ่มรีเซ็ตในหน้าตั้งค่า
 -- ###########################################################################
 --
--- ⚠️ ลบแล้วกู้คืนไม่ได้ ไม่มีถังขยะ ไม่มี undo
---    แนะนำให้โหลดไฟล์สำรองไว้ก่อน: ในแอป → ตั้งค่า → ส่งออกและสำรองข้อมูล
---    → เปิดหน้าสำรองข้อมูล → ดาวน์โหลด Backup JSON
+-- ทำเป็น RPC ไม่ใช่ให้หน้าจอยิง delete ทีละตาราง เพราะการล้างข้อมูลแตะ 20 กว่าตาราง
+-- ถ้าทำจากหน้าจอแล้วเน็ตหลุดกลางทาง จะเหลือสภาพ "ลบไปครึ่งหนึ่ง" ที่ยอดเงินไม่ตรง
+-- กับรายการอีกต่อไป และย้อนกลับไม่ได้ ในนี้ทั้งฟังก์ชันอยู่ใน transaction เดียว
+-- ล้มตรงไหนก็ย้อนกลับหมด
 --
--- ลบอะไรบ้าง (ทุกอย่างที่เป็น "ข้อมูลที่กรอกเข้าไป")
---    รายรับ-รายจ่าย · ค้างชำระ · รอรับเงิน · ใบกำกับภาษี · โน้ตปฏิทิน
---    รายการประจำและงวดของมัน · หนี้สินและงวดผ่อน · บัตรเครดิต บิล งวดผ่อนบัตร
---    การกดเงินสด เครื่องหมายถูกรายแถว · กระเป๋าตังค์ย่อยและการยืม
---    บัญชีธนาคาร · หมวดหมู่ · ผู้ขาย · รายการที่บันทึกไว้ · ประวัติการใช้งาน
+-- จำกัดเฉพาะเจ้าของร้าน (is_owner) ไม่ใช่แค่ can_edit — พนักงานที่แก้รายการได้
+-- ไม่ควรล้างข้อมูลทั้งร้านได้
 --
--- เก็บอะไรไว้ (ไม่ต้องสมัครใหม่ ไม่ต้องตั้งร้านใหม่)
---    บัญชีผู้ใช้และรหัสผ่าน · ตัวร้านและสมาชิกร้าน (ยังล็อกอินเข้าร้านเดิมได้)
+-- ⚠️ ไฟล์นี้ทับ clear_shop_data ฉบับใน debt.sql ที่เขียนไว้ก่อนจะมีตาราง
+--    card_row_marks (card.sql ส่วนที่ 11) ของเดิมจึงลืมลบตารางนั้น ต้องรันไฟล์นี้
+--    หลัง card.sql และ debt.sql เสมอ
 --
--- ตั้งค่ากลับเป็นค่าเริ่มต้น
---    เงินสดในร้าน = 0 · เตือนล่วงหน้า 3 วัน · หมวดหมู่ "อื่นๆ" รายรับ/รายจ่าย
---    (ชุดเดียวกับที่ระบบสร้างให้ตอนเปิดร้านใหม่ ดู handle_new_shop ใน schema.sql)
---
--- วิธีใช้ รันทีละขั้นใน SQL Editor ของ Supabase
+-- รันทับซ้ำได้ ไม่ลบอะไรตอนรัน (สร้างฟังก์ชันอย่างเดียว)
 -- ###########################################################################
 
-
--- ── ขั้นที่ 1: หา id ของร้าน ────────────────────────────────────────────────
--- รันเฉพาะบรรทัดนี้ก่อน แล้วคัดลอกค่า id ของร้านที่ต้องการล้าง
-
-select s.id, s.name, s.created_at,
-       (select count(*) from transactions t where t.shop_id = s.id) as รายการที่มีอยู่
-from shops s
-order by s.created_at;
-
-
--- ── ขั้นที่ 2: เอา id มาใส่ในบรรทัด v_shop แล้วรันทั้งบล็อกนี้ ──────────────
-
-do $$
-declare
-  -- ⬇️ วาง id ของร้านจากขั้นที่ 1 ลงตรงนี้ (แทนที่ข้อความในเครื่องหมายคำพูด)
-  v_shop uuid := '00000000-0000-0000-0000-000000000000';
-  v_name text;
+create or replace function public.assert_is_owner(p_shop uuid)
+returns void language plpgsql stable security definer set search_path = public as $$
 begin
-  select name into v_name from shops where id = v_shop;
-  if v_name is null then
-    raise exception 'ไม่พบร้าน id นี้ — กลับไปรันขั้นที่ 1 แล้วคัดลอก id มาวางให้ถูก';
+  if not is_owner(p_shop) then
+    raise exception 'เฉพาะเจ้าของร้านเท่านั้นที่ล้างข้อมูลได้' using errcode = '42501';
   end if;
+end;
+$$;
 
-  raise notice 'กำลังล้างข้อมูลของร้าน "%"', v_name;
 
-  -- ลบจากตารางลูกไปหาตารางแม่ (ความสัมพันธ์ส่วนใหญ่เป็น cascade/set null อยู่แล้ว
-  -- ลำดับนี้จึงเป็นการทำให้อ่านง่าย มากกว่าเป็นข้อบังคับทางเทคนิค)
+-- ── 1. ล้างเฉพาะรายการเดินบัญชี ────────────────────────────────────────────
+--
+-- ลบทุกอย่างที่เป็น "เงินที่เคลื่อนไหว" แล้วตั้งยอดทุกก้อนเป็น 0 เพื่อเริ่มใส่ใหม่
+-- เก็บโครงที่ตั้งไว้แล้ว: หมวดหมู่ · บัญชีธนาคาร · บัตรเครดิต · กระเป๋าตังค์ย่อย ·
+-- ผู้ขาย · รายการที่บันทึกไว้ · แม่แบบรายการประจำ · โน้ตปฏิทิน
+--
+-- ลบประวัติการใช้งานด้วยโดยตั้งใจ ไม่ใช่ของแถม — ใบแจ้งยอดรายบัญชีไล่ยอดจาก
+-- activity_logs (ดู src/lib/accountStatement.js) ถ้าลบรายการแต่เก็บ log ไว้
+-- ใบแจ้งยอดจะแสดงความเคลื่อนไหวของเงินที่ไม่มีอยู่แล้ว และไม่ตรงกับยอดที่ตั้งใหม่
 
-  -- บัตรเครดิต
-  delete from card_row_marks           where shop_id = v_shop;
-  delete from card_installment_entries where shop_id = v_shop;
-  delete from card_advances            where shop_id = v_shop;
-  delete from card_statements          where shop_id = v_shop;
-  delete from card_installments        where shop_id = v_shop;
+create or replace function public.reset_shop_ledger(p_shop uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform assert_is_owner(p_shop);
 
-  -- หนี้สิน
-  delete from debt_entries where shop_id = v_shop;
-  delete from debts        where shop_id = v_shop;
+  -- บัตรเครดิต: ลบบิลและงวดผ่อน แต่เก็บตัวบัตรไว้
+  delete from card_row_marks           where shop_id = p_shop;
+  delete from card_installment_entries where shop_id = p_shop;
+  delete from card_advances            where shop_id = p_shop;
+  delete from card_installments        where shop_id = p_shop;
+  -- ใบแจ้งยอดอ้างถึงกันเอง (carried_to = ยอดที่ยกไปใบถัดไป) ต้องตัดสายก่อนลบ
+  update card_statements set carried_to = null where shop_id = p_shop;
+  delete from card_statements          where shop_id = p_shop;
 
-  -- รายการประจำ
-  delete from recurring_entries where shop_id = v_shop;
-  delete from recurring_items   where shop_id = v_shop;
+  -- หนี้สิน — เป็นข้อผูกพันทางการเงิน ไม่ใช่โครงที่ตั้งไว้ จึงลบทั้งสัญญา
+  delete from debt_entries where shop_id = p_shop;
+  delete from debts        where shop_id = p_shop;
 
-  -- กระเป๋าตังค์ย่อยและการยืม
-  delete from loans       where shop_id = v_shop;
-  delete from sub_wallets where shop_id = v_shop;
+  -- รายการประจำ: ลบเฉพาะงวดของแต่ละเดือน เก็บแม่แบบไว้
+  delete from recurring_entries where shop_id = p_shop;
+
+  -- การยืมเงินจากกระเป๋าย่อย
+  delete from loans where shop_id = p_shop;
 
   -- สิ่งที่รอดำเนินการ
-  delete from tax_invoices     where shop_id = v_shop;
-  delete from pending_payments where shop_id = v_shop;
-  delete from pending_incomes  where shop_id = v_shop;
+  delete from tax_invoices     where shop_id = p_shop;
+  delete from pending_payments where shop_id = p_shop;
+  delete from pending_incomes  where shop_id = p_shop;
 
-  -- รายการเงินและของประกอบ
-  delete from transactions where shop_id = v_shop;
-  delete from quick_items  where shop_id = v_shop;
-  delete from vendors      where shop_id = v_shop;
-  delete from calendar_notes where shop_id = v_shop;
+  delete from transactions  where shop_id = p_shop;
+  delete from activity_logs where shop_id = p_shop;
 
-  -- ข้อมูลตั้งต้นที่ผู้ใช้สร้างเอง
-  delete from transfer_accounts where shop_id = v_shop;
-  delete from credit_cards      where shop_id = v_shop;
-  delete from categories        where shop_id = v_shop;
+  -- ── ตั้งยอดทุกก้อนเป็น 0 เพื่อเริ่มใส่เงินเดินบัญชีใหม่ ────────────────────
+  update wallet_state      set cash = 0, updated_at = now() where shop_id = p_shop;
+  update transfer_accounts set balance = 0                  where shop_id = p_shop;
+  update sub_wallets       set balance = 0                  where shop_id = p_shop;
+  update credit_cards      set outstanding = 0              where shop_id = p_shop;
 
-  -- ประวัติการใช้งาน (ลบทีหลังสุด เพื่อให้ยังอ่านย้อนได้ถ้าบล็อกนี้ล้มกลางทาง
-  -- ทั้งบล็อกอยู่ใน transaction เดียว ล้มที่ไหนก็ย้อนกลับทั้งหมด ไม่มีสภาพลบครึ่งๆ)
-  delete from activity_logs where shop_id = v_shop;
+  insert into wallet_state (shop_id) values (p_shop) on conflict do nothing;
+end;
+$$;
 
-  -- ── ตั้งค่ากลับเป็นของร้านใหม่ ──────────────────────────────────────────
-  update wallet_state  set cash = 0,               updated_at = now() where shop_id = v_shop;
-  update shop_settings set notify_days_before = 3, updated_at = now() where shop_id = v_shop;
 
-  -- เผื่อร้านเก่าที่ยังไม่มีแถวพวกนี้
-  insert into wallet_state  (shop_id) values (v_shop) on conflict do nothing;
-  insert into shop_settings (shop_id) values (v_shop) on conflict do nothing;
+-- ── 2. ล้างข้อมูลทั้งหมด ───────────────────────────────────────────────────
+--
+-- กลับไปเป็นร้านที่เพิ่งสร้าง เก็บไว้แค่บัญชีผู้ใช้กับตัวร้าน (ยังล็อกอินเข้าร้านเดิมได้)
+-- หมวดหมู่ "อื่นๆ" ใส่กลับให้ชุดเดียวกับ handle_new_shop ใน schema.sql
+-- ถ้าไม่ใส่กลับ จะไม่มีหมวดหมู่ให้เลือกเลยตอนบันทึกรายการแรก
 
-  -- หมวดหมู่ตั้งต้นชุดเดียวกับตอนเปิดร้านใหม่
+create or replace function public.clear_shop_data(p_shop uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform assert_is_owner(p_shop);
+
+  -- ล้างฝั่งเงินก่อน แล้วค่อยลบโครงที่ผู้ใช้ตั้งไว้
+  perform reset_shop_ledger(p_shop);
+
+  delete from recurring_items   where shop_id = p_shop;
+  delete from sub_wallets       where shop_id = p_shop;
+  delete from transfer_accounts where shop_id = p_shop;
+  delete from credit_cards      where shop_id = p_shop;
+  delete from quick_items       where shop_id = p_shop;
+  delete from vendors           where shop_id = p_shop;
+  delete from calendar_notes    where shop_id = p_shop;
+  delete from categories        where shop_id = p_shop;
+
+  update shop_settings set notify_days_before = 3, updated_at = now() where shop_id = p_shop;
+  insert into shop_settings (shop_id) values (p_shop) on conflict do nothing;
+
   insert into categories (shop_id, name, type)
-  values (v_shop, 'อื่นๆ', 'expense'), (v_shop, 'อื่นๆ', 'income');
+  values (p_shop, 'อื่นๆ', 'expense'), (p_shop, 'อื่นๆ', 'income');
+end;
+$$;
 
-  raise notice 'ล้างข้อมูลเสร็จแล้ว — ร้าน "%" กลับเป็นสถานะเริ่มต้น', v_name;
-end $$;
 
-
--- ── ขั้นที่ 3: ตรวจว่าล้างครบ ──────────────────────────────────────────────
--- ใส่ id ร้านเดิมอีกครั้งแล้วรัน ทุกบรรทัดควรเป็น 0 ยกเว้นหมวดหมู่ที่ต้องเป็น 2
-
-select 'รายการเงิน' as ตาราง, count(*) as เหลือ from transactions     where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'ค้างชำระ',      count(*) from pending_payments where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'รอรับเงิน',     count(*) from pending_incomes  where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'บัตรเครดิต',    count(*) from credit_cards     where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'บัญชีธนาคาร',   count(*) from transfer_accounts where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'กระเป๋าย่อย',   count(*) from sub_wallets      where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'หนี้สิน',       count(*) from debts            where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'รายการประจำ',   count(*) from recurring_items  where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'ประวัติใช้งาน', count(*) from activity_logs    where shop_id = '00000000-0000-0000-0000-000000000000'
-union all select 'หมวดหมู่ (ควรเป็น 2)', count(*) from categories where shop_id = '00000000-0000-0000-0000-000000000000';
+notify pgrst, 'reload schema';
