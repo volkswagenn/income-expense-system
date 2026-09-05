@@ -5,6 +5,8 @@ import TransferAccountPicker from '../../components/shared/TransferAccountPicker
 import BankSelect from '../../components/shared/BankSelect'
 import { BANKS } from '../../lib/banks'
 import { nextClosingDate, formatThaiDate } from '../../lib/cardCycle'
+import { IconPickerButton } from '../../components/shared/IconPicker'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 
 const BANK_NAMES = BANKS.map((b) => b.name)
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
@@ -45,6 +47,7 @@ export default function CardFormPopup({ card, onSave, onClose, busy }) {
   const [showMore, setShowMore] = useState(
     !!(card && (Number(card.creditLimit) || Number(card.cashbackRate) || Number(card.annualFee) || card.autopayMode !== 'off'))
   )
+  const [icon, setIcon] = useState(card?.icon ?? null)
   const [error, setError] = useState('')
 
   const clear = (fn) => (v) => { fn(v); setError('') }
@@ -72,6 +75,7 @@ export default function CardFormPopup({ card, onSave, onClose, busy }) {
       autopayMode,
       autopayAccountId: autopayMode === 'off' ? null : autopayAccountId,
       autopayAmount: autopayMode === 'fixed' ? Number(autopayAmount) || 0 : 0,
+      icon: icon ?? null,
     })
   }
 
@@ -123,12 +127,23 @@ export default function CardFormPopup({ card, onSave, onClose, busy }) {
           <div className="grid grid-cols-3 gap-2">
             <div className="col-span-2">
               <label className="label">ชื่อเรียกบัตร</label>
-              <input
-                className="input"
-                value={name}
-                onChange={(e) => clear(setName)(e.target.value)}
-                placeholder="เช่น บัตรหลัก"
-              />
+              {/* ไอคอนอยู่ติดกับชื่อ เพราะเป็นคู่ที่ใช้แยกบัตรออกจากกันในทุกหน้า
+                  ไม่เลือกก็ได้ — จะใช้โลโก้ธนาคารผู้ออกบัตรแทน */}
+              <div className="flex items-center gap-2">
+                <IconPickerButton
+                  value={icon}
+                  onChange={setIcon}
+                  tone="#D0483C"
+                  emptyIcon={DEFAULT_ICONS.card}
+                  title="เลือกไอคอนของบัตรใบนี้"
+                />
+                <input
+                  className="input"
+                  value={name}
+                  onChange={(e) => clear(setName)(e.target.value)}
+                  placeholder="เช่น บัตรหลัก"
+                />
+              </div>
             </div>
             <div>
               <label className="label">4 ตัวท้าย</label>

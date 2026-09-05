@@ -63,9 +63,13 @@ export async function createCreditCard({
   autopayAccountId = null,
   autopayAmount = 0,
   note = '',
+  icon,
 }) {
   const row = toRow('credit_cards', {
     shopId: getShopId(),
+    // ไม่ได้เลือกไอคอน = ไม่ส่งคีย์นี้เลย (toRow ทิ้งคีย์ undefined)
+    // ร้านที่ยังไม่ได้รัน icons.sql รอบใหม่จึงยังเพิ่มบัตรได้ตามปกติ
+    icon: icon || undefined,
     bankName,
     name,
     last4: last4 || null,
@@ -90,11 +94,11 @@ export async function createCreditCard({
 /** แก้ได้เฉพาะข้อมูลบัตร — ยอดหนี้ต้องไปทาง adjustOutstanding เท่านั้น */
 export async function updateCreditCard(id, {
   bankName, name, last4, creditLimit, closingDay, dueDay, cashbackRate, note, sortOrder, enabled,
-  annualFee, annualFeeMonth, autopayMode, autopayAccountId, autopayAmount,
+  annualFee, annualFeeMonth, autopayMode, autopayAccountId, autopayAmount, icon,
 }) {
   const row = toRow('credit_cards', {
     bankName, name, last4, creditLimit, closingDay, dueDay, cashbackRate, note, sortOrder, enabled,
-    annualFee, annualFeeMonth, autopayMode, autopayAccountId, autopayAmount,
+    annualFee, annualFeeMonth, autopayMode, autopayAccountId, autopayAmount, icon,
     updatedAt: new Date().toISOString(),
   })
   return fromRow('credit_cards', await unwrap(

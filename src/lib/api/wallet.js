@@ -88,9 +88,12 @@ export async function returnLoan({ loanId, method, accountId = null, log = null 
 
 // ── บัญชีเงินโอน ────────────────────────────────────────────────────────────
 
-export async function createTransferAccount({ bankName = '', name = '', kind = 'savings', accountNo = '', initialBalance = 0 }) {
+export async function createTransferAccount({ bankName = '', name = '', kind = 'savings', accountNo = '', initialBalance = 0, icon }) {
+  // ไม่ได้เลือกไอคอน = ไม่ส่งคีย์นี้เลย (toRow ทิ้งคีย์ที่เป็น undefined)
+  // ร้านที่ยังไม่ได้รัน icons.sql รอบใหม่จึงยังเพิ่มบัญชีได้ตามปกติ
   const row = toRow('transfer_accounts', {
-    shopId: getShopId(), bankName, name, kind, accountNo: accountNo || null, balance: Number(initialBalance) || 0,
+    shopId: getShopId(), bankName, name, kind, accountNo: accountNo || null,
+    balance: Number(initialBalance) || 0, icon: icon || undefined,
   })
   return fromRow('transfer_accounts', await unwrap(
     supabase.from('transfer_accounts').insert(row).select().single()
@@ -98,8 +101,8 @@ export async function createTransferAccount({ bankName = '', name = '', kind = '
 }
 
 /** แก้ได้เฉพาะชื่อ/ธนาคาร/ลำดับ — ยอดต้องไปทาง adjustTransferAccount เท่านั้น */
-export async function updateTransferAccount(id, { bankName, name, kind, accountNo, sortOrder }) {
-  const row = toRow('transfer_accounts', { bankName, name, kind, accountNo, sortOrder })
+export async function updateTransferAccount(id, { bankName, name, kind, accountNo, sortOrder, icon }) {
+  const row = toRow('transfer_accounts', { bankName, name, kind, accountNo, sortOrder, icon })
   return fromRow('transfer_accounts', await unwrap(
     supabase.from('transfer_accounts').update(row).eq('id', id).select().single()
   ))

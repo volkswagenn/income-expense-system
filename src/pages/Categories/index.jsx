@@ -11,10 +11,12 @@ import ContextMenu from './ContextMenu'
 import SortableList from './SortableList'
 import { CATEGORY_THEME, CATEGORY_TYPE_LIST } from './categoryTheme'
 import { useRegisterManageAdd } from '../Manage/manageHeader'
+import { defaultCategoryIcon } from '../../lib/defaultIcons'
 
 // ── แถวสำหรับพิมพ์ชื่อใหม่ / เปลี่ยนชื่อ ────────────────────────────────────────
-function InlineInput({ defaultValue = '', placeholder, onSubmit, onCancel, depth = 0, theme }) {
+function InlineInput({ defaultValue = '', placeholder, onSubmit, onCancel, depth = 0, theme, withIcon = false, emptyIcon = 'folder' }) {
   const [text, setText] = useState(defaultValue)
+  const [icon, setIcon] = useState(null)
   const ref = useRef(null)
 
   useEffect(() => { ref.current?.focus(); ref.current?.select() }, [])
@@ -22,12 +24,23 @@ function InlineInput({ defaultValue = '', placeholder, onSubmit, onCancel, depth
   const submit = () => {
     const name = text.trim()
     if (!name) return onCancel()
-    onSubmit(name)
+    onSubmit(name, icon)
   }
 
   return (
     <div className="flex items-center gap-2 py-1.5" style={{ paddingLeft: depth * 26 }}>
       <span className="text-gray-300 select-none">{depth > 1 ? '└' : '•'}</span>
+      {/* เลือกไอคอนได้ตั้งแต่ตอนสร้าง ไม่ต้องสร้างเสร็จแล้วค่อยกลับมากดที่แถวอีกรอบ */}
+      {withIcon && (
+        <IconPickerButton
+          value={icon}
+          onChange={setIcon}
+          size={30}
+          tone={theme.iconTone}
+          emptyIcon={emptyIcon}
+          title="เลือกไอคอนของหมวดหมู่นี้"
+        />
+      )}
       <input
         ref={ref}
         className="input text-sm py-1 flex-1 max-w-xs"
@@ -46,7 +59,7 @@ function InlineInput({ defaultValue = '', placeholder, onSubmit, onCancel, depth
 }
 
 // ── แถวหมวดหมู่หนึ่งบรรทัด ──────────────────────────────────────────────────────
-function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, onSetIcon, theme }) {
+function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, onSetIcon, theme, catType }) {
   const isMain = depth === 0
   return (
     <div
@@ -70,7 +83,7 @@ function CategoryRow({ node, depth, usage, selected, onSelect, onContextMenu, on
           size={26}
           value={node.icon}
           tone={theme.iconTone}
-          emptyIcon={isMain ? 'folder' : 'description'}
+          emptyIcon={defaultCategoryIcon(catType, isMain)}
           onChange={(v) => onSetIcon(node.id, v)}
         />
       </span>
@@ -148,8 +161,8 @@ export default function CategoriesPage({ embedded = false }) {
 
   // store action เป็น async — ต้องรอผลก่อนใช้ค่าและก่อนเขียน log
   // ของเดิม item เป็น Promise → log ได้ {} และ selectedId เป็น undefined
-  const handleCreate = async (name, parentId) => {
-    const item = await addCategory(name, catType, parentId)
+  const handleCreate = async (name, parentId, icon = null) => {
+    const item = await addCategory(name, catType, parentId, icon)
     const parent = parentId ? categories.find((c) => c.id === parentId) : null
     addLog(buildLogEntry({
       activityType: 'CATEGORY_CREATE',
@@ -331,7 +344,9 @@ export default function CategoriesPage({ embedded = false }) {
               placeholder={`ชื่อหมวดหมู่หลัก${theme.label}ใหม่...`}
               depth={1}
               theme={theme}
-              onSubmit={(name) => handleCreate(name, null)}
+              onSubmit={(name, icon) => handleCreate(name, null, icon)}
+              withIcon
+              emptyIcon={defaultCategoryIcon(catType, true)}
               onCancel={() => setCreatingUnder(undefined)}
             />
           )}
@@ -397,6 +412,7 @@ export default function CategoriesPage({ embedded = false }) {
                 />
               ) : (
                 <CategoryRow
+                  catType={catType}
                   node={main}
                   depth={0}
                   usage={usageWithChildren(main)}
@@ -421,6 +437,7 @@ export default function CategoriesPage({ embedded = false }) {
                 ) : (
                   <CategoryRow
                     key={sub.id}
+                    catType={catType}
                     node={{ ...sub, children: [] }}
                     depth={1}
                     usage={usageById[sub.id] ?? 0}
@@ -439,7 +456,9 @@ export default function CategoriesPage({ embedded = false }) {
                   placeholder={`ชื่อหมวดหมู่ย่อยใน "${main.name}"...`}
                   depth={2}
                   theme={theme}
-                  onSubmit={(name) => handleCreate(name, main.id)}
+                  onSubmit={(name, icon) => handleCreate(name, main.id, icon)}
+                  withIcon
+                  emptyIcon={defaultCategoryIcon(catType, false)}
                   onCancel={() => setCreatingUnder(undefined)}
                 />
               )}

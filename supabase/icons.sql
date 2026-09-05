@@ -33,10 +33,15 @@
 --   ข้อมูลเก่าทั้งหมดยังไม่มีไอคอน ถ้าบังคับใส่ค่าจะกลายเป็นว่าทุกหมวดหมู่มี
 --   ไอคอนเดียวกันหมดซึ่งอ่านยากกว่าไม่มีเลย ฝั่งหน้าจอมีไอคอนสำรองตามชนิดอยู่แล้ว
 
-alter table categories      add column if not exists icon text;
-alter table sub_wallets     add column if not exists icon text;
-alter table recurring_items add column if not exists icon text;
-alter table vendors         add column if not exists icon text;
+alter table categories        add column if not exists icon text;
+alter table sub_wallets       add column if not exists icon text;
+alter table recurring_items   add column if not exists icon text;
+alter table vendors           add column if not exists icon text;
+-- เพิ่มภายหลัง: บัญชีธนาคารกับบัตรเครดิตเลือกไอคอนเองได้แล้ว
+-- ปกติสองอย่างนี้ใช้โลโก้ธนาคารตามชื่อธนาคารที่เลือก ไอคอนที่ตั้งเองจะไปทับโลโก้นั้น
+-- มีไว้สำหรับบัญชี/บัตรที่ไม่ได้อยู่ในรายชื่อธนาคาร หรือคนที่อยากแยกด้วยสัญลักษณ์ของตัวเอง
+alter table transfer_accounts add column if not exists icon text;
+alter table credit_cards      add column if not exists icon text;
 
 
 -- ── กันค่าที่ไม่มีทางแสดงผลได้ ─────────────────────────────────────────────
@@ -50,7 +55,8 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['categories', 'sub_wallets', 'recurring_items', 'vendors'] loop
+  foreach t in array array['categories', 'sub_wallets', 'recurring_items', 'vendors',
+                           'transfer_accounts', 'credit_cards'] loop
     if not exists (
       select 1 from pg_constraint
        where conname = t || '_icon_format'
@@ -67,8 +73,8 @@ end $$;
 
 -- ── ตรวจว่าลงครบ ───────────────────────────────────────────────────────────
 --
--- ต้องได้ 4 แถว ทุกแถวขึ้น "พร้อมใช้งาน"
--- ถ้าได้ไม่ครบ 4 แถว แปลว่าตารางนั้นยังไม่ถูกสร้าง ให้รัน setup.sql ก่อน
+-- ต้องได้ 6 แถว ทุกแถวขึ้น "พร้อมใช้งาน"
+-- ถ้าได้ไม่ครบ 6 แถว แปลว่าตารางนั้นยังไม่ถูกสร้าง ให้รัน setup.sql ก่อน
 
 select
   c.table_name                                          as "ตาราง",
@@ -81,5 +87,6 @@ left join pg_constraint con
       and con.conrelid = c.table_name::regclass
 where c.table_schema = 'public'
   and c.column_name = 'icon'
-  and c.table_name in ('categories', 'sub_wallets', 'recurring_items', 'vendors')
+  and c.table_name in ('categories', 'sub_wallets', 'recurring_items', 'vendors',
+                       'transfer_accounts', 'credit_cards')
 order by c.table_name;

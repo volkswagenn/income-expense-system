@@ -11,6 +11,10 @@ import BankSelect from '../../components/shared/BankSelect'
 import BankLogo from '../../components/shared/BankLogo'
 import { BANKS } from '../../lib/banks'
 import { useRegisterManageAdd } from './manageHeader'
+import { IconPickerButton } from '../../components/shared/IconPicker'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
+import RowMenu from '../../components/shared/RowMenu'
 
 const BANK_NAMES = BANKS.map((b) => b.name)
 
@@ -38,6 +42,7 @@ function AccountFormPopup({ account, onSave, onClose, busy }) {
   const [kind, setKind] = useState(account?.kind ?? 'savings')
   const [accountNo, setAccountNo] = useState(account?.accountNo ?? '')
   const [initialBalance, setInitialBalance] = useState(account ? String(account.balance) : '')
+  const [icon, setIcon] = useState(account?.icon ?? null)
   const [error, setError] = useState('')
 
   const submit = () => {
@@ -51,6 +56,7 @@ function AccountFormPopup({ account, onSave, onClose, busy }) {
       kind,
       accountNo: accountNo.trim(),
       initialBalance: Number(initialBalance) || 0,
+      icon: icon ?? null,
     })
   }
 
@@ -89,12 +95,24 @@ function AccountFormPopup({ account, onSave, onClose, busy }) {
 
         <div>
           <label className="label">ชื่อบัญชี / ชื่อเรียก</label>
+          {/* ไอคอนอยู่ติดกับชื่อ เพราะสองอย่างนี้คือสิ่งที่ใช้แยกบัญชีออกจากกันในทุกหน้า
+              ไม่เลือกก็ได้ — จะใช้โลโก้ธนาคารตามชื่อธนาคารที่เลือกไว้แทน */}
+          <div className="flex items-center gap-2">
+            <IconPickerButton
+              value={icon}
+              onChange={setIcon}
+              tone="#3A55C4"
+              emptyIcon={DEFAULT_ICONS.account}
+              title="เลือกไอคอนของบัญชีนี้"
+            />
           <input
             className="input"
             value={name}
             onChange={(e) => { setName(e.target.value); setError('') }}
             placeholder="เช่น บัญชีร้าน, บัญชีสำรอง"
           />
+          </div>
+          <p className="text-xs text-gray-400 mt-1">ไม่เลือกไอคอนก็ได้ — จะใช้โลโก้ธนาคารให้เอง</p>
         </div>
 
         <div>
@@ -171,6 +189,7 @@ export default function AccountManage() {
       const delta = newBalance - (Number(before.balance) || 0)
       await updateTransferAccount(editing.id, {
         bankName: data.bankName, name: data.name, kind: data.kind, accountNo: data.accountNo || null,
+        icon: data.icon ?? null,
       })
       if (delta !== 0) await adjustTransferAccount(editing.id, delta)
       addLog(buildLogEntry({
@@ -227,7 +246,14 @@ export default function AccountManage() {
             // จอแคบวางยอดกับปุ่มลงมาแถวล่าง ไม่งั้นชื่อบัญชีถูกบีบเหลือ "บัญ…" อ่านไม่ออก
             <div key={a.id} className="rounded-xl border border-gray-200 p-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                <BankLogo bankName={a.bankName} size="lg" />
+                {/* เลือกไอคอนเองไว้ = ใช้ตัวนั้น ไม่ได้เลือก = โลโก้ธนาคารตามชื่อธนาคาร */}
+                {a.icon ? (
+                  <span className="w-10 h-10 flex-none rounded-lg bg-paper flex items-center justify-center">
+                    <AppIcon value={a.icon} size={22} color="#3A55C4" fallback={DEFAULT_ICONS.account} />
+                  </span>
+                ) : (
+                  <BankLogo bankName={a.bankName} size="lg" />
+                )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{a.name}</p>
                   <p className="text-xs text-gray-500 truncate">
@@ -240,8 +266,15 @@ export default function AccountManage() {
               <div className="flex items-center gap-3 justify-between sm:justify-end">
                 <AmountDisplay amount={a.balance} size="md" />
                 <div className="flex gap-1 shrink-0">
-                  <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => setEditing(a)}>แก้ไข</button>
-                  <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => setDeleting(a)}>ลบ</button>
+                  <RowMenu
+                    title={a.name}
+                    sub={formatAccount(a)}
+                    icon="account_balance"
+                    items={[
+                      { icon: 'edit_note', label: 'แก้ไขบัญชี', desc: 'ชื่อ ธนาคาร ประเภท เลขบัญชี ไอคอน และยอดคงเหลือ', onClick: () => setEditing(a) },
+                      { icon: 'close', label: 'ลบบัญชีนี้', desc: 'รายการที่เคยผูกกับบัญชีนี้ยังอยู่ในประวัติ', danger: true, onClick: () => setDeleting(a) },
+                    ]}
+                  />
                 </div>
               </div>
             </div>
