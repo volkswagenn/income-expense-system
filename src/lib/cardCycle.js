@@ -413,6 +413,19 @@ export function formatIsoThai(iso) {
   return formatThaiDate(new Date(y, m - 1, d))
 }
 
+/**
+ * '2026-10-15' → '15 ต.ค. 69' — รุ่น iso ของ formatThaiShort
+ *
+ * ปีเป็นสองหลักพอ สัญญาผ่อนยาวข้ามปีได้ ป้ายงวดจึงต้องบอกปีไว้ ไม่งั้นงวดเดือน
+ * เดียวกันคนละปีจะอ่านเหมือนกันเป๊ะ (วันที่เต็มอยู่ใน title ของป้าย)
+ */
+export function formatIsoThaiShort(iso) {
+  if (!iso) return '-'
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return String(iso)
+  return formatThaiShort(new Date(y, m - 1, d))
+}
+
 /** 'yyyy-MM-dd' สำหรับส่งเข้าฐานข้อมูล — ห้ามใช้ toISOString เพราะจะเลื่อนตามโซนเวลา */
 export function toDateString(date) {
   const m = String(date.getMonth() + 1).padStart(2, '0')

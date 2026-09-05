@@ -10,7 +10,7 @@ import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { walletTarget } from '../../lib/api/transactions'
 import { formatCard } from '../../components/shared/CreditCardPicker'
-import { nextClosingDate, formatThaiDate, formatIsoThai, daysUntil, cyclePeriod, toDateString } from '../../lib/cardCycle'
+import { nextClosingDate, formatThaiDate, formatIsoThai, formatIsoThaiShort, daysUntil, cyclePeriod, toDateString } from '../../lib/cardCycle'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
@@ -62,18 +62,52 @@ function Meta({ label, value }) {
   )
 }
 
-/** แถบจุดบอกความคืบหน้าของงวดผ่อน — เขียวคือจ่ายแล้ว */
-function Pips({ done, total }) {
+/** งวดที่จ่ายแล้วเท่านั้นที่นับว่าผ่านไปแล้ว — billed คือเข้าบิลแล้วแต่ยังไม่ได้จ่ายบิลใบนั้น */
+const PIP_TONE = {
+  paid:    'bg-lime border-[#A9CF3A] text-ink',
+  prepaid: 'bg-lime border-[#A9CF3A] text-ink',
+  billed:  'bg-white border-ink text-ink',
+  pending: 'bg-paper border-hairline text-faint',
+}
+const PIP_LABEL = {
+  paid: 'จ่ายแล้ว',
+  prepaid: 'จ่ายมาก่อนเริ่มใช้แอป',
+  billed: 'เข้าบิลแล้ว รอจ่ายบิล',
+  pending: 'ยังไม่ถึงกำหนด',
+}
+// สัญญายาวๆ ป้ายจะล้นจนแถวนี้สูงกว่าแถวอื่น ตัดที่ 12 แล้วบอกจำนวนที่เหลือแทน
+const PIP_LIMIT = 12
+
+/**
+ * ป้ายงวดผ่อนในแถวรายการ — งวดละหนึ่งป้าย พร้อมวันครบกำหนดของงวดนั้น
+ *
+ * ของเดิมเป็นจุดเปล่า ซึ่งบอกได้แค่ "จ่ายไปกี่งวดแล้ว" ซึ่งเป็นตัวเลขที่เขียนไว้เป็น
+ * ตัวหนังสือข้างๆ อยู่แล้ว จุดจึงกินที่ไปเปล่าๆ คำถามที่แถวนี้ยังตอบไม่ได้สักทีคือ
+ * "งวดไหนครบกำหนดวันไหน" วันที่จึงย้ายเข้ามาอยู่ในป้ายเลย
+ *
+ * ป้ายกว้างเท่าเนื้อหาพอดีและตัดบรรทัดเอง จึงลงในที่ว่างของแถวได้โดยไม่ดันคอลัมน์อื่น
+ */
+function EntryPips({ rows }) {
+  const list = (rows ?? []).filter((r) => r.status !== 'cancelled')
+  if (list.length === 0) return null
+  const shown = list.slice(0, PIP_LIMIT)
+  const hidden = list.length - shown.length
   return (
-    <span className="flex gap-[2px] flex-wrap max-w-full">
-      {Array.from({ length: Math.min(total, 48) }, (_, k) => (
+    <span className="flex flex-wrap items-center gap-1">
+      {shown.map((r) => (
         <span
-          key={k}
-          className={`w-[11px] h-[7px] rounded-[2px] border block ${
-            k < done ? 'bg-lime border-[#A9CF3A]' : 'bg-[#EFEDE7] border-hairline'
-          }`}
-        />
+          key={r.seq}
+          title={'งวดที่ ' + r.seq + ' จาก ' + list.length + ' · ครบกำหนด ' + formatIsoThai(r.dueDate)
+            + ' · ' + fmt(r.amount) + ' บาท · ' + (PIP_LABEL[r.status] ?? r.status)}
+          className={'inline-flex items-center gap-1 h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums '
+            + (PIP_TONE[r.status] ?? PIP_TONE.pending)}
+        >
+          <span className="font-bold">{r.seq}</span>
+          <span className="w-px h-[9px] bg-current opacity-30" />
+          <span className="opacity-80">{formatIsoThaiShort(r.dueDate)}</span>
+        </span>
       ))}
+      {hidden > 0 && <span className="text-[9.5px] text-faint">+{hidden} งวด</span>}
     </span>
   )
 }
@@ -685,7 +719,7 @@ export default function CardDetailView({ cardId }) {
                     <span className="block text-[11px] text-faint truncate">{r.cat}</span>
                     {prog && (
                       <span className="flex items-center gap-2 mt-1 flex-wrap">
-                        <Pips done={prog.paidCount + prog.prepaidCount} total={insEntry.i.months} />
+                        <EntryPips rows={prog.rows} />
                         <span className="text-[10.5px] text-faint">
                           จ่ายแล้ว {prog.paidCount + prog.prepaidCount} จาก {insEntry.i.months} งวด
                         </span>

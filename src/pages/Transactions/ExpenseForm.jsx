@@ -1517,6 +1517,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
             setRecentsOpen(false)
           }}
           onSaveCurrent={async (name) => { await logQuickItemAdd(name, form.category); setRecentsOpen(false) }}
+          onUpdate={logQuickItemUpdate}
+          onDelete={logQuickItemDelete}
           onClose={() => setRecentsOpen(false)}
         />
       )}
