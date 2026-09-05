@@ -214,13 +214,15 @@ export default function PayFromPicker({
               key={m.k}
               type="button"
               onClick={() => (on && NEEDS_PICK.has(m.k) ? openPopup() : pickMethodDirect(m.k))}
-              className={`rounded-ctl border px-2.5 py-2.5 text-left transition ${
+              // min-w-0 สำคัญกับ grid: ถ้าไม่ใส่ ช่องจะกว้างตามข้อความที่ห้ามตัดคำข้างใน
+              // แล้วตารางจะดันจนจอมือถือเลื่อนซ้ายขวาได้ (ชื่อ "บัตรเครดิต" ล้นออกไป 19px)
+              className={`min-w-0 rounded-ctl border px-2 sm:px-2.5 py-2.5 text-left transition ${
                 on ? tone.on : 'border-hairline bg-white hover:border-[#C9C5BA]'
               }`}
             >
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1 sm:gap-1.5 min-w-0">
                 <Icon name={TILE_ICON[m.k]} size={17} className={`flex-none ${on ? tone.icon : 'text-faint'}`} />
-                <span className="flex-none whitespace-nowrap text-[12.5px] font-semibold">{m.t}</span>
+                <span className="min-w-0 truncate text-[12.5px] font-semibold">{m.t}</span>
               </span>
               <span className="flex items-center gap-1 mt-1">
                 <span className={`tabular-nums flex-1 min-w-0 text-[11.5px] truncate ${

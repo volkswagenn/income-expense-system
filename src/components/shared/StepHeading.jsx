@@ -29,7 +29,9 @@ export default function StepHeading({ n, title, hint, done = false, current = fa
       >
         {done ? <Icon name="check" size={14} /> : n}
       </span>
-      <span className="text-[12.5px] font-semibold">{title}</span>
+      {/* หัวข้อห้ามหด ไม่งั้นบนมือถือคำอธิบายจะบีบจนหัวข้อตกบรรทัด ("รายการนี้คือ / อะไร")
+          คำอธิบายเป็นของรอง ให้มันโดนตัดท้ายแทน */}
+      <span className="flex-none text-[12.5px] font-semibold">{title}</span>
       {optional && (
         <span className="flex-none text-[10.5px] text-faint border border-hairline rounded-full px-1.5 py-px self-center">
           ไม่บังคับ

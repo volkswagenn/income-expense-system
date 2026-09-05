@@ -670,7 +670,9 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
    * แป้นตัวเลขบนมือถือ — อยู่ในแถบบันทึกท้ายฟอร์ม ไม่ต้องเปิดป๊อปอัป
    * เปิดไว้ตั้งแต่แรกเพราะยอดเงินคือช่องแรกที่กรอกเสมอ ปุ่มแป้นในช่องยอดใช้พับเก็บได้
    */
-  const [padOpen, setPadOpen] = useState(true)
+  // ในป๊อปอัปจากหน้าบัตรพื้นที่จำกัด แป้นสูงเกือบ 300px จะกินครึ่งจอจนไม่เห็นฟอร์ม
+  // เปิดเองได้จากปุ่มแป้นในช่องยอด — บนหน้าบันทึกรายการเต็มหน้าเปิดไว้เหมือนเดิม
+  const [padOpen, setPadOpen] = useState(!lockCardId)
   const isMobile = () => window.matchMedia('(max-width: 1023px)').matches
   const pressPad = (k) => {
     const cur = String(form.amount ?? '')
@@ -983,6 +985,9 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
                     <label className="label">ค่างวดตามโปรโมชั่น</label>
                     {rows.map((t, i, arr) => (
                       <div key={i} className="flex items-center gap-1.5 flex-wrap bg-white/70 border border-rose-200 rounded-lg px-2 py-1.5 mb-1.5">
+                        {/* จับ "งวดที่ x–y" กับ "งวดละ n บาท" เป็นคนละก้อน ให้ตกบรรทัดได้เฉพาะ
+                            ระหว่างสองก้อน ไม่งั้นบนมือถือคำว่า "บาท" จะหลุดไปอยู่บรรทัดล่างตัวเดียว */}
+                        <span className="flex items-center gap-1.5 flex-none">
                         <span className="text-xs text-rose-800">งวดที่</span>
                         {/* ต้นช่วงคำนวณจากช่วงก่อนหน้าเสมอ แก้เองไม่ได้ กันกรอกขาดตอน */}
                         <span className="text-xs tabular-nums bg-rose-50 border border-rose-200 rounded px-2 py-0.5 min-w-[34px] text-center">{t.from}</span>
@@ -1009,6 +1014,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
                             }}
                           />
                         )}
+                        </span>
+                        <span className="flex items-center gap-1.5 flex-1 min-w-[148px] justify-end">
                         <span className="text-xs text-rose-800">งวดละ</span>
                         <input
                           className="input !h-7 w-24 text-xs text-right px-2"
@@ -1025,13 +1032,14 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
                         {arr.length > 1 && i < arr.length - 1 && (
                           <button
                             type="button"
-                            className="ml-auto text-rose-400 hover:text-rose-700 text-sm leading-none px-1"
+                            className="flex-none text-rose-400 hover:text-rose-700 text-sm leading-none px-1"
                             onClick={() => setTiers(form.installmentTiers.filter((_, k) => k !== i))}
                             title="ลบช่วงนี้"
                           >
                             ✕
                           </button>
                         )}
+                        </span>
                       </div>
                     ))}
                     {/* โปรฯ ผ่อนประกาศเป็นรายงวด คนกรอกจึงถือตัวเลขรายงวดมา ไม่ได้ถือ "ช่วง" มา
