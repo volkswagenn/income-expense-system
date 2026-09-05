@@ -127,21 +127,22 @@ export default function ResetDataPopup({ isOwner, onClose }) {
       width={460}
       onClose={onClose}
       footer={
-        <div className="flex items-center gap-2">
+        // แถบท้ายใช้ขอบในชุดเดียวกับแถบมาตรฐานของ Popup ไม่งั้นปุ่มจะชิดขอบกล่อง
+        <div className="flex-none flex items-center gap-2 px-[17px] py-3 border-t border-[#EFEDE7] bg-[#FAF9F6]">
           {m && (
-            <button onClick={back} disabled={busy} className="h-9 px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold flex items-center gap-1 hover:bg-paper disabled:opacity-50">
+            <button onClick={back} disabled={busy} className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold flex items-center gap-1 hover:bg-paper disabled:opacity-50">
               <Icon name="chevron_left" size={17} />
               ย้อนกลับ
             </button>
           )}
-          <button onClick={onClose} disabled={busy} className="ml-auto h-9 px-4 rounded-ctl border border-hairline text-[12.5px] font-semibold hover:bg-paper disabled:opacity-50">
+          <button onClick={onClose} disabled={busy} className="ml-auto h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold hover:bg-paper disabled:opacity-50">
             ปิด
           </button>
           {m && (
             <button
               onClick={handleRun}
               disabled={!ready || busy}
-              className="h-9 px-4 rounded-ctl bg-expense text-white text-[12.5px] font-semibold hover:brightness-110 disabled:opacity-40"
+              className="h-[38px] px-[18px] rounded-[11px] bg-expense text-white text-[13px] font-semibold hover:brightness-110 disabled:opacity-50"
             >
               {busy ? 'กำลังล้าง…' : 'ล้างข้อมูลเดี๋ยวนี้'}
             </button>

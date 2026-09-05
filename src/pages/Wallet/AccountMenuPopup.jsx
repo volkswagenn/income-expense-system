@@ -77,17 +77,18 @@ export default function AccountMenuPopup({ account, onClose, onEdit }) {
       width={view === 'menu' ? 420 : 520}
       onClose={onClose}
       footer={
-        <div className="flex items-center gap-2">
+        // แถบท้ายใช้ขอบในชุดเดียวกับแถบมาตรฐานของ Popup ไม่งั้นปุ่มจะชิดขอบกล่อง
+        <div className="flex-none flex items-center gap-2 px-[17px] py-3 border-t border-[#EFEDE7] bg-[#FAF9F6]">
           {view !== 'menu' && (
             <button
               onClick={back}
-              className="h-9 px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold flex items-center gap-1.5 hover:bg-paper"
+              className="h-[38px] px-4 rounded-[11px] border border-hairline bg-white text-[13px] font-semibold flex items-center gap-1.5 hover:bg-paper"
             >
               <Icon name="chevron_left" size={17} />
               ย้อนกลับ
             </button>
           )}
-          <button onClick={onClose} className="ml-auto h-9 px-4 rounded-ctl bg-ink text-white text-[12.5px] font-semibold hover:bg-black">
+          <button onClick={onClose} className="ml-auto h-[38px] px-[18px] rounded-[11px] bg-ink text-white text-[13px] font-semibold hover:bg-black">
             ปิด
           </button>
         </div>
