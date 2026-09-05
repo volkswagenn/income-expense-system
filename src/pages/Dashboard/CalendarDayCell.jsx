@@ -17,6 +17,8 @@ const MARK_STYLE = {
   recurring: { bg: 'bg-recurring-soft', fg: 'text-[#5A3C90]' },
   pending: { bg: 'bg-pending-soft', fg: 'text-[#8A6A15]' },
   card: { bg: 'bg-expense-soft', fg: 'text-[#A93A2E]' },
+  // วันสรุปยอด — สีจางกว่าวันครบกำหนด เพราะยังไม่ใช่วันที่เงินออก
+  cardClose: { bg: 'bg-paper', fg: 'text-[#A93A2E]' },
   income: { bg: 'bg-income-soft', fg: 'text-[#0F6A50]' },
   tax: { bg: 'bg-[#FBEFE4]', fg: 'text-[#B4571E]' },
 }
@@ -88,11 +90,18 @@ function Tooltip({ dateStr, income, expense, pendingItems, pendingIncomeItems, t
         <p className="text-[#A9BEF0]">รอรับเงิน {pendingIncomeItems.length} รายการ</p>
       )}
       {taxItems.length > 0 && <p className="text-[#E0A886]">รอใบกำกับภาษี {taxItems.length} รายการ</p>}
-      {cardBills.length > 0 && (
-        <p className="text-[#F0A9A0]">
-          บิลบัตร {cardBills.map((b) => b.cardName).join(', ')}
+      {cardBills.map((b) => (
+        <p key={b.key} className="text-[#F0A9A0]">
+          {b.closing
+            ? `สรุปยอด ${b.cardName} ${Number(b.amount).toLocaleString('th-TH')} → จ่าย ${b.dueLabel ?? b.dueDate ?? ''}`
+            : `บิลบัตร ${b.cardName} ${Number(b.amount).toLocaleString('th-TH')}`}
+          {Number(b.installment) > 0 && (
+            <span className="block text-[#C99089]">
+              เป็นค่างวดผ่อน {Number(b.installment).toLocaleString('th-TH')}
+            </span>
+          )}
         </p>
-      )}
+      ))}
       {note && <p className="text-[#EBD98A] border-t border-white/15 pt-1.5">โน้ต: {note}</p>}
     </div>,
     document.body
@@ -122,7 +131,9 @@ export default function CalendarDayCell({
   const totalExpense = expense.reduce((s, t) => s + Number(t.amount || 0), 0)
 
   const recurringPending = recurringItems.filter(({ entry }) => entry.status === 'pending')
-  const cardBillsUnpaid = cardBills.filter((b) => !b.paid)
+  // แยกสองเรื่องออกจากกัน: วันที่ต้องจ่ายบิลจริง กับวันสรุปยอดของรอบที่ยังเดินอยู่
+  const cardBillsUnpaid = cardBills.filter((b) => !b.paid && !b.closing)
+  const cardClosings = cardBills.filter((b) => b.closing)
   const hasNote = !!note
   const isOverdue = dateStr < todayStr && (pendingItems.length > 0 || recurringPending.length > 0)
 
@@ -131,15 +142,20 @@ export default function CalendarDayCell({
     || cardBills.length > 0 || hasNote
 
   // ── ป้ายงานที่ครบกำหนดวันนี้ — เลือกอันที่ "ต้องทำ" ก่อนเสมอ ────────────────
+  // ป้ายพ่วงยอดเงินไปด้วยเสมอถ้ารู้ยอด — เปิดปฏิทินแล้วต้องอ่านออกว่าวันนั้น "เท่าไร"
+  // ไม่ใช่รู้แค่ว่ามีอะไรสักอย่างครบกำหนด แล้วต้องเอาเมาส์ไปจิ้มทีละวัน
   let mark = null
   if (cardBillsUnpaid.length > 0) {
-    mark = { kind: 'card', label: `บิล ${cardBillsUnpaid[0].cardName}` }
+    mark = { kind: 'card', label: `บิล ${cardBillsUnpaid[0].cardName}`, amount: cardBillsUnpaid[0].amount }
   } else if (pendingItems.length > 0) {
-    mark = { kind: 'pending', label: pendingItems[0].description || pendingItems[0].itemName || 'ค้างชำระ' }
+    mark = { kind: 'pending', label: pendingItems[0].description || pendingItems[0].itemName || 'ค้างชำระ', amount: pendingItems[0].amount }
   } else if (recurringPending.length > 0) {
-    mark = { kind: 'recurring', label: recurringPending[0].item?.name ?? 'รายการประจำ' }
+    mark = { kind: 'recurring', label: recurringPending[0].item?.name ?? 'รายการประจำ', amount: recurringPending[0].entry?.amount }
+  } else if (cardClosings.length > 0) {
+    // ยอดที่ปิดรอบวันนี้ ยังไม่ใช่เงินที่ออกวันนี้ จึงอยู่ท้ายลำดับความสำคัญ
+    mark = { kind: 'cardClose', label: `สรุปยอด ${cardClosings[0].cardName}`, amount: cardClosings[0].amount }
   } else if (pendingIncomeItems.length > 0) {
-    mark = { kind: 'income', label: pendingIncomeItems[0].description || 'รอรับเงิน' }
+    mark = { kind: 'income', label: pendingIncomeItems[0].description || 'รอรับเงิน', amount: pendingIncomeItems[0].amount }
   } else if (taxItems.length > 0) {
     mark = { kind: 'tax', label: taxItems[0].itemName || 'ใบกำกับภาษี' }
   }
@@ -150,6 +166,7 @@ export default function CalendarDayCell({
   if (pendingItems.length > 0 && mark?.kind !== 'pending') dots.push(DOT_COLOR.pending)
   if (recurringPending.length > 0 && mark?.kind !== 'recurring') dots.push(DOT_COLOR.recurring)
   if (cardBillsUnpaid.length > 0 && mark?.kind !== 'card') dots.push(DOT_COLOR.cardBill)
+  if (cardClosings.length > 0 && mark?.kind !== 'cardClose') dots.push(DOT_COLOR.cardBill)
   if (pendingIncomeItems.length > 0 && mark?.kind !== 'income') dots.push(DOT_COLOR.pendingIncome)
   if (taxItems.length > 0 && mark?.kind !== 'tax') dots.push(DOT_COLOR.tax)
   const shownDots = dots.slice(0, 3)
@@ -245,8 +262,11 @@ export default function CalendarDayCell({
 
         {/* ช่องบนมือถือแคบเกินกว่าจะใส่ป้ายชื่อ — เหลือจุดสีบอกว่ามีงาน กดวันแล้วดูในแผงข้างล่าง */}
         {mark && (
-          <div className={`hidden sm:block mt-auto rounded-md px-1.5 py-px text-[10px] font-semibold truncate ${markStyle.bg} ${markStyle.fg}`}>
-            {mark.label}
+          <div className={`hidden sm:flex items-center gap-1 mt-auto rounded-md px-1.5 py-px text-[10px] font-semibold ${markStyle.bg} ${markStyle.fg}`}>
+            <span className="truncate">{mark.label}</span>
+            {Number(mark.amount) > 0 && (
+              <span className="tabular-nums flex-none ml-auto">{fmtAmt(mark.amount)}</span>
+            )}
           </div>
         )}
 

@@ -12,6 +12,7 @@ import CalendarNotePopup from './CalendarNotePopup'
 import YearlyRecurringPopup from './YearlyRecurringPopup'
 import Icon from '../../components/shared/Icon'
 import { isYearly, pauseInfo } from '../../lib/recurringSchedule'
+import { clampedDate, toDateString, formatThaiDate } from '../../lib/cardCycle'
 import { localMonthStr } from '../../lib/dateUtils'
 
 const THAI_MONTHS_FULL = [
@@ -191,6 +192,22 @@ export default function CalendarView({
       })
     }
 
+    /**
+     * วันสรุปยอดของรอบที่ยังไม่ปิด — ป้ายคนละความหมายกับวันครบกำหนด
+     *
+     * ค่างวดผ่อนของเดือนนี้ไม่มีวันไหนให้เห็นเลยในปฏิทิน เพราะเงินจริงออกวันครบ
+     * กำหนดซึ่งเป็นเดือนถัดไป (รูดกับบัตรที่สรุปยอดสิ้นเดือน จ่ายวันที่ 10)
+     * ผู้ใช้จึงเปิดปฏิทินเดือนนี้แล้วไม่เห็นยอดผ่อนสักบาท ทั้งที่มีงวดเดินอยู่
+     * ป้ายวันสรุปยอดตอบว่า "ยอดของเดือนนี้ปิดวันนี้เท่านี้ แล้วไปจ่ายวันไหน"
+     * ไม่ใช่รายการจ่ายจริง จึงไม่นับรวมในยอดรายจ่ายของวันและใช้สีอ่อนกว่า
+     */
+    const closingOf = (cardId, cycle) => {
+      const card = cards.find((c) => c.id === cardId)
+      const [y, m] = String(cycle).split('-').map(Number)
+      if (!card || !y || !m) return null
+      return toDateString(clampedDate(y, m - 1, card.closingDay))
+    }
+
     const monthsAhead = Math.max(
       2,
       (viewYear - today.getFullYear()) * 12 + (viewMonth - today.getMonth()) + 1
@@ -199,10 +216,24 @@ export default function CalendarView({
     for (const r of getUpcomingBills(monthsAhead).rows) {
       if (r.kind !== 'projected') continue
       if (closedKeys.has(`${r.cardId}|${r.cycle}`)) continue
+      const cardName = getCardShortLabel(r.cardId)
       push(r.dueDate, {
         key: r.key,
-        cardName: getCardShortLabel(r.cardId),
+        cardName,
         amount: r.amount,
+        installment: r.installment ?? 0,
+        paid: false,
+        projected: true,
+        overdue: false,
+      })
+      push(closingOf(r.cardId, r.cycle), {
+        key: `c-${r.key}`,
+        cardName,
+        amount: r.amount,
+        installment: r.installment ?? 0,
+        closing: true,
+        dueDate: r.dueDate,
+        dueLabel: formatThaiDate(new Date(`${r.dueDate}T00:00:00`)),
         paid: false,
         projected: true,
         overdue: false,
