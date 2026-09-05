@@ -9,7 +9,9 @@ import CategorySelect from '../../components/shared/CategorySelect'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import FileUploadPopup from '../../components/shared/FileUploadPopup'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
-import CreditCardPicker from '../../components/shared/CreditCardPicker'
+import CreditCardPicker, { formatCard } from '../../components/shared/CreditCardPicker'
+import AppIcon from '../../components/shared/AppIcon'
+import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import PayFromPicker from '../../components/shared/PayFromPicker'
 import Icon from '../../components/shared/Icon'
 import StepHeading from '../../components/shared/StepHeading'
@@ -60,12 +62,28 @@ const MONTH_PRESETS = [3, 6, 10, 12]
 
 const fmtBaht = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
-export default function ExpenseForm({ onPreviewChange }) {
+/**
+ * ฟอร์มบันทึกรายจ่าย
+ *
+ * @param lockCardId ถ้าส่งมา = ฟอร์มนี้ถูกเปิดจากหน้าบัตร ช่องทางจ่ายถูกล็อกเป็น
+ *                   บัตรใบนั้นและเลือกช่องทางอื่นไม่ได้ ที่เหลือ (ยอด หมวดหมู่ ผ่อน
+ *                   ใบกำกับ ไฟล์แนบ) ทำงานเหมือนกันทุกอย่าง จะได้ไม่ต้องมีฟอร์มย่อ
+ *                   อีกชุดที่ทำได้ไม่ครบแล้วต้องตามแก้สองที่ตลอดไป
+ * @param onSaved    เรียกเมื่อบันทึกสำเร็จ (หน้าบัตรใช้ปิดป๊อปอัป)
+ */
+export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSaved }) {
   const navigate = useNavigate()
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   // ช่องทางจ่ายเริ่มต้นมาจากค่าที่ผู้ใช้ตั้งไว้ในหน้าตั้งค่า (เก็บในเครื่อง)
   const formDefaults = useFormDefaults()
-  const [form, setForm, clearDraft, hasDraft] = useFormDraft('expense', { ...EMPTY, method: formDefaults.method })
+  // แยกร่างของฟอร์มที่เปิดจากหน้าบัตรออกจากร่างของหน้าบันทึกรายการ
+  // ไม่งั้นการเปิดป๊อปอัปจากหน้าบัตรจะทับสิ่งที่ผู้ใช้กรอกค้างไว้ในหน้าหลัก
+  const [form, setForm, clearDraft, hasDraft] = useFormDraft(
+    lockCardId ? `expense:card:${lockCardId}` : 'expense',
+    lockCardId
+      ? { ...EMPTY, method: 'card', cardId: lockCardId }
+      : { ...EMPTY, method: formDefaults.method },
+  )
   const [saved, setSaved] = useState(false)
   const [errMsg, setErrMsg] = useState('')
   // ระบบออนไลน์อย่างเดียว การบันทึกต้องรอผลจริงจากเซิร์ฟเวอร์ จึงต้องกันกดซ้ำระหว่างรอ
@@ -106,6 +124,15 @@ export default function ExpenseForm({ onPreviewChange }) {
     savedRef.current = { tx: null, pending: null, installment: null }
     setForm((f) => ({ ...f, ...patch }))
   }
+
+  // ร่างเก่าที่ค้างใน sessionStorage อาจถูกบันทึกไว้ตอนที่ยังไม่มีการล็อกบัตร
+  // ถ้าปล่อยไว้ ฟอร์มจะโชว์ว่ารูดบัตรใบนี้แต่บันทึกจริงไปอีกช่องทาง
+  useEffect(() => {
+    if (!lockCardId) return
+    if (form.method !== 'card' || form.cardId !== lockCardId) {
+      setForm((f) => ({ ...f, method: 'card', cardId: lockCardId }))
+    }
+  }, [lockCardId, form.method, form.cardId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * เปลี่ยนจำนวนงวดทั้งหมด แล้วตัดช่วงราคาที่เลยออกไปทิ้งทันที
@@ -385,6 +412,7 @@ export default function ExpenseForm({ onPreviewChange }) {
     // เปิดอยู่ = ล้างฟอร์มให้กรอกรายการถัดไปต่อได้เลย (ค่าตั้งต้นคือเปิด)
     if (formDefaults.reopenAfterSave) clearDraft()
     setSaved(true)
+    onSaved?.()
     setUploadStatus(null)
     setAttachments([])
     setTimeout(() => setSaved(false), 2000)
@@ -835,11 +863,24 @@ export default function ExpenseForm({ onPreviewChange }) {
             <StepHeading
               n={3}
               title="จ่ายด้วยอะไร"
-              hint="เลือกช่องทาง แล้วระบุบัญชีหรือบัตรถ้าต้องมี"
+              hint={lockCardId ? 'รูดบัตรใบที่เปิดอยู่ เปลี่ยนช่องทางที่นี่ไม่ได้' : 'เลือกช่องทาง แล้วระบุบัญชีหรือบัตรถ้าต้องมี'}
               done={stepDone[2]}
               current={nextStep === 2}
               className="!mb-1.5"
             />
+            {/* เปิดจากหน้าบัตร = รู้อยู่แล้วว่ารูดใบไหน การให้เลือกช่องทางอีกรอบมีแต่จะ
+                เปิดช่องให้บันทึกผิดใบ ถ้าจะจ่ายด้วยอย่างอื่นให้ไปที่หน้าบันทึกรายการ */}
+            {lockCardId ? (
+              <div className="flex items-center gap-2.5 rounded-ctl border border-expense-line bg-expense-soft/50 px-3 py-2.5">
+                <span className="w-9 h-9 flex-none rounded-lg bg-white flex items-center justify-center">
+                  <AppIcon value={selectedCard?.icon} size={20} fallback={DEFAULT_ICONS.card} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold truncate">{formatCard(selectedCard)}</span>
+                  <span className="block text-[11.5px] text-muted">รูดบัตร · หนี้บัตรเพิ่มทันที ยังไม่ตัดเงินสด</span>
+                </span>
+              </div>
+            ) : (
             <PayFromPicker
               label=""
               value={{ method: form.method, transferAccountId: form.transferAccountId, cardId: form.cardId }}
@@ -851,6 +892,7 @@ export default function ExpenseForm({ onPreviewChange }) {
               pending={{ dueDate: form.dueDate, accountId: form.pendingAccountId }}
               onPendingChange={(p) => setMany({ dueDate: p.dueDate, pendingAccountId: p.accountId })}
             />
+            )}
           </div>
         </div>
 
@@ -1382,7 +1424,11 @@ export default function ExpenseForm({ onPreviewChange }) {
         {/* แถบบันทึกติดอยู่ท้ายฟอร์มเสมอ — ฟอร์มยาวขึ้นเมื่อกางรายละเอียดหรือเปิดผ่อนชำระ
             ถ้าปุ่มลอยไปอยู่ท้ายสุดผู้ใช้จะต้องเลื่อนหาทุกครั้ง */}
         {/* มือถือแถบนี้ต้องลอยเหนือแถบเมนูล่าง (68px) ไม่งั้นปุ่มบันทึกจะโดนบัง */}
-        <div className="sticky z-10 bottom-[68px] lg:bottom-0 -mx-4 sm:-mx-5 -mb-4 sm:-mb-5 px-4 sm:px-5 py-3 bg-white/95 backdrop-blur border-t border-[#F2F0EA] rounded-b-card flex items-center gap-3 flex-wrap">
+        {/* ในป๊อปอัปไม่มีแถบเมนูล่างให้หลบ ถ้ายังเว้น 68px ไว้ แถบบันทึกจะลอยค้างกลางจอ
+            แล้วมีเนื้อหาโผล่ใต้มันจนดูเหมือนวางผิดที่ */}
+        <div className={`sticky z-10 lg:bottom-0 -mx-4 sm:-mx-5 -mb-4 sm:-mb-5 px-4 sm:px-5 py-3 bg-white/95 backdrop-blur border-t border-[#F2F0EA] rounded-b-card flex items-center gap-3 flex-wrap ${
+          lockCardId ? 'bottom-0' : 'bottom-[68px]'
+        }`}>
           {/* แป้นตัวเลขของจอมือถือ — 12 ปุ่ม สูง 44px ตามแบบ */}
           {padOpen && form.method !== 'debt' && (
             <div className="lg:hidden w-full grid grid-cols-3 gap-[7px]">
@@ -1426,15 +1472,18 @@ export default function ExpenseForm({ onPreviewChange }) {
             แนบใบเสร็จ
             {attachments.length > 0 && <span className="tabular-nums font-bold text-income">{attachments.length}</span>}
           </button>
-          <button
-            type="button"
-            onClick={() => navigate('/transactions?tab=recurring')}
-            className="hidden lg:flex h-[38px] px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold items-center gap-1.5 hover:bg-paper"
-            title="ไปหน้ารายการประจำเพื่อตั้งรายการนี้ให้เรียกเก็บทุกเดือน"
-          >
-            <Icon name="history" size={17} />
-            ตั้งเป็นรายการประจำ
-          </button>
+          {/* ปุ่มนี้พาออกจากหน้าปัจจุบัน จึงไม่ควรอยู่ในป๊อปอัปที่เปิดค้างจากหน้าบัตร */}
+          {!lockCardId && (
+            <button
+              type="button"
+              onClick={() => navigate('/transactions?tab=recurring')}
+              className="hidden lg:flex h-[38px] px-3.5 rounded-ctl border border-hairline text-[12.5px] font-semibold items-center gap-1.5 hover:bg-paper"
+              title="ไปหน้ารายการประจำเพื่อตั้งรายการนี้ให้เรียกเก็บทุกเดือน"
+            >
+              <Icon name="history" size={17} />
+              ตั้งเป็นรายการประจำ
+            </button>
+          )}
 
           {saved && <span className="text-income text-sm font-medium">✓ บันทึกสำเร็จ</span>}
           {errMsg && <span className="text-expense text-sm">{errMsg}</span>}

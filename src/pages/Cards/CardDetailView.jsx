@@ -307,24 +307,6 @@ export default function CardDetailView({ cardId }) {
     setFeeTarget(null)
   })
 
-  /** คีย์ยอดรูดจากหน้าบัตร — เป็นรายจ่ายบนบัตรเหมือนบันทึกจากฟอร์มรายจ่ายทุกประการ */
-  const handleCharge = ({ date, amount, itemName, categoryId, vendor, note }) => run(async () => {
-    await addTransaction({
-      date, type: 'expense', amount, method: 'card', cardId: card.id,
-      category: categoryId, itemName, vendor, note,
-    }, {
-      effect: { target: walletTarget('card', { cardId: card.id }), delta: -amount },
-      log: buildLogEntry({
-        activityType: 'ADD_EXPENSE',
-        description: `รูดบัตร "${itemName}" ${fmt(amount)} บาท บัตร "${formatCard(card)}"`,
-        walletEffect: { target: 'card', delta: -amount, cardId: card.id },
-        newValue: { cardId: card.id, amount, date, itemName },
-      }),
-    })
-    await Promise.all([refreshCards(), refreshTransactions()])
-    setChargeOpen(false)
-  })
-
   /**
    * เมนูท้ายแถวของบิล — เปลี่ยนตามชนิดของแถว
    * แถวในบิลมาจากสามที่ (รายจ่ายจริง / ยอดกดเงินสด / งวดผ่อนที่รอเรียกเก็บ)
@@ -643,6 +625,14 @@ export default function CardDetailView({ cardId }) {
           <button className="h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs hover:bg-paper" onClick={() => setCashbackTarget({ estimate: estCashback })}>
             บันทึกเงินคืน
           </button>
+          {/* งานที่ทำบ่อยที่สุดในแถวนี้ จึงอยู่ขวาสุดและเป็นปุ่มทึบ — ตำแหน่งที่ตาไปหยุดหลังสุด */}
+          <button
+            className="h-8 px-3 rounded-[9px] bg-ink text-white text-xs font-semibold flex items-center gap-1.5 hover:bg-black"
+            onClick={() => setChargeOpen(true)}
+          >
+            <Icon name="add" size={15} />
+            เพิ่มรายการรูดบัตร
+          </button>
         </div>
 
         <div className="card flex flex-col overflow-hidden">
@@ -651,15 +641,7 @@ export default function CardDetailView({ cardId }) {
             <span className="tabular-nums text-[11px] font-semibold bg-expense-soft text-[#A93A2E] rounded-md px-2 py-0.5">
               {cycleRows.length} รายการ
             </span>
-            {/* คีย์ยอดรูดจากตรงนี้ได้เลย — คนที่กำลังไล่บิลอยู่ไม่ควรต้องเด้งไปหน้าอื่นทุกบรรทัด */}
-            <button
-              className="ml-auto flex-none h-8 px-3 rounded-[9px] border border-hairline bg-white text-xs font-semibold hover:bg-paper flex items-center gap-1"
-              onClick={() => setChargeOpen(true)}
-            >
-              <Icon name="add" size={16} />
-              เพิ่มรายการรูดบัตร
-            </button>
-            <span className="text-xs text-faint w-full sm:w-auto">
+            <span className="ml-auto text-xs text-faint">
               {current ? `รอบ ${current.cycle} · สรุปยอด ${formatThaiDate(current.end)}` : ''}
             </span>
           </div>
@@ -932,10 +914,9 @@ export default function CardDetailView({ cardId }) {
 
       {chargeOpen && (
         <CardChargePopup
-          cardLabel={formatCard(card)}
-          onConfirm={handleCharge}
-          onCancel={() => setChargeOpen(false)}
-          busy={busy}
+          card={card}
+          onClose={() => setChargeOpen(false)}
+          onSaved={() => { refreshCards(); refreshTransactions() }}
         />
       )}
 

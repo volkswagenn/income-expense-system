@@ -39,6 +39,9 @@ export default function Popup({
   disabled = false,
   error = '',
   footer,
+  // แทนที่ระยะขอบมาตรฐานของตัวกล่อง — ใช้เมื่อเนื้อในมีระยะขอบของตัวเองอยู่แล้ว
+  // (เช่นยกฟอร์มทั้งหน้ามาใส่ในป๊อปอัป) ไม่งั้นจะได้ขอบซ้อนสองชั้น
+  bodyClassName = 'px-[17px] py-[15px] flex flex-col gap-[11px]',
   children,
 }) {
   // ปิดด้วย Esc — ป๊อปอัปที่กดพลาดต้องออกได้โดยไม่ต้องหาปุ่ม
@@ -74,7 +77,7 @@ export default function Popup({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-[17px] py-[15px] flex flex-col gap-[11px]">
+        <div className={`flex-1 min-h-0 overflow-y-auto ${bodyClassName}`}>
           {children}
           {error && (
             <p className="text-[12.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3.5 py-2.5">
