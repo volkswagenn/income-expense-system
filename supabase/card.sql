@@ -2192,3 +2192,107 @@ $$;
 
 
 notify pgrst, 'reload schema';
+
+
+-- ###########################################################################
+-- ##  17. ทำเครื่องหมายว่ารายการในบิล "จ่ายไปแล้ว" โดยไม่ตัดเงินซ้ำ
+-- ###########################################################################
+--
+-- เกิดกับบิลที่จ่ายไปก่อนระบบจะจำได้ว่าเงินก้อนนั้นเป็นของบรรทัดไหน (ก่อนมี
+-- p_transaction ในส่วนที่ 6) เงินออกไปแล้วจริงและยอดบิลลดไปแล้ว เหลือแค่ไม่มีใครรู้
+-- ว่ามันคือค่าของรายการไหน หน้าจอจึงยังขึ้นว่ายังไม่จ่าย
+--
+-- ฟังก์ชันนี้ไม่ขยับเงินเลยแม้แต่บาทเดียว แค่ผูก "ขา" ที่จ่ายไว้แล้วเข้ากับรายการ
+-- ขาหนึ่งที่จ่ายรวมหลายบรรทัดจะถูกแบ่งให้พอดียอดของรายการ ส่วนที่เหลือยังเป็นขา
+-- ที่ไม่ผูกกับใคร รอผูกกับบรรทัดอื่นต่อไป ยอดรวมของบิลจึงเท่าเดิมทุกบาท
+
+create or replace function public.assign_statement_payment(
+  p_transaction uuid,
+  p_log         jsonb default null
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_tx   transactions;
+  v_st   card_statements;
+  v_need numeric(14,2);
+  v_take numeric(14,2);
+  v_leg  card_statement_payments;
+begin
+  select * into v_tx from transactions where id = p_transaction;
+  if not found then raise exception 'ไม่พบรายการนี้'; end if;
+  perform assert_can_edit(v_tx.shop_id);
+  if v_tx.card_id is null then raise exception 'รายการนี้ไม่ได้รูดบัตร'; end if;
+  if v_tx.type <> 'expense' then raise exception 'ทำเครื่องหมายจ่ายแล้วได้เฉพาะรายการที่เป็นรายจ่าย'; end if;
+
+  -- บิลที่รายการนี้อยู่ — ผูกใบตรงๆ หรือวันที่รูดตกในช่วงของใบ (กฎเดียวกับหน้าจอ)
+  select * into v_st from card_statements s
+   where s.card_id = v_tx.card_id
+     and (case when v_tx.card_statement_id is not null
+               then s.id = v_tx.card_statement_id
+               else v_tx.date between s.period_start and s.period_end end)
+   order by s.period_end desc
+   limit 1;
+  if not found then
+    raise exception 'รายการนี้ยังไม่อยู่ในบิลใบไหน — ถ้าจ่ายไปแล้วให้ใช้ "จ่ายรายการนี้ก่อนออกบิล" แทน';
+  end if;
+
+  v_need := v_tx.amount - coalesce((
+    select sum(amount) from card_statement_payments
+     where transaction_id = p_transaction and statement_id = v_st.id), 0);
+  if v_need <= 0.005 then return; end if;   -- ทำเครื่องหมายไว้ครบแล้ว
+
+  for v_leg in
+    select * from card_statement_payments
+     where statement_id = v_st.id and transaction_id is null
+     order by paid_at, created_at
+  loop
+    exit when v_need <= 0.005;
+    v_take := least(v_leg.amount, v_need);
+    if v_take >= v_leg.amount - 0.005 then
+      update card_statement_payments set transaction_id = p_transaction where id = v_leg.id;
+    else
+      -- แบ่งขา: ส่วนที่เป็นของรายการนี้แยกออกมาเป็นขาใหม่ ยอดรวมสองขาเท่าขาเดิม
+      update card_statement_payments set amount = amount - v_take where id = v_leg.id;
+      insert into card_statement_payments
+             (shop_id, statement_id, card_id, method, transfer_account_id, amount, paid_at, transaction_id)
+      values (v_leg.shop_id, v_leg.statement_id, v_leg.card_id, v_leg.method,
+              v_leg.transfer_account_id, v_take, v_leg.paid_at, p_transaction);
+    end if;
+    v_need := v_need - v_take;
+  end loop;
+
+  if v_need > 0.005 then
+    raise exception 'ยอดที่จ่ายบิลใบนี้ไปแล้วยังไม่พอสำหรับรายการนี้ — ขาดอีก % บาท ให้กด "จ่ายยอดนี้" แทน',
+      to_char(v_need, 'FM999,999,990.00');
+  end if;
+
+  perform write_log(v_tx.shop_id, p_log);
+end;
+$$;
+
+-- เอาเครื่องหมายออก — ขาที่ผูกไว้กลับไปเป็นขาของบิลตามเดิม เงินไม่ขยับเช่นกัน
+create or replace function public.unassign_statement_payment(
+  p_transaction uuid,
+  p_log         jsonb default null
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_tx transactions;
+begin
+  select * into v_tx from transactions where id = p_transaction;
+  if not found then raise exception 'ไม่พบรายการนี้'; end if;
+  perform assert_can_edit(v_tx.shop_id);
+
+  update card_statement_payments
+     set transaction_id = null
+   where transaction_id = p_transaction and statement_id is not null;
+
+  perform write_log(v_tx.shop_id, p_log);
+end;
+$$;
+
+notify pgrst, 'reload schema';
+
+select 'ทำเครื่องหมายจ่ายแล้วโดยไม่ตัดเงินซ้ำ' as "รายการ",
+       case when (select count(*) from information_schema.routines
+                   where routine_schema = 'public'
+                     and routine_name in ('assign_statement_payment','unassign_statement_payment')) = 2
+            then '✅' else '❌ ยังไม่ครบ — รันไฟล์นี้ซ้ำอีกรอบ' end as "ผล";

@@ -223,7 +223,7 @@ export default function CardDetailView({ cardId }) {
 
   const {
     ensureStatements, payStatement, undoPayment, cashAdvance, undoAdvance, payEntry,
-    prepayTransaction, undoPrepayment,
+    prepayTransaction, undoPrepayment, assignStatementPayment, unassignStatementPayment,
   } = useCreditCardStore()
   const statementPayments = useCreditCardStore((s) => s.statementPayments)
   const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
@@ -274,6 +274,20 @@ export default function CardDetailView({ cardId }) {
     [statements, isPayableStatement]
   )
   const bill = unpaid[0] ?? null
+
+  /**
+   * ยอดที่จ่ายบิลใบนี้ไปแล้ว แต่ยังไม่ได้ระบุว่าเป็นค่าของบรรทัดไหน
+   *
+   * บิลที่จ่ายไปก่อนระบบจะจำที่มาของเงิน (ก่อน card.sql ส่วนที่ 17) ทั้งก้อนอยู่ตรงนี้
+   * ใช้ตัดสินว่าบรรทัดไหน "ทำเครื่องหมายว่าจ่ายแล้ว" ได้บ้างโดยไม่ต้องตัดเงินซ้ำ
+   */
+  const unassignedPaid = useMemo(() => {
+    if (!bill) return 0
+    const legs = statementPayments.filter((l) => l.statementId === bill.id)
+    const all = legs.reduce((s, l) => s + Number(l.amount || 0), 0)
+    const assigned = legs.filter((l) => l.transactionId).reduce((s, l) => s + Number(l.amount || 0), 0)
+    return Math.round((all - assigned) * 100) / 100
+  }, [bill, statementPayments])
   const paidHistory = useMemo(
     () => statements.filter((s) => s.status === 'paid').sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1)),
     [statements]
@@ -640,15 +654,32 @@ export default function CardDetailView({ cardId }) {
     if (r.tx) {
       const inIssuedBill = hasBill && billTab === 'this'
       const prepaidLeft = r.prepayable ? Math.abs(r.amount) - (r.prepaid?.amount ?? 0) : 0
+      // จ่ายบรรทัดนี้ในบิลไปแล้วเท่าไร เหลือเท่าไร (ใช้ทั้งปุ่มจ่ายและปุ่มทำเครื่องหมาย)
+      const paidHereLeft = Math.abs(r.amount) - (r.paidInBill?.amount ?? 0)
+      const paidHere = paidHereLeft <= 0.005
       return [
         // จ่ายเฉพาะรายการนี้ — รูดแล้วโอนคืนทันทีไม่รอบิล (วิธีที่คนใช้บัตรจำนวนมากทำ)
         // รายการในรอบที่ยังไม่ออกบิล = ขาจ่ายล่วงหน้า · รายการในบิลที่ออกแล้ว = จ่ายบิล
         // ด้วยยอดเฉพาะรายการ (บิลรับยอดบางส่วนอยู่แล้ว ไม่ต้องมีทางพิเศษ)
-        ...(inIssuedBill && r.prepayable && bill ? [{
+        ...(inIssuedBill && r.prepayable && bill && !paidHere ? [{
           icon: 'payments',
-          label: `จ่ายบิลเฉพาะยอดนี้ ${fmt(Math.abs(r.amount))}`,
+          label: `จ่ายบิลเฉพาะยอดนี้ ${fmt(paidHereLeft)}`,
           desc: 'เปิดหน้าจ่ายบิลโดยใส่ยอดของรายการนี้ให้ ส่วนที่เหลือของบิลยังค้างอยู่',
           onClick: () => openPayItemInBill(r),
+        }] : []),
+        // จ่ายไปแล้วจริงแต่ระบบไม่รู้ว่าเงินก้อนไหนเป็นของบรรทัดไหน (จ่ายก่อนมีระบบนี้)
+        // ให้ติ๊กเองได้ โดยผูกกับยอดที่จ่ายบิลไว้แล้ว ไม่ตัดเงินเพิ่มแม้แต่บาทเดียว
+        ...(inIssuedBill && r.prepayable && bill && !paidHere && unassignedPaid >= paidHereLeft - 0.005 ? [{
+          icon: 'check_circle',
+          label: 'ทำเครื่องหมายว่าจ่ายแล้ว',
+          desc: `ยอดนี้ถูกตัดไปแล้วตอนจ่ายบิล (บิลใบนี้มียอดที่ยังไม่ระบุว่าเป็นของบรรทัดไหน ${fmt(unassignedPaid)}) — ไม่ตัดเงินเพิ่ม`,
+          onClick: () => markRowPaid(r),
+        }] : []),
+        ...(inIssuedBill && r.paidInBill && !r.paidInBill.whole ? [{
+          icon: 'undo',
+          label: 'เอาเครื่องหมายจ่ายแล้วออก',
+          desc: 'ยอดที่จ่ายกลับไปเป็นยอดจ่ายรวมของบิล เงินไม่ขยับ',
+          onClick: () => unmarkRowPaid(r),
         }] : []),
         ...(!inIssuedBill && r.prepayable && prepaidLeft > 0.005 ? [{
           icon: 'payments',
@@ -744,6 +775,32 @@ export default function CardDetailView({ cardId }) {
     setPayPreset({ amount: Math.abs(r.amount), label: r.name, transactionId: r.tx?.id ?? null })
     setPayTarget(bill)
   }
+
+  /**
+   * ทำเครื่องหมายว่าบรรทัดนี้จ่ายไปแล้ว โดยไม่ตัดเงินซ้ำ
+   *
+   * ใช้กับของที่จ่ายไปก่อนระบบจะจำได้ว่าเงินก้อนนั้นเป็นของบรรทัดไหน เงินออกไปแล้ว
+   * และยอดบิลลดไปแล้วจริง ขาดแค่ป้ายบอกว่ามันคือค่าของรายการไหน (card.sql ส่วนที่ 17)
+   */
+  const markRowPaid = (r) => run(async () => {
+    await assignStatementPayment(r.tx.id, buildLogEntry({
+      activityType: 'CARD_PAYMENT_ASSIGN',
+      description:
+        `ทำเครื่องหมายว่า "${r.name}" ${fmt(Math.abs(r.amount))} บาท จ่ายไปแล้ว ` +
+        `จากยอดที่จ่ายบิลบัตร "${formatCard(card)}" ไว้แล้ว (ไม่ตัดเงินเพิ่ม)`,
+      newValue: { transactionId: r.tx.id, cardId: card.id, amount: Math.abs(r.amount) },
+    }))
+    await refreshWallet()
+  })
+
+  const unmarkRowPaid = (r) => run(async () => {
+    await unassignStatementPayment(r.tx.id, buildLogEntry({
+      activityType: 'CARD_PAYMENT_UNASSIGN',
+      description: `เอาเครื่องหมายจ่ายแล้วออกจาก "${r.name}" ของบัตร "${formatCard(card)}" (เงินไม่ขยับ)`,
+      oldValue: { transactionId: r.tx.id, cardId: card.id },
+    }))
+    await refreshWallet()
+  })
   const closePayBill = () => { setPayTarget(null); setPayPreset(null) }
 
   const handlePrepay = ({ method, accountId, amount, date }) => run(async () => {
@@ -1105,7 +1162,7 @@ export default function CardDetailView({ cardId }) {
           <div className="px-4 pb-1 pt-2.5 text-[11px] text-faint">
             {billTab === 'this'
               ? (hasBill
-                ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
+                ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น (จ่ายแล้วจะขึ้นถูกสีเขียวหน้าแถว) · จ่ายไปแล้วก่อนหน้านี้แต่ระบบยังไม่รู้ว่าเป็นของบรรทัดไหน กด "ติ๊กว่าจ่ายแล้ว" ได้เลย ไม่ตัดเงินเพิ่ม · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเองคือทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
                 : 'บัตรใบนี้ไม่มีบิลที่ต้องจ่าย · บิลใบถัดไปจะออกเองตอนสรุปยอด แล้วรายการจากแท็บ "รอบบิลหน้า" จะย้ายมาอยู่ที่นี่')
               : (hasBill ? 'รายการที่รูดหลังวันสรุปยอดมาอยู่ที่นี่ จะถูกเรียกเก็บในบิลรอบถัดไป · ถ้าธนาคารเก็บในบิลใบที่ออกแล้ว กด "ย้ายไปรอบบิลนี้" · ' : 'ทุกรายการที่รูดในรอบนี้อยู่ที่นี่ และจะกลายเป็นบิลใบถัดไปตอนสรุปยอด · ')
                 + 'รูดแล้วโอนคืนทันที กด "จ่ายรายการนี้" ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง · กดปุ่ม ⋮ ท้ายแถวเพื่อจัดการรายการนั้น · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) · งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด'}
@@ -1212,6 +1269,7 @@ export default function CardDetailView({ cardId }) {
                             ✓ จ่ายแล้ว {lastPaidAt ? formatIsoThaiShort(lastPaidAt) : ''}
                           </span>
                         ) : (
+                        <>
                         <button
                           disabled={busy}
                           onClick={() => openPayItemInBill(r)}
@@ -1220,6 +1278,19 @@ export default function CardDetailView({ cardId }) {
                         >
                           {r.paidInBill ? 'จ่ายส่วนที่เหลือ' : 'จ่ายยอดนี้'}
                         </button>
+                        {/* จ่ายไปแล้วจริงแต่ระบบไม่รู้ว่าเงินก้อนไหนเป็นของบรรทัดไหน (จ่ายก่อนมีระบบนี้)
+                            ให้ติ๊กเองได้เมื่อบิลใบนี้ยังมียอดที่จ่ายแล้วเหลือพอ — ไม่ตัดเงินเพิ่ม */}
+                        {unassignedPaid >= Math.abs(r.amount) - (r.paidInBill?.amount ?? 0) - 0.005 && (
+                          <button
+                            disabled={busy}
+                            onClick={() => markRowPaid(r)}
+                            className="text-[10.5px] text-muted underline hover:no-underline hover:text-income whitespace-nowrap disabled:opacity-50"
+                            title={`ยอดนี้ถูกตัดไปแล้วตอนจ่ายบิล — ผูกกับยอดที่จ่ายไว้แล้ว ${fmt(unassignedPaid)} บาท ไม่ตัดเงินเพิ่ม`}
+                          >
+                            ติ๊กว่าจ่ายแล้ว
+                          </button>
+                        )}
+                        </>
                         )
                       ) : fullyPrepaid ? (
                         <span

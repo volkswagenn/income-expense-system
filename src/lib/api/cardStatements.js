@@ -152,3 +152,23 @@ export async function prepayTransaction(transactionId, { method, accountId = nul
 export async function undoPrepayment(legId, log = null) {
   await unwrap(supabase.rpc('undo_card_prepayment', { p_leg: legId, p_log: log }))
 }
+
+/**
+ * ทำเครื่องหมายว่ารายการในบิลนี้จ่ายไปแล้ว โดยไม่ตัดเงินซ้ำ
+ * ใช้กับรายการที่จ่ายไปก่อนระบบจะจำได้ว่าเงินก้อนไหนเป็นของบรรทัดไหน
+ * (supabase/card.sql ส่วนที่ 17) — ผูกขาที่จ่ายไว้แล้วเข้ากับรายการเท่านั้น
+ */
+export async function assignStatementPayment(transactionId, log = null) {
+  const { error } = await supabase.rpc('assign_statement_payment', { p_transaction: transactionId, p_log: log })
+  if (!error) return
+  // ยังไม่ได้รัน card.sql รอบใหม่ — บอกให้ไปรัน ไม่ใช่โยนข้อความ 404 ดิบๆ ใส่หน้า
+  if (error.code === 'PGRST202') {
+    throw new Error('ฐานข้อมูลยังไม่มีคำสั่งนี้ — เปิด Supabase แล้วรัน supabase/card.sql ทับในแท็บเดิมก่อน')
+  }
+  throw new Error(toThaiError(error))
+}
+
+/** เอาเครื่องหมายจ่ายแล้วออก — ขากลับไปเป็นยอดจ่ายของบิลตามเดิม เงินไม่ขยับ */
+export async function unassignStatementPayment(transactionId, log = null) {
+  await unwrap(supabase.rpc('unassign_statement_payment', { p_transaction: transactionId, p_log: log }))
+}

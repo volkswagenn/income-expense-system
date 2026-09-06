@@ -187,6 +187,18 @@ const useCreditCardStore = create((set, get) => ({
     await get().refresh()
   },
 
+  // ทำเครื่องหมายว่ารายการในบิลจ่ายไปแล้ว — ไม่ตัดเงินซ้ำ แค่ผูกขาที่จ่ายไว้แล้ว
+  // เข้ากับรายการ ใช้กับของที่จ่ายไปก่อนระบบจะจำได้ว่าเงินก้อนไหนของบรรทัดไหน
+  assignStatementPayment: async (transactionId, log) => {
+    await stmtApi.assignStatementPayment(transactionId, log)
+    await get().refresh()
+  },
+
+  unassignStatementPayment: async (transactionId, log) => {
+    await stmtApi.unassignStatementPayment(transactionId, log)
+    await get().refresh()
+  },
+
   /** ขาที่จ่ายก่อนออกบิลและยังไม่ถูกรวมเข้าใบไหน ของบัตรใบนี้ */
   getOpenPrepayments: (cardId) =>
     get().statementPayments.filter((l) => l.cardId === cardId && !l.statementId),
