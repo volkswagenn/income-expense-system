@@ -143,3 +143,39 @@ export function pauseLabel(info) {
   const [y, m] = info.resumeMonth.split('-').map(Number)
   return `พัก ${info.totalMonths} เดือน · เหลืออีก ${info.monthsLeft} เดือน · กลับมาเรียกเก็บ ${THAI_MONTHS_SHORT[m - 1]} ${y + 543}`
 }
+
+// ── รอบบิลที่บิลใบนี้เรียกเก็บ ────────────────────────────────────────────────
+//
+// "เดือนที่ต้องจ่าย" กับ "รอบบิลที่จ่าย" เป็นคนละเดือนได้ และในหน้าเดียวกันมีทั้งสองแบบ
+// ปนกัน — บิลค่าไฟที่ครบกำหนด 15 ก.ย. คือค่าไฟของเดือน ส.ค. ส่วนค่าบริการซอฟต์แวร์
+// ที่ตัดวันที่ 18 ก.ย. คือค่าบริการของเดือน ก.ย. เอง
+// item.billingCycleOffset เก็บส่วนต่างเป็นจำนวนเดือน (ดู supabase/recurring.sql)
+
+export const CYCLE_OFFSETS = [
+  { value: -1, label: 'ของเดือนก่อนหน้า', hint: 'ค่าไฟ ค่าน้ำ ค่าเน็ต ค่าโทรศัพท์ — เก็บย้อนหลังจากที่ใช้ไปแล้ว' },
+  { value: 0, label: 'ของเดือนที่จ่าย', hint: 'ค่าบริการที่เก็บของเดือนนั้นเลย เช่นค่าสมาชิกรายเดือน' },
+  { value: 1, label: 'ของเดือนถัดไป', hint: 'จ่ายล่วงหน้า เช่นค่าเช่าที่จ่ายก่อนเข้าอยู่' },
+]
+
+/** เดือนของรอบบิลที่ entry ใบนี้เรียกเก็บ — รูปแบบ 'YYYY-MM' */
+export function cycleMonth(item, entryMonth) {
+  const offset = Number(item?.billingCycleOffset) || 0
+  return offset === 0 ? entryMonth : addMonths(entryMonth, offset)
+}
+
+/** 'ส.ค. 2569' — ชื่อเดือนของรอบบิล */
+export function monthName(month, { full = false } = {}) {
+  const [y, m] = String(month ?? '').split('-').map(Number)
+  if (!y || !m) return '—'
+  return `${(full ? THAI_MONTHS_FULL : THAI_MONTHS_SHORT)[m - 1]} ${y + 543}`
+}
+
+/**
+ * ป้ายบอกรอบบิลของ entry — คืน null เมื่อรอบบิลตรงกับเดือนที่จ่าย
+ * เพราะกรณีนั้นการเขียนซ้ำไม่ได้บอกอะไรใหม่ นอกจากทำให้แถวรก
+ */
+export function cycleLabel(item, entryMonth, { always = false } = {}) {
+  const offset = Number(item?.billingCycleOffset) || 0
+  if (offset === 0 && !always) return null
+  return `รอบบิล ${monthName(cycleMonth(item, entryMonth))}`
+}

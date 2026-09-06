@@ -19,6 +19,8 @@ const OVERRIDES = {
 /** ฟิลด์ที่ต้องเป็นตัวเลขเสมอ — numeric ของ Postgres อาจกลับมาเป็น string */
 const NUMERIC_FIELDS = new Set([
   'amount', 'balance', 'cash', 'fixedAmount', 'notifyDaysBefore', 'billingDay', 'billingMonth', 'vatRate', 'sortOrder',
+  // ส่วนต่างเดือนของรอบบิล ติดลบได้ (ดู supabase/recurring.sql)
+  'billingCycleOffset',
   // บัตรเครดิต — ไม่ใส่ไว้ที่นี่ numeric จะกลับมาเป็น string แล้วบวกเลขกลายเป็นต่อสตริง
   'creditLimit', 'outstanding', 'closingDay', 'dueDay', 'cashbackRate', 'cardMinRate',
   // ใบแจ้งยอด

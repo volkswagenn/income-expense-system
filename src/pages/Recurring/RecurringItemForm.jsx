@@ -8,7 +8,8 @@ import CreditCardPicker from '../../components/shared/CreditCardPicker'
 import TransferAccountPicker from '../../components/shared/TransferAccountPicker'
 import NumpadPopup from '../../components/shared/NumpadPopup'
 import { IconPickerButton } from '../../components/shared/IconPicker'
-import { FREQUENCY_OPTIONS, THAI_MONTHS_FULL, VAT_MODES, VAT_RATE, vatBreakdown, vatMode } from '../../lib/recurringSchedule'
+import { CYCLE_OFFSETS, FREQUENCY_OPTIONS, THAI_MONTHS_FULL, VAT_MODES, VAT_RATE, monthName, cycleMonth, vatBreakdown, vatMode } from '../../lib/recurringSchedule'
+import { localMonthStr } from '../../lib/dateUtils'
 
 const EMPTY = {
   icon: null,               // ไอคอนประจำรายการ (null = ไม่ตั้ง)
@@ -19,6 +20,7 @@ const EMPTY = {
   billingDay: '',
   frequency: 'monthly',       // monthly | yearly
   billingMonth: '',            // ใช้เฉพาะรายปี (1–12)
+  billingCycleOffset: 0,       // รอบบิลที่เก็บ เทียบกับเดือนที่จ่าย (-1 = ของเดือนก่อน)
   vatMode: 'none',            // none | included | add — fixedAmount เก็บตัวเลขที่กรอกเสมอ
   vendor: '',
   note: '',
@@ -50,6 +52,7 @@ function toFormValues(item) {
     fixedAmount: item.fixedAmount != null ? String(item.fixedAmount) : '',
     frequency: item.frequency ?? 'monthly',
     billingMonth: item.billingMonth ?? '',
+    billingCycleOffset: Number(item.billingCycleOffset) || 0,
     vatMode: vatMode(item),
   }
   for (const key of TEXT_FIELDS) form[key] = form[key] ?? ''
@@ -114,6 +117,11 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
         // เหตุผลเดียวกับ defaultCardId — ฐานข้อมูลที่ยังไม่ได้รัน icons.sql ไม่มีคอลัมน์ icon
         // ถ้าส่ง null ไปทุกครั้ง การบันทึกรายการประจำจะพังทั้งหมด ไม่ใช่แค่เรื่องไอคอน
         // จึงส่งเฉพาะตอนที่ผู้ใช้ตั้งไอคอนจริง หรือตอนสั่งเอาไอคอนเดิมออก
+        // เหตุผลเดียวกับ defaultCardId — ฐานข้อมูลที่ยังไม่ได้รัน recurring.sql รอบล่าสุด
+        // จะไม่มีคอลัมน์ billing_cycle_offset ส่งไปทุกครั้งจะทำให้บันทึกรายการประจำพังทั้งหมด
+        billingCycleOffset: Number(form.billingCycleOffset) !== (Number(item?.billingCycleOffset) || 0)
+          ? Number(form.billingCycleOffset) || 0
+          : undefined,
         icon: form.icon || (item?.icon ? null : undefined),
       })
     } finally {
@@ -323,6 +331,38 @@ export default function RecurringItemForm({ item, onSave, onClose }) {
           {error.billingDay && <p className="text-xs text-red-500 mt-1">{error.billingDay}</p>}
           {error.billingMonth && <p className="text-xs text-red-500 mt-1">{error.billingMonth}</p>}
           <p className="text-xs text-gray-400 mt-1">ถ้าเดือนนั้นสั้นกว่า จะใช้วันสุดท้ายแทน</p>
+        </div>
+
+        {/* รอบบิลที่บิลใบนี้เรียกเก็บ — บิลสาธารณูปโภคของไทยเก็บย้อนหลังเกือบทั้งหมด
+            ถ้าไม่บอกไว้ เวลาเทียบยอดกับบิลจริงจะไม่รู้ว่าเงินก้อนนี้เป็นค่าอะไรของเดือนไหน */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            บิลที่จ่ายรอบนี้ เป็นค่าใช้จ่ายของเดือนไหน
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {CYCLE_OFFSETS.map((opt) => {
+              const on = (Number(form.billingCycleOffset) || 0) === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => set('billingCycleOffset', opt.value)}
+                  title={opt.hint}
+                  className={`py-2 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                    on ? 'border-ink bg-[#F2FAD9]' : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+            {CYCLE_OFFSETS.find((o) => o.value === (Number(form.billingCycleOffset) || 0))?.hint}
+            {' · '}
+            ตัวอย่าง: บิลที่จ่ายเดือน {monthName(localMonthStr())} คือรอบบิลของเดือน{' '}
+            <b className="text-gray-600">{monthName(cycleMonth({ billingCycleOffset: form.billingCycleOffset }, localMonthStr()))}</b>
+          </p>
         </div>
 
         {/* วิธีจ่ายที่ตั้งไว้ล่วงหน้า — เมื่อกดจ่ายตามรอบจะใช้ค่านี้ทันที */}

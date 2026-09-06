@@ -1,5 +1,5 @@
 import useCategoryStore from '../../store/useCategoryStore'
-import { isYearly, scheduleLabel } from '../../lib/recurringSchedule'
+import { isYearly, scheduleLabel, cycleLabel } from '../../lib/recurringSchedule'
 
 const METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', card: 'บัตรเครดิต', pending: 'ค้างชำระ' }
 
@@ -9,7 +9,7 @@ function StatusBadge({ status }) {
   return <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">⏳ รอจ่าย</span>
 }
 
-export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause }) {
+export default function RecurringEntryCard({ entry, item, daysLeft, upcoming = false, onPay, onUndoPay, onSkip, onEdit, onDelete, onPause }) {
   const { getCategoryName, getCategories } = useCategoryStore()
   const categories = getCategories('expense')
   const cat = categories.find((c) => c.id === item.category)
@@ -20,20 +20,29 @@ export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSk
   const hasAmount = entry.amount > 0
   const isPaid = entry.status === 'paid'
   const isSkipped = entry.status === 'skipped'
-  const isPending = entry.status === 'pending'
+  const isPending = entry.status === 'pending' && !upcoming
 
   return (
-    <div className={`rounded-xl border bg-white p-4 transition-colors ${
+    <div className={`rounded-xl border p-4 transition-colors ${
+      upcoming ? 'border-dashed border-gray-200 bg-transparent' :
       isPaid ? 'border-emerald-200 bg-emerald-50/30' :
       isSkipped ? 'border-gray-200 opacity-60' :
-      'border-gray-200 hover:border-gray-300'
+      'border-gray-200 bg-white hover:border-gray-300'
     }`}>
       <div className="flex items-start gap-3">
         {/* Left: info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-sm font-semibold text-gray-800">{item.name}</span>
-            <StatusBadge status={entry.status} />
+            {upcoming
+              ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">◷ ยังไม่ถึงรอบ</span>
+              : <StatusBadge status={entry.status} />}
+            {/* เหลืออีกกี่วันจะย้ายไปเป็นรอบเดือนหน้า — มีเวลาไล่เช็คสลิปอีกเท่าไร */}
+            {daysLeft != null && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-income-soft text-income">
+                ย้ายออกอีก {daysLeft} วัน
+              </span>
+            )}
             {isYearly(item) && (
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">📆 รายปี</span>
             )}
@@ -45,6 +54,12 @@ export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSk
           <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
             <span>📁 {catName}</span>
             <span>📅 {scheduleLabel(item, { short: true })}</span>
+            {/* รอบบิลที่เก็บ ต่างจากเดือนที่จ่ายได้ (ค่าไฟเดือน ส.ค. มาเก็บเดือน ก.ย.) */}
+            {cycleLabel(item, entry.month) && (
+              <span className="px-1.5 py-px rounded bg-[#F4F3EF] text-[#5C6068] font-medium">
+                {cycleLabel(item, entry.month)}
+              </span>
+            )}
             {item.vendor && <span>🏢 {item.vendor}</span>}
           </div>
 
@@ -69,6 +84,17 @@ export default function RecurringEntryCard({ entry, item, onPay, onUndoPay, onSk
 
           {/* Actions */}
           <div className="flex gap-1.5 mt-2 justify-end flex-wrap">
+            {/* รอบเดือนหน้ายังไม่ถึงกำหนด มีแค่ปุ่มจ่ายล่วงหน้า —
+                ข้าม/พักเป็นเรื่องของรอบปัจจุบัน ไม่ควรมาปนที่นี่ */}
+            {upcoming && (
+              <button
+                onClick={() => onPay(entry, item)}
+                className="btn btn-secondary text-xs py-1 px-3"
+                title="จ่ายล่วงหน้าสำหรับรอบเดือนหน้า"
+              >
+                ✓ จ่ายล่วงหน้า
+              </button>
+            )}
             {isPending && (
               <>
                 <button

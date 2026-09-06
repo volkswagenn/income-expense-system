@@ -4,6 +4,7 @@ import useCategoryStore from '../../store/useCategoryStore'
 import useRecurringStore from '../../store/useRecurringStore'
 import Icon from '../../components/shared/Icon'
 import { localDateStr, localMonthStr } from '../../lib/dateUtils'
+import { cycleLabel } from '../../lib/recurringSchedule'
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })
 
@@ -51,7 +52,13 @@ export default function TodayPanel() {
           <div className="flex flex-col gap-1.5 mt-2">
             {pendingRecurring.map(({ entry, item }) => (
               <div key={entry.id} className="flex items-center gap-2 bg-recurring-soft/60 rounded-[9px] px-2.5 py-1.5">
-                <span className="flex-1 min-w-0 text-[12px] font-medium truncate">{item.name}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[12px] font-medium truncate">{item.name}</span>
+                  {/* บอกด้วยว่าเงินก้อนนี้เป็นค่าอะไรของเดือนไหน ไม่ใช่แค่เดือนที่ต้องจ่าย */}
+                  {cycleLabel(item, entry.month) && (
+                    <span className="block text-[10px] text-[#5A3C90]/70 truncate">{cycleLabel(item, entry.month)}</span>
+                  )}
+                </span>
                 <span className="tabular-nums text-[12px] font-semibold text-recurring">{fmt(entry.amount)}</span>
               </div>
             ))}

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { format, subMonths } from 'date-fns'
 import usePaymentHistory, { PAYMENT_KINDS } from '../../hooks/usePaymentHistory'
 import usePaymentSlipStore from '../../store/usePaymentSlipStore'
+import { slipsInstalled } from '../../lib/api/paymentSlips'
 import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import Icon from '../../components/shared/Icon'
@@ -67,6 +68,9 @@ export default function PaymentsPage() {
   const [viewSlip, setViewSlip] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // ตารางสลิปเป็นของที่ต้องรัน SQL เพิ่มทีหลัง ถ้ายังไม่ได้รัน หน้านี้ยังอ่านประวัติได้ปกติ
+  // แต่แนบสลิปไม่ได้ ต้องบอกไว้ตั้งแต่ต้น ไม่ใช่ปล่อยให้อัปโหลดไฟล์เสร็จแล้วค่อยพัง
+  const canAttach = slipsInstalled()
 
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase()
@@ -185,6 +189,13 @@ export default function PaymentsPage() {
         </div>
       </div>
 
+      {!canAttach && (
+        <p className="text-[12.5px] text-[#8A6A15] bg-pending-soft border border-pending-line rounded-ctl px-3.5 py-2.5 leading-relaxed">
+          ยังแนบสลิปไม่ได้ — ฐานข้อมูลยังไม่มีตารางสลิป เปิด Supabase › SQL Editor แล้วรัน{' '}
+          <b className="font-mono">supabase/slips.sql</b> (ผลตรวจท้ายไฟล์ต้องได้ ✅ ครบ 3 บรรทัด) จากนั้นรีเฟรชหน้านี้ ·
+          ประวัติการจ่ายด้านล่างแสดงครบตามปกติอยู่แล้ว
+        </p>
+      )}
       {error && <p className="text-[12.5px] text-expense bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3.5 py-2.5">{error}</p>}
 
       {shown.length === 0 ? (
@@ -230,7 +241,9 @@ export default function PaymentsPage() {
                   ) : (
                     <button
                       onClick={() => setUploadFor(r)}
-                      className="flex-none h-[30px] px-2.5 rounded-[9px] border border-dashed border-[#D8D4C9] text-[11.5px] text-muted hover:border-ink hover:text-ink"
+                      disabled={!canAttach}
+                      title={canAttach ? 'แนบสลิปโอนเงินของการจ่ายครั้งนี้' : 'ต้องรัน supabase/slips.sql ก่อน'}
+                      className="flex-none h-[30px] px-2.5 rounded-[9px] border border-dashed border-[#D8D4C9] text-[11.5px] text-muted hover:border-ink hover:text-ink disabled:opacity-40 disabled:hover:border-[#D8D4C9] disabled:hover:text-muted"
                     >
                       + แนบสลิป
                     </button>
@@ -315,7 +328,9 @@ export default function PaymentsPage() {
             ) : (
               <button
                 onClick={() => setUploadFor(detail)}
-                className="h-[34px] px-3 rounded-[9px] border border-dashed border-[#D8D4C9] text-[12px] text-muted hover:border-ink hover:text-ink"
+                disabled={!canAttach}
+                title={canAttach ? 'แนบสลิปโอนเงินของการจ่ายครั้งนี้' : 'ต้องรัน supabase/slips.sql ก่อน'}
+                className="h-[34px] px-3 rounded-[9px] border border-dashed border-[#D8D4C9] text-[12px] text-muted hover:border-ink hover:text-ink disabled:opacity-40 disabled:hover:border-[#D8D4C9] disabled:hover:text-muted"
               >
                 + แนบสลิปการโอน
               </button>

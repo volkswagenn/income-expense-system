@@ -8,6 +8,7 @@ import useWalletStore from '../store/useWalletStore'
 import useCategoryStore from '../store/useCategoryStore'
 import useTransactionStore from '../store/useTransactionStore'
 import { formatIsoThai } from '../lib/cardCycle'
+import { cycleLabel, monthName } from '../lib/recurringSchedule'
 
 /**
  * ประวัติการจ่ายเงินทุกชนิดรวมเป็นรายการเดียว
@@ -156,7 +157,8 @@ export default function usePaymentHistory() {
       push('recurring', e.id, {
         paidAt: e.paidAt, day: dayOf(e.paidAt), amount: num(e.amount),
         title: it?.name ?? 'รายการประจำ',
-        detail: `รอบเดือน ${e.month}`,
+        // บอกรอบบิลที่เก็บด้วย ถ้าต่างจากเดือนที่จ่าย (ค่าไฟเดือน ส.ค. มาเก็บเดือน ก.ย.)
+        detail: [`รอบเดือน ${monthName(e.month)}`, it ? cycleLabel(it, e.month) : null].filter(Boolean).join(' · '),
         source: source(e.paidMethod, e.transferAccountId),
         ref: e,
       })

@@ -12,7 +12,26 @@ import { fromRow, fromRows } from './_map'
  */
 
 function isMissingTable(error) {
+  // PGRST205 = PostgREST ไม่รู้จักตารางนี้ · 42P01 = Postgres บอกว่าไม่มีตาราง
+  // ข้อความดิบของ PGRST205 มีคำว่า "schema cache" ซึ่งไปชนกฎแปล error ของคอลัมน์ที่หายไป
+  // แล้วได้ข้อความชี้ผิดไฟล์ จึงต้องดักตรงนี้ก่อนส่งให้ toThaiError
   return error?.code === '42P01' || error?.code === 'PGRST205'
+}
+
+const NOT_INSTALLED =
+  'ยังไม่ได้ติดตั้งตารางสลิปในฐานข้อมูล — เปิด Supabase › SQL Editor แล้วรัน supabase/slips.sql '
+  + '(ผลตรวจท้ายไฟล์ต้องได้ ✅ ครบ 3 บรรทัด) จากนั้นรีเฟรชหน้านี้'
+
+/**
+ * ตารางสลิปติดตั้งแล้วหรือยัง
+ *
+ * ตอนโหลดข้อมูลเรากลืน error ของตารางที่ยังไม่มี เพื่อไม่ให้ทั้งแอปพังเพราะฟีเจอร์เสริม
+ * แต่ถ้าไม่จำสถานะไว้ หน้าจอจะดูปกติทุกอย่างจนกดแนบสลิป — ไฟล์ถูกอัปโหลดขึ้น Storage
+ * เสร็จแล้วค่อยพังตอนบันทึกแถว กลายเป็นไฟล์ค้างที่ไม่ได้ผูกกับอะไรเลย
+ */
+let installed = true
+export function slipsInstalled() {
+  return installed
 }
 
 /**
@@ -31,6 +50,7 @@ export async function listPaymentSlips() {
   if (error) {
     if (isMissingTable(error)) {
       console.warn('ยังไม่มีตาราง payment_slips — รัน supabase/slips.sql ก่อนจึงจะแนบสลิปได้')
+      installed = false
       return []
     }
     throw new Error(toThaiError(error))
@@ -53,12 +73,21 @@ export async function savePaymentSlip({ kind, refId, paidAt = null, attachments 
     note,
     updated_at: new Date().toISOString(),
   }
-  return fromRow('payment_slips', await unwrap(
-    supabase.from('payment_slips').upsert(row, { onConflict: 'kind,ref_id' }).select().single()
-  ))
+  const { data, error } = await supabase
+    .from('payment_slips').upsert(row, { onConflict: 'kind,ref_id' }).select().single()
+  if (error) {
+    if (isMissingTable(error)) { installed = false; throw new Error(NOT_INSTALLED) }
+    throw new Error(toThaiError(error))
+  }
+  installed = true
+  return fromRow('payment_slips', data)
 }
 
 /** ลบสลิปออกจากการจ่ายนั้น (ไฟล์บน Storage ไม่ถูกลบ เผื่อยังต้องใช้เป็นหลักฐาน) */
 export async function deletePaymentSlip(id) {
-  await unwrap(supabase.from('payment_slips').delete().eq('id', id).select().single())
+  const { error } = await supabase.from('payment_slips').delete().eq('id', id).select().single()
+  if (error) {
+    if (isMissingTable(error)) { installed = false; throw new Error(NOT_INSTALLED) }
+    throw new Error(toThaiError(error))
+  }
 }

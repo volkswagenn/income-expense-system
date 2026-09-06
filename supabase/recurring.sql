@@ -48,12 +48,28 @@ begin
   end if;
 end $$;
 
--- ── ตรวจผล: ควรได้ 8 แถว (ถ้ายังไม่ได้รัน card.sql จะได้ 7 — ขาด default_card_id) ──
+-- ── รอบบิลที่บิลใบนี้เรียกเก็บ ──────────────────────────────────────────────
+--
+-- บิลสาธารณูปโภคของไทยเกือบทั้งหมดเรียกเก็บ "ย้อนหลัง": บิลค่าไฟที่ครบกำหนดวันที่ 15
+-- กันยายน คือค่าไฟที่ใช้ไปเมื่อเดือนสิงหาคม ส่วนค่าบริการรายเดือนอย่างซอฟต์แวร์
+-- มักเก็บล่วงหน้าสำหรับเดือนที่กำลังจะใช้ ทั้งสองแบบอยู่ปนกันในหน้าเดียว
+--
+-- ของเดิมระบบรู้แค่ "เดือนที่ต้องจ่าย" (recurring_entries.month) เลยตอบไม่ได้ว่า
+-- เงินก้อนนี้เป็นค่าอะไรของเดือนไหน เวลาเทียบกับบิลจริงจากผู้ให้บริการจึงงง
+--
+-- คอลัมน์นี้เก็บส่วนต่างเป็นจำนวนเดือน: รอบบิล = เดือนที่จ่าย + offset
+--    0 = รอบเดือนเดียวกับที่จ่าย (ค่าตั้งต้น — ของเดิมทั้งหมดถือเป็นแบบนี้)
+--   -1 = บิลของเดือนก่อน (ค่าไฟ ค่าน้ำ ค่าเน็ต ค่าโทรศัพท์)
+--   +1 = จ่ายล่วงหน้าสำหรับเดือนถัดไป (ค่าเช่า ค่าบริการรายเดือนบางเจ้า)
+alter table recurring_items add column if not exists billing_cycle_offset int not null default 0
+  check (billing_cycle_offset between -3 and 3);
+
+-- ── ตรวจผล: ควรได้ 9 แถว (ถ้ายังไม่ได้รัน card.sql จะได้ 8 — ขาด default_card_id) ──
 
 select column_name as คอลัมน์, data_type as ชนิด, column_default as ค่าตั้งต้น
   from information_schema.columns
  where table_schema = 'public' and table_name = 'recurring_items'
    and column_name in ('frequency','billing_month','deleted',
                        'paused_from','paused_until','vat_rate','vat_mode',
-                       'default_card_id')
+                       'default_card_id','billing_cycle_offset')
  order by column_name;

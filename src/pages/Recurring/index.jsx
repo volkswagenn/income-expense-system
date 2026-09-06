@@ -32,6 +32,56 @@ function loadView() {
   try { return localStorage.getItem(VIEW_KEY) === 'compact' ? 'compact' : 'card' } catch { return 'card' }
 }
 
+/**
+ * บิลที่จัดการแล้วอยู่ในหัวข้อ "จ่ายแล้ว" นานกี่วัน ก่อนจะหายไปแล้วรอบเดือนหน้าขึ้นมาแทน
+ *
+ * เป็นกติกาการแสดงผลล้วนๆ ไม่แตะเงินและไม่แตะข้อมูล จึงเก็บในเครื่องเหมือนมุมมอง
+ * การ์ด/บรรทัดเดียว ไม่ต้องรัน SQL เพิ่ม และแต่ละคนตั้งความยาวที่ตัวเองถนัดได้
+ * 10 วันเป็นค่าตั้งต้น — ยาวพอให้สลิปธนาคารมาครบ สั้นพอไม่ให้หน้ารก
+ */
+const KEEP_KEY = 'jodflow.recurring.keepDays'
+const KEEP_OPTIONS = [7, 10, 15, 30]
+function loadKeepDays() {
+  try {
+    const n = Number(localStorage.getItem(KEEP_KEY))
+    return KEEP_OPTIONS.includes(n) ? n : 10
+  } catch { return 10 }
+}
+
+/** จำนวนวันเต็มจากวันที่ (ISO) ถึงวันนี้ — ใช้นับอายุของบิลที่จัดการไปแล้ว */
+function daysSince(iso) {
+  if (!iso) return 0
+  const then = new Date(String(iso).slice(0, 10) + 'T00:00:00')
+  if (Number.isNaN(then.getTime())) return 0
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.floor((today - then) / 86400000)
+}
+
+/**
+ * หัวข้อคั่นระหว่างก้อน — จุดสี ชื่อ เดือน จำนวน และยอดรวมของก้อนนั้น
+ * ตั้งใจไม่ทำเป็นการ์ด เพราะการ์ดแปลว่า "ก้อนข้อมูลหนึ่งชิ้น" ส่วนนี่คือป้ายบอกทาง
+ */
+function SectionHead({ dot, title, month, count, total, tone, pill, note }) {
+  return (
+    <div className="pt-3 first:pt-0">
+      <div className="flex items-center gap-2.5">
+        <span className={`w-[7px] h-[7px] rounded-full flex-none ${dot}`} />
+        <span className="text-[13.5px] font-semibold whitespace-nowrap">{title}</span>
+        <span className="text-[11.5px] text-faint whitespace-nowrap">{month}</span>
+        <span className={`text-[10.5px] font-bold rounded-full px-2 py-px whitespace-nowrap ${pill}`}>
+          {count} รายการ
+        </span>
+        <span className="flex-1 min-w-[12px] h-px bg-hairline" />
+        <span className={`tabular-nums text-[13px] font-bold whitespace-nowrap ${tone}`}>
+          {total.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+        </span>
+      </div>
+      {note && <p className="text-[11px] text-faint leading-relaxed mt-1">{note}</p>}
+    </div>
+  )
+}
+
 function monthKey(year, month) {
   return `${year}-${String(month + 1).padStart(2, '0')}`
 }
@@ -48,8 +98,10 @@ export default function RecurringPage() {
   const [negativeWarn, setNegativeWarn] = useState(null) // { amount, method, proceed }
   const [showItemList, setShowItemList] = useState(false)
   const [view, setView] = useState(loadView)
+  const [keepDays, setKeepDays] = useState(loadKeepDays)
   const [pauseTarget, setPauseTarget] = useState(null)
   const changeView = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch {} }
+  const changeKeepDays = (n) => { setKeepDays(n); try { localStorage.setItem(KEEP_KEY, String(n)) } catch {} }
 
   const {
     items, entries, addItem, updateItem, toggleItem, deleteItem,
@@ -67,12 +119,17 @@ export default function RecurringPage() {
   const [actionError, setActionError] = useState('')
 
   const month = monthKey(viewYear, viewMonth)
+  // เดือนถัดไปของเดือนที่ดูอยู่ — ใช้กับหัวข้อที่ 3
+  const nextMonth = monthKey(viewMonth === 11 ? viewYear + 1 : viewYear, (viewMonth + 1) % 12)
 
   // สร้าง entry ของเดือนที่ดูอยู่ — ต้องรันใหม่เมื่อ items เปลี่ยนด้วย
   // ไม่งั้นการเปิดใช้รายการที่ปิดไว้จะไม่สร้าง entry จนกว่าจะสลับเดือนไปกลับ
   useEffect(() => {
     generateEntries(month)
-  }, [month, items])
+    // สร้างรอบของเดือนถัดไปด้วย เพราะหัวข้อที่ 3 ต้องมี entry จริงให้กด "จ่ายล่วงหน้า"
+    // ถ้าปั้นแถวขึ้นมาลอยๆ ปุ่มจ่ายจะกดไม่ได้ ซึ่งแย่กว่าไม่มีหัวข้อนั้นเลย
+    generateEntries(nextMonth)
+  }, [month, nextMonth, items])
 
   const navigateMonth = (delta) => {
     let m = viewMonth + delta
@@ -84,13 +141,53 @@ export default function RecurringPage() {
   }
 
   // entries for current view month, merged with item data
+  //
+  // ที่ยังไม่จ่ายอยู่บนสุดเรียงตามวันครบกำหนด ที่จัดการไปแล้ว (จ่ายแล้ว/ข้าม) ไหลลงล่าง
+  // เพราะสิ่งที่คนเปิดหน้านี้มาทำคือ "เดือนนี้เหลืออะไรต้องจ่ายอีก" ของที่จบไปแล้ว
+  // เป็นแค่หลักฐานให้ไล่ดูย้อนหลัง ไม่ควรมาแทรกกลางรายการที่ยังต้องทำ
   const monthEntries = useMemo(() => {
+    const rank = (st) => (st === 'pending' ? 0 : st === 'skipped' ? 1 : 2)
     return entries
       .filter((e) => e.month === month)
       .map((e) => ({ entry: e, item: items.find((it) => it.id === e.recurringId) }))
       .filter((x) => x.item)
-      .sort((a, b) => a.item.billingDay - b.item.billingDay)
+      .sort((a, b) => rank(a.entry.status) - rank(b.entry.status)
+        || a.item.billingDay - b.item.billingDay)
   }, [entries, items, month])
+
+  /**
+   * สามหัวข้อของหน้านี้ ตอบคนละคำถาม จึงต้องแยกกันให้เห็น
+   *   1. รอจ่าย        — รอบของเดือนที่ดูอยู่ที่ยังไม่ได้จ่าย = สิ่งที่ต้องลงมือทำ
+   *   2. จ่ายแล้ว      — จ่ายหรือข้ามไปแล้ว เก็บไว้ไล่เช็คกับสลิปตามจำนวนวันที่ตั้งไว้
+   *   3. เดือนหน้า     — พอบิลในหัวข้อ 2 ครบกำหนดเก็บ มันจะหายไป (ดูย้อนหลังที่ประวัติ
+   *                      การจ่าย) แล้วรอบเดือนถัดไปของรายการนั้นขึ้นมาแทน
+   *
+   * นับอายุจากวันที่จ่ายจริง ส่วนรอบที่กด "ข้าม" ไม่มีวันจ่าย จึงนับจากวันครบกำหนด
+   * ซึ่งคือวันที่ตัดสินใจว่าเดือนนี้ไม่ต้องจ่ายอยู่แล้ว
+   */
+  const openEntries = monthEntries.filter((x) => x.entry.status === 'pending')
+
+  const doneEntries = []
+  const agedOutIds = new Set()
+  for (const x of monthEntries) {
+    if (x.entry.status === 'pending') continue
+    const age = daysSince(x.entry.paidAt ?? x.entry.dueDate)
+    if (age < keepDays) doneEntries.push({ ...x, age, daysLeft: keepDays - age })
+    else agedOutIds.add(x.item.id)
+  }
+  doneEntries.sort((a, b) => a.age - b.age || a.item.billingDay - b.item.billingDay)
+
+  const nextEntries = useMemo(() => {
+    if (agedOutIds.size === 0) return []
+    return entries
+      .filter((e) => e.month === nextMonth && agedOutIds.has(e.recurringId))
+      .map((e) => ({ entry: e, item: items.find((it) => it.id === e.recurringId) }))
+      .filter((x) => x.item)
+      .sort((a, b) => a.item.billingDay - b.item.billingDay)
+    // agedOutIds สร้างใหม่ทุกรอบ render จึงผูก dependency กับสิ่งที่ทำให้มันเปลี่ยนแทน
+  }, [entries, items, nextMonth, monthEntries, keepDays]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sumOf = (list) => list.reduce((n, x) => n + (Number(x.entry.amount) || 0), 0)
 
   // เดือนที่ถูกพักไม่มี entry ในฐานข้อมูลเลย (ไม่ได้ออกบิล) จึงต้องหยิบจากแม่แบบมาแสดงเอง
   // ตั้งใจให้ยังเห็นอยู่ เพราะต้องรู้ว่ารายการนี้ยังมีและจะกลับมาเมื่อไหร่
@@ -446,6 +543,25 @@ export default function RecurringPage() {
               ☰ ย่อ
             </button>
           </div>
+          {/* บิลที่จ่ายแล้วอยู่ในหัวข้อที่ 2 นานแค่ไหน ก่อนเปลี่ยนเป็นรอบเดือนหน้า */}
+          <div className="hidden lg:flex items-center gap-1.5 rounded-lg border border-hairline bg-white pl-2.5 p-0.5">
+            <span className="text-[11px] text-muted whitespace-nowrap">เก็บบิลที่จ่ายแล้ว</span>
+            <div className="inline-flex gap-0.5" role="group" aria-label="จำนวนวันที่เก็บบิลที่จ่ายแล้ว">
+              {KEEP_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => changeKeepDays(n)}
+                  title={`เก็บบิลที่จ่ายแล้วไว้ ${n} วัน แล้วเปลี่ยนเป็นรอบเดือนหน้า`}
+                  className={`px-2 h-7 rounded-md text-xs font-semibold transition-colors ${
+                    keepDays === n ? 'bg-ink text-white' : 'text-gray-500 hover:bg-[#F6F5F1]'
+                  }`}
+                >
+                  {n} วัน
+                </button>
+              ))}
+            </div>
+          </div>
           {/* คำใบ้บอกกติกาสองข้อที่คนถามบ่อยที่สุด: รายการโผล่มาเองเมื่อไหร่ และจ่ายตรงนี้ไม่ซ้ำกับแท็บรายจ่าย */}
           <span className="flex-1 min-w-0 text-[11.5px] text-faint leading-snug hidden md:block">
             ระบบสร้างรายการประจำให้อัตโนมัติทุกวันที่ 1 เวลา 08:00 · กดจ่ายที่นี่แล้วจะไม่ต้องบันทึกซ้ำในแท็บรายจ่าย
@@ -467,23 +583,26 @@ export default function RecurringPage() {
         </p>
       )}
 
-      {/* Summary */}
+      {/* ไทล์สรุปตรงกับสามหัวข้อด้านล่างหนึ่งต่อหนึ่ง — ยอดรวมทั้งเดือนอยู่ที่กล่องสรุป
+          ท้ายหน้าอยู่แล้ว ถ้าเอามาไว้ตรงนี้ด้วยจะกลายเป็นตัวเลขซ้ำที่ไม่ตรงกับก้อนไหนเลย */}
       {monthEntries.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
-            <p className="text-xs text-gray-500 mb-0.5">จ่ายแล้ว</p>
-            <p className="text-base font-bold text-emerald-600">{summary.paidTotal.toLocaleString('th-TH')}</p>
-            <p className="text-xs text-emerald-500">{summary.paidCount} รายการ</p>
-          </div>
           <div className="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
-            <p className="text-xs text-gray-500 mb-0.5">รอจ่าย</p>
-            <p className="text-base font-bold text-amber-600">{summary.pendingTotal.toLocaleString('th-TH')}</p>
-            <p className="text-xs text-amber-500">{summary.pendingCount} รายการ</p>
+            <p className="text-xs text-gray-500 mb-0.5">รอจ่าย · เดือนนี้</p>
+            <p className="text-base font-bold text-amber-600">{sumOf(openEntries).toLocaleString('th-TH')}</p>
+            <p className="text-xs text-amber-500">{openEntries.length} รายการ</p>
+          </div>
+          <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
+            <p className="text-xs text-gray-500 mb-0.5">จ่ายแล้ว · เดือนนี้</p>
+            <p className="text-base font-bold text-emerald-600">{summary.paidTotal.toLocaleString('th-TH')}</p>
+            <p className="text-xs text-emerald-500">
+              {summary.paidCount} รายการ{doneEntries.length !== summary.paidCount ? ` · แสดง ${doneEntries.length}` : ''}
+            </p>
           </div>
           <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-200">
-            <p className="text-xs text-gray-500 mb-0.5">รวมทั้งหมด</p>
-            <p className="text-base font-bold text-gray-800">{(summary.paidTotal + summary.pendingTotal).toLocaleString('th-TH')}</p>
-            <p className="text-xs text-gray-400">{monthEntries.length} รายการ</p>
+            <p className="text-xs text-gray-500 mb-0.5">เตรียมจ่าย · เดือนหน้า</p>
+            <p className="text-base font-bold text-gray-800">{sumOf(nextEntries).toLocaleString('th-TH')}</p>
+            <p className="text-xs text-gray-400">{nextEntries.length} รายการ</p>
           </div>
         </div>
       )}
@@ -497,7 +616,21 @@ export default function RecurringPage() {
         </div>
       ) : (
         <div className={view === 'compact' ? 'space-y-1' : 'space-y-2'}>
-          {monthEntries.map(({ entry, item }) => {
+          <SectionHead
+            dot="bg-pending"
+            title="บิลที่รอจ่าย"
+            month={`${THAI_MONTHS[viewMonth]} ${viewYear + 543}`}
+            count={openEntries.length}
+            total={sumOf(openEntries)}
+            tone="text-pending"
+            pill="bg-pending-soft text-pending"
+          />
+          {openEntries.length === 0 && (
+            <p className="text-[12px] text-faint bg-white border border-dashed border-hairline rounded-[11px] py-3.5 text-center">
+              จ่ายครบทุกรายการของเดือนนี้แล้ว
+            </p>
+          )}
+          {openEntries.map(({ entry, item }) => {
             const Row = view === 'compact' ? RecurringEntryRow : RecurringEntryCard
             return (
               <Row
@@ -513,6 +646,74 @@ export default function RecurringPage() {
               />
             )
           })}
+
+          <SectionHead
+            dot="bg-income"
+            title="บิลที่จ่ายแล้ว"
+            month={`${THAI_MONTHS[viewMonth]} ${viewYear + 543}`}
+            count={doneEntries.length}
+            total={sumOf(doneEntries)}
+            tone="text-income"
+            pill="bg-income-soft text-income"
+            note={`เก็บไว้ ${keepDays} วันหลังจ่าย เพื่อไล่เช็คกับสลิป · ครบแล้วจะหายจากหน้านี้ แล้วรอบเดือนหน้าขึ้นมาแทน (ดูย้อนหลังได้ที่ "ประวัติการจ่าย")`}
+          />
+          {doneEntries.length === 0 && (
+            <p className="text-[12px] text-faint bg-white border border-dashed border-hairline rounded-[11px] py-3.5 text-center">
+              ยังไม่มีบิลที่จ่ายในช่วง {keepDays} วันที่ผ่านมา
+            </p>
+          )}
+
+          {doneEntries.map(({ entry, item, daysLeft }) => {
+            const Row = view === 'compact' ? RecurringEntryRow : RecurringEntryCard
+            return (
+              <Row
+                key={entry.id}
+                entry={entry}
+                item={item}
+                daysLeft={daysLeft}
+                onPay={handlePay}
+                onUndoPay={handleUndoPay}
+                onSkip={handleSkip}
+                onEdit={setEditItem}
+                onDelete={(it) => setDeleteItemId(it.id)}
+                onPause={setPauseTarget}
+              />
+            )
+          })}
+
+          {/* หัวข้อที่ 3 — โผล่เฉพาะตอนมีบิลที่พ้นกำหนดเก็บแล้วจริง ถ้าไม่มีก็ไม่ต้อง
+              เอาหัวข้อว่างมาถ่วงหน้าจอ */}
+          {nextEntries.length > 0 && (
+            <>
+              <SectionHead
+                dot="bg-[#A5A199]"
+                title="บิลที่ต้องจ่ายเดือนหน้า"
+                month={`${THAI_MONTHS[(viewMonth + 1) % 12]} ${(viewMonth === 11 ? viewYear + 1 : viewYear) + 543}`}
+                count={nextEntries.length}
+                total={sumOf(nextEntries)}
+                tone="text-muted"
+                pill="bg-paper text-muted"
+                note="รอบของเดือนหน้าที่ขึ้นมาแทนบิลเดือนนี้ซึ่งพ้นกำหนดเก็บแล้ว · กดจ่ายล่วงหน้าได้ถ้าบิลมาถึงก่อน"
+              />
+              {nextEntries.map(({ entry, item }) => {
+                const Row = view === 'compact' ? RecurringEntryRow : RecurringEntryCard
+                return (
+                  <Row
+                    key={entry.id}
+                    entry={entry}
+                    item={item}
+                    upcoming
+                    onPay={handlePay}
+                    onUndoPay={handleUndoPay}
+                    onSkip={handleSkip}
+                    onEdit={setEditItem}
+                    onDelete={(it) => setDeleteItemId(it.id)}
+                    onPause={setPauseTarget}
+                  />
+                )
+              })}
+            </>
+          )}
 
           {/* รายการที่พักอยู่ — ยังเห็นได้และบอกว่าเหลืออีกกี่เดือน แต่ไม่นับเป็นยอดรอจ่าย */}
           {pausedThisMonth.map(({ item, info }) => (
