@@ -24,15 +24,17 @@ const money = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDig
  * รายการกางอยู่ในเนื้อหน้า (ไม่ได้ลอยทับ) เพราะตัวนี้ถูกใช้ในป๊อปอัปหลายที่
  * ซึ่งกล่องข้างในเลื่อนได้ ถ้าทำเป็นเมนูลอยจะถูกขอบกล่องตัดหายไปครึ่งหนึ่ง
  *
- * props: value, onChange(id), label, showBalance
+ * props: value, onChange(id), label, showBalance, exclude (id ที่ไม่ให้เลือก เช่นบัญชีต้นทางตอนโอน)
  */
 export default function TransferAccountPicker({
   value,
   onChange,
   label = 'บัญชีเงินโอน',
   showBalance = true,
+  exclude = [],
 }) {
-  const accounts = useWalletStore((s) => s.transferAccounts)
+  const allAccounts = useWalletStore((s) => s.transferAccounts)
+  const accounts = exclude.length ? allAccounts.filter((a) => !exclude.includes(a.id)) : allAccounts
   const [open, setOpen] = useState(false)
   const boxRef = useRef(null)
 

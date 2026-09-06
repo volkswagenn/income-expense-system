@@ -16,6 +16,7 @@ import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
 import ConfirmPopup from '../../components/shared/ConfirmPopup'
 import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
+import PayCardItemPopup from '../../components/shared/PayCardItemPopup'
 import CardCashbackPopup from '../../components/shared/CardCashbackPopup'
 import CardAdvancePopup from '../../components/shared/CardAdvancePopup'
 import CardFeePopup from '../../components/shared/CardFeePopup'
@@ -214,7 +215,9 @@ export default function CardDetailView({ cardId }) {
 
   const {
     ensureStatements, payStatement, undoPayment, cashAdvance, undoAdvance, payEntry,
+    prepayTransaction, undoPrepayment,
   } = useCreditCardStore()
+  const statementPayments = useCreditCardStore((s) => s.statementPayments)
   const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
   const cancelInstallment = useCreditCardStore((s) => s.cancelInstallment)
   const attachTxToStatement = useCreditCardStore((s) => s.attachTransactionToStatement)
@@ -228,6 +231,11 @@ export default function CardDetailView({ cardId }) {
   const { addLog } = useLogStore()
 
   const [payTarget, setPayTarget] = useState(null)
+  // ยอดที่ตั้งไว้ให้ป๊อปอัปจ่ายบิล ตอนกด "จ่ายยอดนี้" ที่รายการเดียวในบิล — { amount, label }
+  const [payPreset, setPayPreset] = useState(null)
+  // จ่ายรายการรูดก่อนออกบิล — { tx, name, date, tag, amount, paid, remaining }
+  const [prepayTarget, setPrepayTarget] = useState(null)
+  const [undoPrepayTarget, setUndoPrepayTarget] = useState(null)
   const [undoTarget, setUndoTarget] = useState(null)
   const [cashbackTarget, setCashbackTarget] = useState(null)
   const [autopayTarget, setAutopayTarget] = useState(null)
@@ -264,6 +272,20 @@ export default function CardDetailView({ cardId }) {
   )
   const unbilledAdvances = advances.filter((a) => !a.statementId)
 
+  // ยอดที่โอนจ่ายให้รายการทีละรายการไว้ก่อนออกบิล (card.sql ส่วนที่ 16) แยกตามรายการ
+  // เฉพาะขาที่ยังไม่ถูกรวมเข้าใบ — พอบิลออก ขาจะย้ายไปเป็นยอดจ่ายของใบนั้นแทน
+  const prepaidByTx = useMemo(() => {
+    const m = new Map()
+    for (const l of statementPayments) {
+      if (l.statementId || !l.transactionId || l.cardId !== cardId) continue
+      const cur = m.get(l.transactionId) ?? { amount: 0, legs: [] }
+      cur.amount += Number(l.amount || 0)
+      cur.legs.push(l)
+      m.set(l.transactionId, cur)
+    }
+    return m
+  }, [statementPayments, cardId])
+
   // วันนี้แบบ 'YYYY-MM-DD' ตามเวลาเครื่อง — ใช้ตัดสินว่างวดที่ค้างเลยกำหนดหรือยัง
   const todayStr = toDateString(new Date())
 
@@ -287,6 +309,9 @@ export default function CardDetailView({ cardId }) {
           : String(t.itemName ?? '').startsWith(FEE_PREFIX) ? 'ค่าธรรมเนียม'
           : t.type === 'income' ? 'เงินคืน' : 'รูดบัตร',
         amount: t.type === 'income' ? -Number(t.amount || 0) : Number(t.amount || 0),
+        // จ่ายก่อนออกบิลได้เฉพาะรายการรูดจ่ายธรรมดา (ค่างวดมีปุ่มจ่ายค่างวดของมันเอง)
+        prepayable: t.type === 'expense' && !t.installmentEntryId,
+        prepaid: prepaidByTx.get(t.id) ?? null,
       }))
     for (const a of advances) {
       if (a.statementId || a.date > to) continue
@@ -343,7 +368,7 @@ export default function CardDetailView({ cardId }) {
     }
 
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr, upcomingVisible])
+  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr, upcomingVisible, prepaidByTx])
 
   /**
    * รายการของบิลใบที่ออกไปแล้วและยังไม่จ่าย (แท็บ "รอบบิลนี้") — มาจากสามที่
@@ -368,6 +393,8 @@ export default function CardDetailView({ cardId }) {
           : t.type === 'income' ? 'เงินคืน' : 'รูดบัตร',
         amount: t.type === 'income' ? -Number(t.amount || 0) : Number(t.amount || 0),
         movable: !!t.cardStatementId,
+        // ในบิลที่ออกแล้ว "จ่ายยอดนี้" = จ่ายบิลด้วยยอดของรายการ (ไม่ใช่ขาจ่ายล่วงหน้า)
+        prepayable: t.type === 'expense' && !t.installmentEntryId,
       }))
     for (const a of advances) {
       if (a.statementId !== bill.id) continue
@@ -538,7 +565,31 @@ export default function CardDetailView({ cardId }) {
    */
   const rowMenuItems = (r, ins) => {
     if (r.tx) {
+      const inIssuedBill = showTabs && billTab === 'this'
+      const prepaidLeft = r.prepayable ? Math.abs(r.amount) - (r.prepaid?.amount ?? 0) : 0
       return [
+        // จ่ายเฉพาะรายการนี้ — รูดแล้วโอนคืนทันทีไม่รอบิล (วิธีที่คนใช้บัตรจำนวนมากทำ)
+        // รายการในรอบที่ยังไม่ออกบิล = ขาจ่ายล่วงหน้า · รายการในบิลที่ออกแล้ว = จ่ายบิล
+        // ด้วยยอดเฉพาะรายการ (บิลรับยอดบางส่วนอยู่แล้ว ไม่ต้องมีทางพิเศษ)
+        ...(inIssuedBill && r.prepayable && bill ? [{
+          icon: 'payments',
+          label: `จ่ายบิลเฉพาะยอดนี้ ${fmt(Math.abs(r.amount))}`,
+          desc: 'เปิดหน้าจ่ายบิลโดยใส่ยอดของรายการนี้ให้ ส่วนที่เหลือของบิลยังค้างอยู่',
+          onClick: () => openPayItemInBill(r),
+        }] : []),
+        ...(!inIssuedBill && r.prepayable && prepaidLeft > 0.005 ? [{
+          icon: 'payments',
+          label: r.prepaid ? `จ่ายส่วนที่เหลือ ${fmt(prepaidLeft)}` : 'จ่ายรายการนี้ก่อนออกบิล',
+          desc: 'โอนจ่ายเฉพาะยอดนี้ตอนนี้ ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง',
+          onClick: () => openPrepay(r),
+        }] : []),
+        ...(r.prepaid ? [{
+          icon: 'undo',
+          label: `ย้อนการจ่าย ${fmt(r.prepaid.amount)} ของรายการนี้`,
+          desc: 'คืนเงินเข้ากระเป๋าที่ตัดไป และยอดกลับเข้าบิลรอบที่กำลังมาถึง',
+          danger: true,
+          onClick: () => setUndoPrepayTarget(r),
+        }] : []),
         {
           icon: 'edit_note',
           label: 'แก้ไขรายการ',
@@ -607,6 +658,52 @@ export default function CardDetailView({ cardId }) {
     }
     return [{ icon: 'info', label: 'รายการนี้จัดการที่อื่น', desc: 'ดูรายละเอียดได้ที่หน้าประวัติทั้งหมด', onClick: () => {} }]
   }
+
+  // ── จ่ายเฉพาะรายการเดียว ────────────────────────────────────────────────
+  const openPrepay = (r) => {
+    const paid = r.prepaid?.amount ?? 0
+    setPrepayTarget({
+      tx: r.tx, name: r.name, date: r.date, tag: r.tag,
+      amount: Math.abs(r.amount), paid, remaining: Math.abs(r.amount) - paid,
+    })
+  }
+  const openPayItemInBill = (r) => {
+    setPayPreset({ amount: Math.abs(r.amount), label: r.name })
+    setPayTarget(bill)
+  }
+  const closePayBill = () => { setPayTarget(null); setPayPreset(null) }
+
+  const handlePrepay = ({ method, accountId, amount, date }) => run(async () => {
+    const { tx, name } = prepayTarget
+    await prepayTransaction(tx.id, {
+      method, accountId, amount, date,
+      log: buildLogEntry({
+        activityType: 'CARD_PREPAY',
+        description:
+          `จ่ายรายการ "${name}" ${fmt(amount)} บาท ของบัตร "${formatCard(card)}" ก่อนออกบิล ` +
+          `จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}`,
+        walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
+        newValue: { transactionId: tx.id, cardId: card.id, amount, date, method },
+      }),
+    })
+    await refreshWallet()
+    setPrepayTarget(null)
+  })
+
+  // ย้อนทุกขาของรายการนั้น (จ่ายบางส่วนหลายครั้งได้) ขาไหนย้อนไม่ได้จะ throw ทั้งก้อน
+  const handleUndoPrepay = () => run(async () => {
+    const r = undoPrepayTarget
+    for (const leg of r.prepaid.legs) {
+      await undoPrepayment(leg.id, buildLogEntry({
+        activityType: 'CARD_PREPAY_UNDO',
+        description: `ย้อนการจ่ายรายการ "${r.name}" ${fmt(leg.amount)} บาท ของบัตร "${formatCard(card)}" ที่จ่ายไว้ก่อนออกบิล`,
+        walletEffect: { target: leg.method, delta: +Number(leg.amount), transferAccountId: leg.transferAccountId },
+        oldValue: { legId: leg.id, transactionId: r.tx.id, cardId: card.id, amount: leg.amount, paidAt: leg.paidAt },
+      }))
+    }
+    await refreshWallet()
+    setUndoPrepayTarget(null)
+  })
 
   const handleAdvance = ({ amount, fee, target, date, note }) => run(async () => {
     const toCash = target === 'cash'
@@ -832,6 +929,7 @@ export default function CardDetailView({ cardId }) {
                       ` · ค่างวดผ่อน ${current.installmentCount} งวด ${fmt(current.installment)}`}
                     {current.advance > 0 && ` · กดเงินสด ${fmt(current.advance)}`}
                     {current.credit > 0 && ` · เงินคืน −${fmt(current.credit)}`}
+                    {current.prepaid > 0 && ` · จ่ายล่วงหน้าแล้ว −${fmt(current.prepaid)}`}
                   </span>
                 </div>
               </div>
@@ -945,9 +1043,9 @@ export default function CardDetailView({ cardId }) {
           )}
           <div className={`px-4 pb-1 text-[11px] text-faint ${showTabs ? 'pt-2.5' : ''}`}>
             {showTabs && billTab === 'this'
-              ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
+              ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
               : (showTabs ? 'รายการที่รูดหลังวันสรุปยอดมาอยู่ที่นี่ จะถูกเรียกเก็บในบิลรอบถัดไป · ถ้าธนาคารเก็บในบิลใบที่ออกแล้ว กด "ย้ายไปรอบบิลนี้" · ' : 'รายการที่รูดหลังวันสรุปยอดจะย้ายไปอยู่บิลรอบถัดไปให้เอง · ')
-                + 'กดปุ่ม ⋮ ท้ายแถวเพื่อจัดการรายการนั้น · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) · งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด'}
+                + 'รูดแล้วโอนคืนทันที กด "จ่ายรายการนี้" ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง · กดปุ่ม ⋮ ท้ายแถวเพื่อจัดการรายการนั้น · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) · งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด'}
           </div>
           <div className="px-4 pb-3 overflow-x-auto">
             {shownRows.length === 0 ? (
@@ -964,6 +1062,12 @@ export default function CardDetailView({ cardId }) {
                   : null
               const prog = insEntry ? getInstallmentProgress(insEntry.i.id) : null
               const marked = rowMarks.includes(r.key)
+              // จ่ายให้รายการนี้ไว้ก่อนออกบิลแล้วเท่าไร เหลือเท่าไร (เฉพาะรอบที่ยังไม่ออกบิล)
+              const prepaidLeft = r.prepaid ? Math.abs(r.amount) - r.prepaid.amount : null
+              const fullyPrepaid = prepaidLeft !== null && prepaidLeft <= 0.005
+              const lastPrepaidAt = r.prepaid
+                ? r.prepaid.legs.map((l) => l.paidAt).sort().at(-1)
+                : null
               return (
                 <div key={r.key} className="grid grid-cols-[22px_64px_minmax(0,1fr)_96px_110px_30px] gap-2.5 items-center py-2 border-t border-[#F2F0EA]">
                   {/* ติ๊กว่าไล่เช็คบรรทัดนี้กับสลิปแล้ว — ไม่ตัดเงิน เพราะธนาคารเก็บบิลทั้งใบ
@@ -1005,6 +1109,38 @@ export default function CardDetailView({ cardId }) {
                       {r.tag}
                     </span>
                     {r.upcoming && <span className="text-[10px] text-faint">รอเรียกเก็บ</span>}
+                    {/* ปุ่มจ่ายเฉพาะรายการนี้ — ต้องเห็นได้เลยไม่ต้องเปิดเมนู เพราะ "รูดแล้ว
+                        โอนคืนทันที" คือวิธีใช้บัตรประจำวันของคนจำนวนมาก
+                        รอบที่ยังไม่ออกบิล = จ่ายล่วงหน้า (ยอดหายจากรอบสะสมทันที)
+                        บิลที่ออกแล้ว = จ่ายบิลด้วยยอดของรายการนี้ */}
+                    {r.prepayable && (
+                      showTabs && billTab === 'this' ? (
+                        <button
+                          disabled={busy}
+                          onClick={() => openPayItemInBill(r)}
+                          className="text-[10.5px] text-income underline hover:no-underline whitespace-nowrap disabled:opacity-50"
+                          title="เปิดหน้าจ่ายบิลโดยใส่ยอดของรายการนี้ให้ — ส่วนที่เหลือของบิลยังค้างอยู่"
+                        >
+                          จ่ายยอดนี้
+                        </button>
+                      ) : fullyPrepaid ? (
+                        <span
+                          className="text-[10px] text-income font-semibold whitespace-nowrap"
+                          title="โอนจ่ายรายการนี้ไปแล้ว ยอดถูกหักออกจากบิลรอบที่กำลังมาถึง · ย้อนได้ที่เมนู ⋮"
+                        >
+                          ✓ จ่ายแล้ว {lastPrepaidAt ? formatIsoThaiShort(lastPrepaidAt) : ''}
+                        </span>
+                      ) : (
+                        <button
+                          disabled={busy}
+                          onClick={() => openPrepay(r)}
+                          className="text-[10.5px] text-income underline hover:no-underline whitespace-nowrap disabled:opacity-50"
+                          title="โอนจ่ายเฉพาะยอดนี้ตอนนี้ ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง"
+                        >
+                          {r.prepaid ? 'จ่ายส่วนที่เหลือ' : 'จ่ายรายการนี้'}
+                        </button>
+                      )
+                    )}
                     {/* ปุ่มย้ายรอบบิล — เห็นได้เลยไม่ต้องเปิดเมนู เพราะเป็นงานที่ทำตอนไล่บิล
                         ทีละบรรทัด งวดผ่อนไม่มีปุ่ม (ตารางงวดกำหนดเอง) */}
                     {showTabs && r.tx && !r.tx.installmentEntryId && (
@@ -1036,7 +1172,15 @@ export default function CardDetailView({ cardId }) {
                   <span className={`tabular-nums text-right text-[13px] font-semibold ${
                     r.amount < 0 ? 'text-income' : r.upcoming ? 'text-muted' : 'text-ink'
                   }`}>
-                    {r.amount < 0 ? `−${fmt(-r.amount)}` : fmt(r.amount)}
+                    {/* จ่ายไปแล้ว = ขีดฆ่ายอดเดิม จ่ายบางส่วน = บอกยอดที่ยังจะเข้าบิล */}
+                    <span className={fullyPrepaid ? 'line-through text-faint font-normal' : ''}>
+                      {r.amount < 0 ? `−${fmt(-r.amount)}` : fmt(r.amount)}
+                    </span>
+                    {r.prepaid && !fullyPrepaid && (
+                      <span className="block text-[10px] text-income font-normal whitespace-nowrap">
+                        จ่ายแล้ว {fmt(r.prepaid.amount)} · เหลือ {fmt(prepaidLeft)}
+                      </span>
+                    )}
                   </span>
                   {/* ทุกแถวต้องจัดการได้ ไม่ใช่เฉพาะแถวที่เป็นรายจ่ายจริง —
                       งวดผ่อนที่รอเรียกเก็บกับยอดกดเงินสดก็คือของที่ผู้ใช้บันทึกไว้เหมือนกัน
@@ -1222,8 +1366,23 @@ export default function CardDetailView({ cardId }) {
 
       {/* ── ป๊อปอัป ─────────────────────────────────────────────────────── */}
       {payTarget && (
-        <PayCardBillPopup statement={payTarget} cardLabel={formatCard(card)} onConfirm={handlePay} onCancel={() => setPayTarget(null)} busy={busy} />
+        <PayCardBillPopup statement={payTarget} cardLabel={formatCard(card)} preset={payPreset} onConfirm={handlePay} onCancel={closePayBill} busy={busy} />
       )}
+      {prepayTarget && (
+        <PayCardItemPopup item={prepayTarget} cardLabel={formatCard(card)} onConfirm={handlePrepay} onCancel={() => setPrepayTarget(null)} busy={busy} />
+      )}
+      <ConfirmPopup
+        open={!!undoPrepayTarget}
+        danger
+        title="ย้อนการจ่ายรายการนี้"
+        message={undoPrepayTarget
+          ? `คืนเงิน ${fmt(undoPrepayTarget.prepaid.amount)} บาท ที่จ่ายให้ "${undoPrepayTarget.name}" ไว้ก่อนออกบิล กลับเข้ากระเป๋าที่ตัดไป?\n\nยอดของรายการนี้จะกลับไปรวมในบิลรอบที่กำลังมาถึงเท่าเดิม ระบบจะบันทึกการยกเลิกไว้ในประวัติทั้งหมด`
+          : ''}
+        confirmLabel="ย้อนการจ่าย"
+        onConfirm={handleUndoPrepay}
+        onCancel={() => setUndoPrepayTarget(null)}
+      />
+      {/* ปุ่มติ๊กในบิลใบที่ออกแล้ว — ตรวจกับสลิป ไม่ตัดเงิน */}
       {cashbackTarget && (
         <CardCashbackPopup card={card} estimate={cashbackTarget.estimate} onConfirm={handleCashback} onCancel={() => setCashbackTarget(null)} busy={busy} />
       )}
@@ -1269,7 +1428,11 @@ export default function CardDetailView({ cardId }) {
         message={cancelTxTarget
           ? `"${cancelTxTarget.itemName}" ${fmt(cancelTxTarget.amount)} บาท (${formatIsoThai(cancelTxTarget.date)})\n\n` +
             describeTxCancelEffects(cancelTxTarget, { pendingPayments, taxInvoices, pendingIncomes })
-              .map((t) => `· ${t}`).join('\n')
+              .map((t) => `· ${t}`).join('\n') +
+            // เงินที่โอนจ่ายให้รายการนี้ไว้ไม่ได้คืน — กลายเป็นเครดิตในบัตร (ธนาคารก็ทำแบบนี้)
+            (prepaidByTx.get(cancelTxTarget.id)
+              ? `\n· ยอด ${fmt(prepaidByTx.get(cancelTxTarget.id).amount)} บาท ที่จ่ายให้รายการนี้ไว้ก่อนออกบิล จะกลายเป็นเครดิตในบัตร หักจากบิลรอบหน้า (ถ้าอยากได้เงินคืนเข้ากระเป๋า ให้ "ย้อนการจ่าย" ที่รายการก่อนลบ)`
+              : '')
           : ''}
         confirmLabel="ลบรายการ"
         onCancel={() => setCancelTxTarget(null)}

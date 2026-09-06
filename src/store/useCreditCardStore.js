@@ -172,6 +172,32 @@ const useCreditCardStore = create((set, get) => ({
     return statement
   },
 
+  // ── จ่ายรายการรูดทีละรายการก่อนออกบิล (supabase/card.sql ส่วนที่ 16) ────────
+  // รูดแล้วโอนคืนเข้าบัตรเฉพาะยอดนั้นทันที ไม่รอบิล — ยอดหายจากรอบที่กำลังสะสม
+  // และบิลที่ออกมาจะรับรู้ว่าจ่ายไปแล้วเท่าไร ไม่ต้องจ่ายซ้ำ
+
+  prepayTransaction: async (transactionId, params) => {
+    const leg = await stmtApi.prepayTransaction(transactionId, params)
+    await get().refresh()
+    return leg
+  },
+
+  undoPrepayment: async (legId, log) => {
+    await stmtApi.undoPrepayment(legId, log)
+    await get().refresh()
+  },
+
+  /** ขาที่จ่ายก่อนออกบิลและยังไม่ถูกรวมเข้าใบไหน ของบัตรใบนี้ */
+  getOpenPrepayments: (cardId) =>
+    get().statementPayments.filter((l) => l.cardId === cardId && !l.statementId),
+
+  /** ยอดที่จ่ายให้รายการนี้ไว้ก่อนออกบิล — null ถ้ายังไม่เคยจ่าย */
+  getPrepaidForTransaction: (transactionId) => {
+    const legs = get().statementPayments.filter((l) => l.transactionId === transactionId && !l.statementId)
+    if (legs.length === 0) return null
+    return { amount: legs.reduce((s, l) => s + Number(l.amount || 0), 0), legs }
+  },
+
   // ── ผ่อนชำระ ──────────────────────────────────────────────────────────────
 
   createInstallment: async (cardId, data, schedule, log) => {
@@ -564,10 +590,17 @@ const useCreditCardStore = create((set, get) => ({
           .filter((e) => activeIds.has(e.installmentId) && e.status === 'pending'
             && e.cycle <= cycle && (!sweptCycle || e.cycle > sweptCycle))
           .reduce((s, e) => s + Number(e.amount || 0), 0)
+        // ยอดที่จ่ายให้รายการไว้ก่อนออกบิล หักออกจากใบที่จะเก็บรายการนั้น (ดู getCurrentCycle)
+        const inRangeIds = new Set(inRange.map((t) => t.id))
+        const prepaid = get().getOpenPrepayments(card.id)
+          .filter((l) => (l.transactionId
+            ? inRangeIds.has(l.transactionId)
+            : l.paidAt <= to && (!sweptUpTo || l.paidAt > sweptUpTo)))
+          .reduce((s, l) => s + Number(l.amount || 0), 0)
         sweptUpTo = to
         sweptCycle = cycle
 
-        const amount = spend + advance - credit + installment
+        const amount = spend + advance - credit + installment - prepaid
         if (amount <= 0) continue
         rows.push({
           key: `p-${card.id}-${cycle}`,
@@ -629,10 +662,18 @@ const useCreditCardStore = create((set, get) => ({
     )
     const installment = insRows.reduce((s, e) => s + Number(e.amount || 0), 0)
 
+    // ยอดที่โอนจ่ายให้รายการทีละรายการไว้ก่อนออกบิล — ธนาคารหักออกจากยอดที่ต้องชำระ
+    // ของใบถัดไป (close_card_statement ตั้ง paid_amount ให้) กฎเลือกขาต้องตรงกับ SQL:
+    // ขาของรายการที่ใบนี้จะเก็บ · ขาที่รายการถูกลบไปแล้วดูวันที่จ่ายแทน (กลายเป็นเครดิต)
+    const txIds = new Set(txs.map((t) => t.id))
+    const prepaid = get().getOpenPrepayments(cardId)
+      .filter((l) => (l.transactionId ? txIds.has(l.transactionId) : l.paidAt <= to))
+      .reduce((s, l) => s + Number(l.amount || 0), 0)
+
     return {
-      ...period, spend, credit, advance,
+      ...period, spend, credit, advance, prepaid,
       installment, installmentCount: insRows.length,
-      net: spend + advance - credit + installment,
+      net: spend + advance - credit + installment - prepaid,
       count: txs.length + adv.length + insRows.length,
     }
   },

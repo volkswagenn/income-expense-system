@@ -118,3 +118,24 @@ export async function attachTransaction(transactionId, statementId) {
 export async function detachTransaction(transactionId) {
   await unwrap(supabase.rpc('detach_transaction_from_statement', { p_transaction: transactionId }))
 }
+
+/**
+ * จ่ายรายการรูดทีละรายการก่อนออกบิล — เงินออกจากกระเป๋า หนี้บัตรลด ไม่สร้างรายจ่ายใหม่
+ * ขาที่ได้ยังไม่ผูกใบ (statementId ว่าง) จนกว่าบิลรอบนั้นจะออก (supabase/card.sql ส่วนที่ 16)
+ */
+export async function prepayTransaction(transactionId, { method, accountId = null, amount, date, log = null }) {
+  const row = await unwrap(supabase.rpc('prepay_card_transaction', {
+    p_transaction: transactionId,
+    p_method: method,
+    p_account: accountId,
+    p_amount: amount,
+    p_date: date,
+    p_log: log,
+  }))
+  return fromRow('card_statement_payments', row)
+}
+
+/** ย้อนการจ่ายก่อนออกบิล — ได้เฉพาะขาที่ยังไม่ถูกรวมเข้าบิล */
+export async function undoPrepayment(legId, log = null) {
+  await unwrap(supabase.rpc('undo_card_prepayment', { p_leg: legId, p_log: log }))
+}

@@ -6,6 +6,7 @@ import useRecurringStore from '../store/useRecurringStore'
 import usePaymentSlipStore from '../store/usePaymentSlipStore'
 import useWalletStore from '../store/useWalletStore'
 import useCategoryStore from '../store/useCategoryStore'
+import useTransactionStore from '../store/useTransactionStore'
 import { formatIsoThai } from '../lib/cardCycle'
 
 /**
@@ -51,6 +52,7 @@ export default function usePaymentHistory() {
   const slips = usePaymentSlipStore((s) => s.slips)
   const accounts = useWalletStore((s) => s.transferAccounts)
   const getCategoryName = useCategoryStore((s) => s.getCategoryName)
+  const transactions = useTransactionStore((s) => s.transactions)
 
   return useMemo(() => {
     const slipOf = new Map(slips.map((s) => [`${s.kind}:${s.refId}`, s]))
@@ -71,13 +73,23 @@ export default function usePaymentHistory() {
     // ตารางขาการจ่ายเพิ่งมีในรุ่นหลัง บิลที่จ่ายก่อนหน้านั้นไม่มีขา จึงถอยไปอ่าน
     // paid_at/paid_method ที่ตัวใบแทน เพื่อให้ประวัติเก่าไม่หายไปจากหน้านี้
     const stmtById = new Map(statements.map((s) => [s.id, s]))
+    const txById = new Map(transactions.map((t) => [t.id, t]))
     const legged = new Set(legs.map((l) => l.statementId))
     for (const l of legs) {
       const st = stmtById.get(l.statementId)
+      // ขาที่จ่ายให้รายการรูดทีละรายการก่อนออกบิล (card.sql ส่วนที่ 16) — บอกว่าจ่ายให้
+      // รายการไหน และถ้าบิลออกแล้วก็บอกด้วยว่าไปรวมอยู่ในใบไหน
+      const tx = l.transactionId ? txById.get(l.transactionId) : null
+      const forItem = l.transactionId
+        ? `จ่ายให้รายการ "${tx?.itemName || '(รายการถูกลบไปแล้ว)'}"${tx ? ` ${formatIsoThai(tx.date)}` : ''} ก่อนออกบิล`
+        : null
       push('card_bill', l.id, {
         paidAt: l.paidAt, day: dayOf(l.paidAt), amount: num(l.amount),
-        title: `บิลบัตร ${getCardShortLabel(st?.cardId)}`,
-        detail: st ? `รอบ ${st.cycle} · ครบกำหนด ${formatIsoThai(st.dueDate)}` : '',
+        title: `บิลบัตร ${getCardShortLabel(st?.cardId ?? l.cardId)}`,
+        detail: [
+          st ? `รอบ ${st.cycle} · ครบกำหนด ${formatIsoThai(st.dueDate)}` : (forItem ? 'ยังไม่ออกบิล' : ''),
+          forItem,
+        ].filter(Boolean).join(' · '),
         source: source(l.method, l.transferAccountId),
         ref: st ?? null,
       })
@@ -154,7 +166,7 @@ export default function usePaymentHistory() {
     return rows
   }, [
     cards, statements, legs, installments, entries, debts, debtEntries,
-    pendingPayments, recItems, recEntries, slips, accounts,
+    pendingPayments, recItems, recEntries, slips, accounts, transactions,
     getCardShortLabel, getCategoryName,
   ])
 }

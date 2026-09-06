@@ -47,8 +47,10 @@
 -- • ส่วนที่ 15: ยอดรูดที่ธนาคารเก็บในบิลใบที่ออกไปแล้ว ใส่เข้าใบนั้นได้
 --   (transactions.card_statement_id + attach/detach + trigger ซิงค์ยอดบิล)
 --   และบิลรอบถัดไปข้ามรายการที่ผูกใบแล้ว จึงไม่ถูกเก็บซ้ำ
+-- • ส่วนที่ 16: จ่ายรายการรูดทีละรายการก่อนออกบิล (prepay_card_transaction /
+--   undo_card_prepayment) บิลที่ออกมารับรู้ยอดที่จ่ายไว้แล้วเป็น paid_amount ตั้งแต่ต้น
 -- (เปิดแท็บเดิมใน SQL Editor ลบของเก่า วางทั้งไฟล์ Run) ไม่มีการลบข้อมูล
--- ผลตรวจต้องได้ ตาราง 6/6 · คอลัมน์ 13/13 · ฟังก์ชัน 16/16 และส่วนที่ 14 เป็น 0 ทั้งสองแถว
+-- ผลตรวจต้องได้ ตาราง 6/6 · คอลัมน์ 15/15 · ฟังก์ชัน 18/18 และส่วนที่ 14 เป็น 0 ทั้งสองแถว
 -- ============================================================================
 
 
@@ -228,6 +230,21 @@ create table if not exists card_statement_payments (
 );
 create index if not exists card_statement_payments_stmt_idx
   on card_statement_payments (statement_id, created_at desc);
+
+-- ขาที่จ่าย "ก่อนออกบิล" ให้รายการรูดทีละรายการ (ดูส่วนที่ 16) ยังไม่มีใบให้ผูก
+-- statement_id จึงว่างได้ และต้องจำเองว่าเป็นของบัตรใบไหน จ่ายให้รายการไหน
+alter table card_statement_payments alter column statement_id drop not null;
+alter table card_statement_payments add column if not exists card_id uuid
+  references credit_cards(id) on delete cascade;
+alter table card_statement_payments add column if not exists transaction_id uuid
+  references transactions(id) on delete set null;
+-- ขาเก่าที่จ่ายผ่านบิล เติม card_id ให้จากใบที่ผูกอยู่ (รันซ้ำได้ แถวที่มีแล้วไม่แตะ)
+update card_statement_payments p
+   set card_id = s.card_id
+  from card_statements s
+ where p.card_id is null and s.id = p.statement_id;
+create index if not exists card_statement_payments_open_idx
+  on card_statement_payments (card_id) where statement_id is null;
 
 -- ยอดที่จ่ายจริงของงวด แยกจากยอดตามตาราง (ดูส่วนที่ 12)
 alter table card_installment_entries add column if not exists paid_amount numeric(14,2);
@@ -443,6 +460,9 @@ declare
   v_min    numeric(14,2);
   v_entry  record;
   v_tx     transactions;
+  v_prepaid    numeric(14,2);
+  v_prepaid_at date;
+  v_last_leg   card_statement_payments;
 begin
   perform assert_can_edit(p_shop);
 
@@ -574,6 +594,31 @@ begin
      and (status <> 'paid' or amount - paid_amount < 0)
      and period_end < p_end and id <> v_st.id;
 
+  -- ยอดที่ผู้ใช้โอนจ่ายให้รายการทีละรายการไว้ก่อนออกบิล (ส่วนที่ 16) — ธนาคารแสดง
+  -- เป็นบรรทัด "ยอดชำระ" ในใบนี้ ยอดที่ต้องชำระจึงเหลือเฉพาะส่วนที่ยังไม่ได้จ่าย
+  -- ผูกขาเข้าใบ ให้ paid_amount นับรวม และ undo_card_payment ย้อนได้ทีละขาเหมือนขาปกติ
+  -- เอาเฉพาะขาของรายการที่ใบนี้เก็บ (วันที่รูด <= วันสรุปยอด) ขาที่รายการถูกลบไปแล้ว
+  -- ดูวันที่จ่ายแทน — เงินออกไปแล้วจริง ต้องกลายเป็นเครดิตในใบ ไม่ใช่หายไป
+  update card_statement_payments p
+     set statement_id = v_st.id
+   where p.card_id = p_card and p.statement_id is null
+     and coalesce((select t.date from transactions t where t.id = p.transaction_id), p.paid_at) <= p_end;
+
+  select coalesce(sum(amount), 0), max(paid_at) into v_prepaid, v_prepaid_at
+    from card_statement_payments where statement_id = v_st.id;
+  if v_prepaid > 0 then
+    select * into v_last_leg from card_statement_payments
+     where statement_id = v_st.id order by paid_at desc, created_at desc limit 1;
+    update card_statements
+       set paid_amount = v_prepaid,
+           status = case when v_prepaid >= amount then 'paid' else 'partial' end,
+           paid_at = v_prepaid_at,
+           paid_method = v_last_leg.method,
+           transfer_account_id = v_last_leg.transfer_account_id
+     where id = v_st.id
+     returning * into v_st;
+  end if;
+
   return v_st;
 end;
 $$;
@@ -623,8 +668,8 @@ begin
 
   -- จำแต่ละ "ขา" ที่จ่ายไว้ทีละครั้ง เพราะบิลใบเดียวจ่ายได้หลายรอบจากคนละกระเป๋า
   -- ตอนย้อนต้องคืนเข้ากระเป๋าที่ตัดมาจริงทีละขา ไม่ใช่กระเป๋าสุดท้ายทั้งก้อน
-  insert into card_statement_payments (shop_id, statement_id, method, transfer_account_id, amount, paid_at)
-  values (v_st.shop_id, p_statement, p_method,
+  insert into card_statement_payments (shop_id, statement_id, card_id, method, transfer_account_id, amount, paid_at)
+  values (v_st.shop_id, p_statement, v_st.card_id, p_method,
           case when p_method = 'transfer' then p_account end, p_amount, p_date);
 
   update card_statements
@@ -1090,10 +1135,11 @@ select 'ตารางบัตร' as "รายการ", count(*)::text || 
    and table_name in ('credit_cards','card_statements','card_installments','card_installment_entries','card_advances',
                       'card_statement_payments')
 union all
-select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 13'
+select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 15'
   from information_schema.columns
  where table_schema = 'public'
    and ((table_name='transactions'      and column_name in ('card_id','installment_entry_id','card_statement_id'))
+     or (table_name='card_statement_payments' and column_name in ('card_id','transaction_id'))
      or (table_name='credit_cards'      and column_name in ('autopay_mode','autopay_account_id','autopay_amount','annual_fee','annual_fee_month'))
      or (table_name='card_statements'   and column_name = 'advance_amount')
      or (table_name='card_installments' and column_name = 'principal_amount')
@@ -1101,7 +1147,7 @@ select 'คอลัมน์ที่เติมเพิ่ม', count(*)::te
      or (table_name='recurring_entries' and column_name = 'card_id')
      or (table_name='shop_settings'     and column_name = 'card_min_rate'))
 union all
-select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 16'
+select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 18'
   from information_schema.routines
  where routine_schema = 'public'
    and routine_name in ('close_card_statement','pay_card_statement','undo_card_payment',
@@ -1109,7 +1155,8 @@ select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || '
      'card_cash_advance','undo_card_advance',
      'pay_installment_entry','undo_installment_entry','delete_card_installment','refund_source',
      'attach_installment_to_closed_statements',
-     'attach_transaction_to_statement','detach_transaction_from_statement','apply_statement_delta')
+     'attach_transaction_to_statement','detach_transaction_from_statement','apply_statement_delta',
+     'prepay_card_transaction','undo_card_prepayment')
 union all
 select 'รับ method = card แล้ว',
        case when exists (
@@ -1884,6 +1931,8 @@ create or replace function public.attach_transaction_to_statement(
 declare
   v_tx transactions;
   v_st card_statements;
+  v_moved    numeric(14,2);
+  v_moved_at date;
 begin
   select * into v_tx from transactions where id = p_transaction;
   if not found then raise exception 'ไม่พบรายการที่จะใส่เข้าบิล'; end if;
@@ -1903,6 +1952,22 @@ begin
   end if;
 
   update transactions set card_statement_id = p_statement where id = p_transaction;
+
+  -- ยอดที่จ่ายให้รายการนี้ไว้ก่อนออกบิล (ส่วนที่ 16) ย้ายตามเข้าใบ ไม่งั้นใบจะมีรายการ
+  -- แต่ไม่รู้ว่าจ่ายไปแล้ว ผู้ใช้ต้องจ่ายซ้ำ · apply_statement_delta คิดสถานะใบให้ต่อ
+  with moved as (
+    update card_statement_payments set statement_id = p_statement
+     where transaction_id = p_transaction and statement_id is null
+    returning amount, paid_at
+  )
+  select coalesce(sum(amount), 0), max(paid_at) into v_moved, v_moved_at from moved;
+  if v_moved > 0 then
+    update card_statements
+       set paid_amount = paid_amount + v_moved,
+           paid_at = coalesce(paid_at, v_moved_at)
+     where id = p_statement;
+  end if;
+
   perform apply_statement_delta(
     p_statement,
     case when v_tx.type = 'income' then 0 else v_tx.amount end,
@@ -1920,6 +1985,7 @@ create or replace function public.detach_transaction_from_statement(
 declare
   v_tx transactions;
   v_st card_statements;
+  v_moved numeric(14,2);
 begin
   select * into v_tx from transactions where id = p_transaction;
   if not found or v_tx.card_statement_id is null then return; end if;
@@ -1929,6 +1995,21 @@ begin
   end if;
 
   update transactions set card_statement_id = null where id = p_transaction;
+
+  -- ขาที่ตามรายการนี้เข้าใบมา (ดู attach) ถอยกลับไปเป็นขาเปิด รอบิลรอบหน้าเก็บใหม่
+  -- เฉพาะขาที่ผูกรายการนี้ ขาที่จ่ายทั้งใบตามปกติไม่เกี่ยว
+  with moved as (
+    update card_statement_payments set statement_id = null
+     where transaction_id = p_transaction and statement_id = v_tx.card_statement_id
+    returning amount
+  )
+  select coalesce(sum(amount), 0) into v_moved from moved;
+  if v_moved > 0 then
+    update card_statements
+       set paid_amount = greatest(0, paid_amount - v_moved)
+     where id = v_tx.card_statement_id;
+  end if;
+
   perform apply_statement_delta(
     v_tx.card_statement_id,
     case when v_tx.type = 'income' then 0 else -v_tx.amount end,
@@ -1982,5 +2063,116 @@ drop trigger if exists transactions_statement_sync on transactions;
 create trigger transactions_statement_sync
   after update or delete on transactions
   for each row execute function public.sync_statement_on_transaction();
+
+-- ###########################################################################
+-- ##  16. จ่ายรายการรูดทีละรายการก่อนออกบิล
+-- ###########################################################################
+--
+-- วิธีใช้บัตรของคนจำนวนมาก: รูดจ่ายแล้วโอนเงินคืนเข้าบัตรเฉพาะยอดนั้นทันที
+-- ไม่รอบิล (ที่ธนาคารเรียก "ชำระก่อนวันสรุปยอด") ยอดที่โอนไปโผล่ในบิลใบถัดไปเป็น
+-- บรรทัด "ยอดชำระ" ทำให้ยอดที่ต้องชำระเหลือเฉพาะรายการที่ยังไม่ได้โอน
+--
+-- ในแอป: ขาการจ่าย (card_statement_payments) ที่ยังไม่ผูกใบ + ผูกรายการที่จ่ายให้
+--   • เงินออกจากกระเป๋าที่เลือก หนี้บัตรลดทันที เหมือนจ่ายบิล (สองขา ผลรวมศูนย์)
+--   • ไม่สร้าง transactions — รายจ่ายเกิดแล้วตอนรูด ถ้าบันทึกซ้ำจะนับสองเท่าในรายงาน
+--   • หน้าจอหักยอดนี้ออกจาก "รอบถัดไปสะสมแล้ว" ทันที (getCurrentCycle)
+--   • ตอนออกบิล close_card_statement ผูกขาเข้าใบและตั้ง paid_amount ให้ ใบจึงออกมา
+--     เป็น partial/paid ตั้งแต่ต้น ย้อนได้ที่ปุ่มย้อนของบิลเหมือนขาปกติ
+--   • ก่อนออกบิลย้อนได้ที่รายการนั้นเอง (undo_card_prepayment)
+--   • รายการที่อยู่ในบิลที่ออกแล้ว ไม่ใช้ทางนี้ — จ่ายที่บิลด้วยยอดเฉพาะรายการแทน
+--     (pay_card_statement รับยอดบางส่วนอยู่แล้ว)
+
+create or replace function public.prepay_card_transaction(
+  p_transaction uuid,
+  p_method      text,
+  p_account     uuid,
+  p_amount      numeric,
+  p_date        date,
+  p_log         jsonb default null
+) returns card_statement_payments language plpgsql security definer set search_path = public as $$
+declare
+  v_tx   transactions;
+  v_paid numeric(14,2);
+  v_leg  card_statement_payments;
+  v_src  text;
+begin
+  select * into v_tx from transactions where id = p_transaction;
+  if not found then raise exception 'ไม่พบรายการนี้'; end if;
+  perform assert_can_edit(v_tx.shop_id);
+
+  if v_tx.method <> 'card' or v_tx.card_id is null then
+    raise exception 'รายการนี้ไม่ได้รูดบัตร';
+  end if;
+  if v_tx.type <> 'expense' then
+    raise exception 'จ่ายล่วงหน้าได้เฉพาะรายการรูดจ่าย';
+  end if;
+  if v_tx.installment_entry_id is not null then
+    raise exception 'ค่างวดผ่อนจ่ายที่เมนู "จ่ายค่างวด" ของสัญญานั้นแทน';
+  end if;
+  -- มีใบครอบแล้ว = อยู่ในบิลที่ออกแล้ว ต้องจ่ายที่บิลใบนั้น
+  if v_tx.card_statement_id is not null or exists (
+    select 1 from card_statements s
+     where s.card_id = v_tx.card_id and v_tx.date between s.period_start and s.period_end
+  ) then
+    raise exception 'รายการนี้อยู่ในบิลที่ออกแล้ว ให้กด "จ่ายบิล" แล้วใส่ยอดเฉพาะรายการนี้แทน';
+  end if;
+
+  if p_amount is null or p_amount <= 0 then raise exception 'จำนวนเงินต้องมากกว่าศูนย์'; end if;
+  select coalesce(sum(amount), 0) into v_paid
+    from card_statement_payments where transaction_id = p_transaction and statement_id is null;
+  if v_paid + p_amount > v_tx.amount + 0.005 then
+    raise exception 'จ่ายเกินยอดของรายการ (รายการ % บาท จ่ายไปแล้ว % บาท)', v_tx.amount, v_paid;
+  end if;
+  if p_method not in ('cash', 'transfer') then
+    raise exception 'วิธีจ่ายไม่ถูกต้อง: %', p_method;
+  end if;
+  if p_method = 'transfer' and p_account is null then
+    raise exception 'ต้องเลือกบัญชีเงินโอนที่จะจ่าย';
+  end if;
+
+  -- สองขาเหมือน pay_card_statement: เงินออกจากกระเป๋า หนี้บัตรลด
+  v_src := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
+  perform apply_wallet_effect(v_tx.shop_id, v_src, -p_amount);
+  perform apply_wallet_effect(v_tx.shop_id, 'card:' || v_tx.card_id, p_amount);
+
+  insert into card_statement_payments
+    (shop_id, statement_id, card_id, transaction_id, method, transfer_account_id, amount, paid_at)
+  values
+    (v_tx.shop_id, null, v_tx.card_id, p_transaction, p_method,
+     case when p_method = 'transfer' then p_account end, p_amount, p_date)
+  returning * into v_leg;
+
+  perform write_log(v_tx.shop_id, p_log);
+  return v_leg;
+end;
+$$;
+
+-- ย้อนขาที่จ่ายก่อนออกบิล — ใช้ได้เฉพาะตอนที่ยังไม่ถูกรวมเข้าใบ
+-- หลังออกบิลแล้วขานี้เป็นขาของบิล ต้องย้อนที่ undo_card_payment (LIFO ทีละขา)
+create or replace function public.undo_card_prepayment(
+  p_leg uuid,
+  p_log jsonb default null
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_leg card_statement_payments;
+begin
+  select * into v_leg from card_statement_payments where id = p_leg;
+  if not found then raise exception 'ไม่พบการจ่ายนี้'; end if;
+  perform assert_can_edit(v_leg.shop_id);
+  if v_leg.statement_id is not null then
+    raise exception 'ยอดนี้ถูกรวมเข้าบิลแล้ว ให้ย้อนที่ปุ่ม "ย้อนการจ่าย" ของบิลใบนั้นแทน';
+  end if;
+  if v_leg.card_id is null then raise exception 'การจ่ายนี้ไม่ได้ผูกกับบัตร'; end if;
+
+  -- บัญชีที่ถูกลบไปแล้ว refund_source คืนเข้าเงินสดแทน
+  perform apply_wallet_effect(v_leg.shop_id,
+    refund_source(v_leg.shop_id, v_leg.method, v_leg.transfer_account_id), v_leg.amount);
+  perform apply_wallet_effect(v_leg.shop_id, 'card:' || v_leg.card_id, -v_leg.amount);
+
+  delete from card_statement_payments where id = p_leg;
+  perform write_log(v_leg.shop_id, p_log);
+end;
+$$;
+
 
 notify pgrst, 'reload schema';

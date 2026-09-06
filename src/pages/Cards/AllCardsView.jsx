@@ -81,6 +81,7 @@ export default function AllCardsView({ onOpenCard }) {
               cycle.installmentCount
                 ? `ในนั้นเป็นค่างวดผ่อน ${cycle.installmentCount} งวด ${fmt(cycle.installment)}`
                 : null,
+              cycle.prepaid > 0 ? `จ่ายล่วงหน้าแล้ว −${fmt(cycle.prepaid)}` : null,
             ].filter(Boolean).join(' · ')
           : '',
         cutTxt: `สรุปยอดทุกวันที่ ${c.closingDay} · ครบกำหนดทุกวันที่ ${c.dueDay}`,

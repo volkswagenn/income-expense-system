@@ -18,14 +18,15 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
  * ซึ่งเป็นความเข้าใจผิดที่แพงที่สุดเรื่องบัตรเครดิต
  *
  * onConfirm({ method, accountId, amount, date })
+ * preset = { amount, label } เปิดมาพร้อมยอดที่ตั้งไว้ (เช่นจ่ายเฉพาะรายการเดียวในบิล)
  */
-export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCancel, busy }) {
+export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCancel, busy, preset = null }) {
   const remaining = Number(statement.amount) - Number(statement.paidAmount)
   const minimum = Math.min(Number(statement.minimumAmount) || 0, remaining)
 
   const [method, setMethod] = useState('cash')
   const [accountId, setAccountId] = useState('')
-  const [amount, setAmount] = useState(String(remaining))
+  const [amount, setAmount] = useState(String(preset?.amount > 0 ? Math.min(preset.amount, remaining) : remaining))
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [error, setError] = useState('')
 
@@ -157,7 +158,13 @@ export default function PayCardBillPopup({ statement, cardLabel, onConfirm, onCa
         <DatePicker value={date} onChange={setDate} />
       </div>
 
-      {isCustom && (
+      {preset?.label && Math.abs(value - Math.min(preset.amount, remaining)) < 0.005 && (
+        <div className="flex-none bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2.5 text-[11.5px] text-muted leading-relaxed">
+          ยอดนี้คือรายการ "{preset.label}" ในบิลใบนี้ — จ่ายเฉพาะรายการนี้ ส่วนที่เหลือของบิลยังค้างอยู่
+          แก้ยอดได้ถ้าโอนจริงไม่เท่านี้
+        </div>
+      )}
+      {isCustom && !preset?.label && (
         <div className="flex-none bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2.5 text-[11.5px] text-muted leading-relaxed">
           พิมพ์ยอดที่โอนจริงลงในช่องด้านบน ใช้ตอนจ่ายไม่ตรงยอดเต็มและไม่ตรงขั้นต่ำ
           เช่นจ่ายบางส่วนหรือจ่ายเกินเพื่อเก็บเป็นเครดิต · ยอดที่เหลือจะคิดดอกเบี้ยตามเงื่อนไขบัตร

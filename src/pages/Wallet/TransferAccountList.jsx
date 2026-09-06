@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import AmountInput from '../../components/shared/AmountInput'
 import useWalletStore from '../../store/useWalletStore'
 import { moveBetweenTransferAccounts } from '../../lib/walletEngine'
-import { formatAccount } from '../../components/shared/TransferAccountPicker'
+import TransferAccountPicker, { formatAccount } from '../../components/shared/TransferAccountPicker'
 import AmountDisplay from '../../components/shared/AmountDisplay'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
@@ -31,37 +31,54 @@ function MovePopup({ accounts, onConfirm, onClose }) {
     onConfirm(fromId, toId, amt)
   }
 
+  const from = accounts.find((a) => a.id === fromId)
+  const to = accounts.find((a) => a.id === toId)
+  const amt = Number(amount) || 0
+
   return (
     <Popup
       title="ย้ายเงินระหว่างบัญชี"
+      sub="ยอดรวมเงินโอนไม่เปลี่ยน แค่ย้ายจากบัญชีหนึ่งไปอีกบัญชี"
       icon="swap_horiz"
-      width={420}
+      width={440}
       onClose={onClose}
       onConfirm={submit}
-      confirmLabel="ย้ายเงิน"
+      confirmLabel={amt > 0 ? `ย้าย ${amt.toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท` : 'ย้ายเงิน'}
+      error={error}
     >
-        <div>
-          <label className="label">จากบัญชี</label>
-          <select className="input" value={fromId} onChange={(e) => { setFromId(e.target.value); setError('') }}>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>{formatAccount(a)} — {a.balance.toLocaleString()}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">ไปบัญชี</label>
-          <select className="input" value={toId} onChange={(e) => { setToId(e.target.value); setError('') }}>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>{formatAccount(a)} — {a.balance.toLocaleString()}</option>
-            ))}
-          </select>
-        </div>
+        {/* ตัวเลือกบัญชีชุดเดียวกับที่อื่นในแอป (มีโลโก้ + ยอด) ไม่ใช้ <select> ของเบราว์เซอร์ */}
+        <TransferAccountPicker
+          value={fromId}
+          onChange={(id) => { setFromId(id); if (id === toId) setToId(''); setError('') }}
+          label="จากบัญชี"
+        />
+        <TransferAccountPicker
+          value={toId}
+          onChange={(id) => { setToId(id); setError('') }}
+          label="ไปบัญชี"
+          exclude={fromId ? [fromId] : []}
+        />
         <div>
           <label className="label">จำนวนเงิน (บาท)</label>
-          <AmountInput className="input" value={amount}
+          <AmountInput className="input text-right text-[19px] font-semibold tabular-nums" value={amount}
             onChange={(e) => { setAmount(e.target.value); setError('') }} placeholder="0.00" autoFocus />
         </div>
-        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">⚠️ {error}</p>}
+        {from && to && amt > 0 && (
+          <div className="grid grid-cols-2 gap-2 text-[11.5px]">
+            <div className="bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2">
+              <span className="block text-faint truncate">{formatAccount(from)}</span>
+              <b className={`tabular-nums ${Number(from.balance) - amt < 0 ? 'text-expense' : 'text-ink'}`}>
+                {(Number(from.balance) - amt).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+              </b>
+            </div>
+            <div className="bg-[#FAF9F6] border border-[#EFEDE7] rounded-ctl px-3 py-2">
+              <span className="block text-faint truncate">{formatAccount(to)}</span>
+              <b className="tabular-nums text-ink">
+                {(Number(to.balance) + amt).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+              </b>
+            </div>
+          </div>
+        )}
     </Popup>
   )
 }
@@ -124,7 +141,7 @@ export default function TransferAccountList() {
               </div>
               <button
                 onClick={() => setMenuAccount(a)}
-                title="ดูความเคลื่อนไหวและแก้ไขบัญชี"
+                title="ฝาก ถอน โอนไปบัญชีอื่น หรือดูรายการเดินบัญชี"
                 className="shrink-0 w-9 h-9 rounded-ctl border border-hairline bg-white flex items-center justify-center text-muted hover:text-ink hover:bg-paper"
               >
                 <Icon name="more_vert" size={18} />
