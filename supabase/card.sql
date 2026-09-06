@@ -628,13 +628,20 @@ $$;
 -- ##  6. จ่ายบิล — ย้ายเงินสองขาในทรานแซกชันเดียว ไม่สร้าง transactions
 -- ###########################################################################
 
+-- เพิ่มพารามิเตอร์ p_transaction ทีหลัง — ต้องทิ้งรุ่นเก่า 6 พารามิเตอร์ก่อน
+-- ไม่งั้นจะได้ฟังก์ชันชื่อเดียวกันสองตัว แล้ว PostgREST เลือกไม่ถูกว่าจะเรียกตัวไหน
+drop function if exists public.pay_card_statement(uuid, text, uuid, numeric, date, jsonb);
+
 create or replace function public.pay_card_statement(
   p_statement uuid,
   p_method    text,
   p_account   uuid,
   p_amount    numeric,
   p_date      date,
-  p_log       jsonb default null
+  p_log       jsonb default null,
+  -- จ่ายบิลด้วยยอดของรายการเดียว = ส่ง id ของรายการนั้นมาด้วย ขาที่จ่ายจะจำไว้ว่า
+  -- เป็นของรายการไหน หน้าจอจึงติ๊กถูกหน้าบรรทัดนั้นได้ ไม่ใช่รู้แค่ว่ายอดบิลลดลง
+  p_transaction uuid default null
 ) returns card_statements language plpgsql security definer set search_path = public as $$
 declare
   v_st     card_statements;
@@ -668,9 +675,10 @@ begin
 
   -- จำแต่ละ "ขา" ที่จ่ายไว้ทีละครั้ง เพราะบิลใบเดียวจ่ายได้หลายรอบจากคนละกระเป๋า
   -- ตอนย้อนต้องคืนเข้ากระเป๋าที่ตัดมาจริงทีละขา ไม่ใช่กระเป๋าสุดท้ายทั้งก้อน
-  insert into card_statement_payments (shop_id, statement_id, card_id, method, transfer_account_id, amount, paid_at)
+  insert into card_statement_payments
+         (shop_id, statement_id, card_id, method, transfer_account_id, amount, paid_at, transaction_id)
   values (v_st.shop_id, p_statement, v_st.card_id, p_method,
-          case when p_method = 'transfer' then p_account end, p_amount, p_date);
+          case when p_method = 'transfer' then p_account end, p_amount, p_date, p_transaction);
 
   update card_statements
      set paid_amount = paid_amount + p_amount,
@@ -1164,6 +1172,14 @@ select 'รับ method = card แล้ว',
           where conname = 'transactions_method_check'
             and pg_get_constraintdef(oid) like '%''card''%'
        ) then '✅' else '❌ ยังไม่รับ' end
+union all
+select 'จ่ายบิลเฉพาะรายการ (จำได้ว่าเป็นของบรรทัดไหน)',
+       case when exists (
+         select 1 from information_schema.parameters p
+          join information_schema.routines r on r.specific_name = p.specific_name
+          where r.routine_schema = 'public' and r.routine_name = 'pay_card_statement'
+            and p.parameter_name = 'p_transaction'
+       ) then '✅' else '❌ ยังไม่มี — รันไฟล์นี้ซ้ำอีกรอบ' end
 union all
 select 'RLS เปิดครบ',
        case when (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace

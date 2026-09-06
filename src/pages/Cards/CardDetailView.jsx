@@ -115,9 +115,16 @@ const dayOf = (v) => {
   return Number.isNaN(d.getTime()) ? s.slice(0, 10) : toDateString(d)
 }
 
-function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null }) {
+/**
+ * @param paidViaBill id ของงวดที่จ่ายไปแล้ว "ผ่านบิลบัตร" — สถานะในฐานข้อมูลยังเป็น
+ *   billed อยู่ (ตั้งใจ: กฎการลบ/ยกเลิกสัญญาผูกกับสถานะนี้ ถ้าเปลี่ยนเป็น paid
+ *   การลบสัญญาจะคืนเงินซ้ำกับที่จ่ายบิลไปแล้ว) แต่ในสายตาคนใช้มันคือจ่ายแล้ว
+ *   ป้ายจึงต้องเป็นสีเดียวกับงวดที่จ่ายแล้ว ไม่งั้นจ่ายบิลไปหน้าจอก็ยังเหมือนเดิม
+ */
+function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null, paidViaBill = null }) {
   const list = (rows ?? []).filter((r) => r.status !== 'cancelled')
   if (list.length === 0) return null
+  const isPaid = (r) => r.status === 'paid' || r.status === 'prepaid' || !!paidViaBill?.has(r.id)
   // แสดงทุกงวดไม่ตัด — สัญญา 84 งวดก็ต้องเห็นครบ ป้ายตัดบรรทัดเองตามความกว้าง
   // (เคยตัดที่ 12 แล้วขึ้น "+72 งวด" ซึ่งซ่อนสิ่งที่คนเปิดหน้านี้มาดูพอดี)
   const shown = list
@@ -126,7 +133,7 @@ function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null 
   // (billed) หรือกำลังจะเข้า (pending) — ตามที่ธนาคารมอง งวดที่เข้าบิลแล้วแต่ยังไม่จ่าย
   // ยังเป็นภาระของงวดนั้น ไม่ได้ถูกเลื่อนไปงวดถัดไป ที่เรียกใช้ระบุมาแทนได้
   const currentSeq = currentSeqProp
-    ?? list.find((r) => r.status !== 'paid' && r.status !== 'prepaid')?.seq
+    ?? list.find((r) => !isPaid(r))?.seq
     ?? null
   // วันตัดรอบถัดจากรอบของงวดนี้ — ค้างข้ามวันนี้ไปคือค้างจริงจัง ไม่ใช่แค่ช้าไม่กี่วัน
   // (รหัสรอบคือเดือนที่ตัด ใช้เป็นเลขเดือน 0-based ของเดือนถัดไปได้พอดี)
@@ -138,7 +145,7 @@ function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null 
   // สามคำถามเรียงตามลำดับ: จ่ายหรือยัง → จ่ายทันไหม / ค้างนานแค่ไหน → เป็นงวดที่เน้นไหม
   const toneOf = (r) => {
     if (r.status === 'prepaid') return PIP_TONE.prepaid
-    if (r.status === 'paid') {
+    if (r.status === 'paid' || paidViaBill?.has(r.id)) {
       const paidDay = dayOf(r.paidAt)
       return paidDay && r.dueDate && paidDay > r.dueDate ? PIP_TONE.paidLate : PIP_TONE.paid
     }
@@ -150,6 +157,7 @@ function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null 
     return r.status === 'billed' ? PIP_TONE.billed : PIP_TONE.pending
   }
   const labelOf = (r) => {
+    if (r.status !== 'paid' && paidViaBill?.has(r.id)) return 'จ่ายแล้วผ่านบิลบัตร'
     if (r.status === 'paid') {
       const paidDay = dayOf(r.paidAt)
       return paidDay && r.dueDate && paidDay > r.dueDate ? `จ่ายแล้ว แต่ช้ากว่ากำหนด (${formatIsoThai(paidDay)})` : 'จ่ายแล้วทันกำหนด'
@@ -286,6 +294,46 @@ export default function CardDetailView({ cardId }) {
     return m
   }, [statementPayments, cardId])
 
+  // ยอดที่จ่ายบิลไปแล้วโดยระบุว่าเป็นของรายการไหน (ปุ่ม "จ่ายยอดนี้" ในบิลที่ออกแล้ว)
+  // ต่างจาก prepaidByTx ตรงที่ขาพวกนี้ผูกกับใบแจ้งยอดแล้ว — เงินเข้าบิลใบนั้นจริง
+  // มีไว้เพื่อให้บรรทัดที่จ่ายไปแล้วดูออกทันทีว่าจ่ายแล้ว ไม่ใช่รู้แค่ว่ายอดบิลลดลง
+  const paidInBillByTx = useMemo(() => {
+    const m = new Map()
+    for (const l of statementPayments) {
+      if (!l.statementId || !l.transactionId) continue
+      const cur = m.get(l.transactionId) ?? { amount: 0, legs: [] }
+      cur.amount += Number(l.amount || 0)
+      cur.legs.push(l)
+      m.set(l.transactionId, cur)
+    }
+    return m
+  }, [statementPayments])
+
+  /**
+   * งวดผ่อนที่ "จ่ายไปแล้วผ่านบิลบัตร" — id ของงวด
+   *
+   * งวดที่เข้าบิลแล้วจ่ายไม่ได้ทีละงวด (pay_installment_entry ปฏิเสธ) เงินของมันออกไป
+   * ตอนจ่ายบิล สถานะในฐานข้อมูลจึงยังเป็น billed อยู่ ซึ่งถูกแล้วสำหรับกฎการลบสัญญา
+   * แต่หน้าจอต้องบอกว่าจ่ายแล้ว ไม่งั้นจ่ายบิลไปงวดก็ยังขึ้นเหมือนยังไม่ได้จ่าย
+   *
+   * นับสองทาง: บิลที่จ่ายครบทั้งใบ = ทุกงวดในใบจ่ายแล้ว · หรือจ่ายด้วยยอดของบรรทัดนั้น
+   * จนเต็มยอด (ปุ่ม "จ่ายยอดนี้")
+   */
+  const entryPaidViaBill = useMemo(() => {
+    const paidStmts = statements.filter((s) => s.status === 'paid')
+    const inPaidStatement = (t) => paidStmts.some((s) => (
+      t.cardStatementId ? t.cardStatementId === s.id : (t.date >= s.periodStart && t.date <= s.periodEnd)
+    ))
+    const out = new Set()
+    for (const t of transactions) {
+      if (!t.installmentEntryId || t.cardId !== cardId) continue
+      const leg = paidInBillByTx.get(t.id)
+      const covered = leg && leg.amount >= Math.abs(Number(t.amount || 0)) - 0.005
+      if (covered || inPaidStatement(t)) out.add(t.installmentEntryId)
+    }
+    return out
+  }, [transactions, cardId, paidInBillByTx, statements])
+
   // วันนี้แบบ 'YYYY-MM-DD' ตามเวลาเครื่อง — ใช้ตัดสินว่างวดที่ค้างเลยกำหนดหรือยัง
   const todayStr = toDateString(new Date())
 
@@ -398,6 +446,10 @@ export default function CardDetailView({ cardId }) {
         // และมีปุ่มจ่ายค่างวดของตัวเองอยู่แล้ว — พองวดเข้าบิลไปแล้วมันคือยอดหนึ่งบรรทัด
         // ในบิลเหมือนรายการอื่น จ่ายเฉพาะบรรทัดนั้นได้ ที่เหลือของบิลยังค้างต่อไป
         prepayable: t.type === 'expense',
+        // จ่ายบรรทัดนี้ไปแล้วเท่าไร — จ่ายทั้งใบไปแล้วก็ถือว่าทุกบรรทัดจ่ายครบ
+        paidInBill: bill.status === 'paid'
+          ? { amount: Math.abs(Number(t.amount || 0)), whole: true, legs: [] }
+          : paidInBillByTx.get(t.id) ?? null,
       }))
     for (const a of advances) {
       if (a.statementId !== bill.id) continue
@@ -408,7 +460,7 @@ export default function CardDetailView({ cardId }) {
       })
     }
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [bill, transactions, advances, cardId, getCategoryName])
+  }, [bill, transactions, advances, cardId, getCategoryName, paidInBillByTx])
 
   /**
    * สองแท็บมีเสมอทุกใบ ไม่ว่าจะมีบิลค้างหรือไม่
@@ -500,16 +552,20 @@ export default function CardDetailView({ cardId }) {
   const handlePay = ({ method, accountId, amount, date }) => run(async () => {
     const statement = payTarget
     const remaining = Number(statement.amount) - Number(statement.paidAmount)
+    // เปิดมาจากปุ่ม "จ่ายยอดนี้" ของบรรทัดไหน ผูกขาที่จ่ายไว้กับรายการนั้น
+    // ไม่งั้นยอดบิลลดลงเฉยๆ แต่บรรทัดที่จ่ายไปแล้วหน้าตาเหมือนเดิมทุกอย่าง
+    const payingTx = payPreset?.transactionId ?? null
     await payStatement(statement.id, {
-      method, accountId, amount, date,
+      method, accountId, amount, date, transactionId: payingTx,
       log: buildLogEntry({
         activityType: 'CARD_PAYMENT',
         description:
           `จ่ายบิลบัตร "${formatCard(card)}" รอบ ${statement.cycle} ${fmt(amount)} บาท ` +
           `จาก${method === 'cash' ? 'เงินสด' : 'เงินโอน'}` +
+          (payPreset?.label ? ` — เฉพาะรายการ "${payPreset.label}"` : '') +
           (amount > remaining ? ` (จ่ายเกิน ${fmt(amount - remaining)} เป็นเครดิตในบัตร)` : ''),
         walletEffect: { target: method, delta: -amount, transferAccountId: accountId },
-        newValue: { statementId: statement.id, cardId: card.id, amount, date, method },
+        newValue: { statementId: statement.id, cardId: card.id, amount, date, method, transactionId: payingTx },
       }),
     })
     await refreshWallet()
@@ -685,7 +741,7 @@ export default function CardDetailView({ cardId }) {
     })
   }
   const openPayItemInBill = (r) => {
-    setPayPreset({ amount: Math.abs(r.amount), label: r.name })
+    setPayPreset({ amount: Math.abs(r.amount), label: r.name, transactionId: r.tx?.id ?? null })
     setPayTarget(bill)
   }
   const closePayBill = () => { setPayTarget(null); setPayPreset(null) }
@@ -1079,11 +1135,27 @@ export default function CardDetailView({ cardId }) {
               const lastPrepaidAt = r.prepaid
                 ? r.prepaid.legs.map((l) => l.paidAt).sort().at(-1)
                 : null
+              // จ่ายบรรทัดนี้ในบิลที่ออกแล้วไปเท่าไร เหลือเท่าไร
+              const paidInBillLeft = r.paidInBill ? Math.abs(r.amount) - r.paidInBill.amount : null
+              const fullyPaidInBill = paidInBillLeft !== null && paidInBillLeft <= 0.005
+              const lastPaidAt = r.paidInBill?.legs?.map((l) => l.paidAt).sort().at(-1) ?? null
+              // บรรทัดนี้ "จ่ายแล้ว" จริง ไม่ว่าจะจ่ายก่อนออกบิลหรือจ่ายตอนบิลออกแล้ว
+              const rowPaid = fullyPrepaid || fullyPaidInBill
               return (
                 <div key={r.key} className="grid grid-cols-[22px_64px_minmax(0,1fr)_96px_110px_30px] gap-2.5 items-center py-2 border-t border-[#F2F0EA]">
                   {/* ติ๊กว่าไล่เช็คบรรทัดนี้กับสลิปแล้ว — ไม่ตัดเงิน เพราะธนาคารเก็บบิลทั้งใบ
                       ไม่ได้เก็บทีละบรรทัด (ดูหมายเหตุใน supabase/card.sql ส่วน 11) */}
-                  {r.upcoming ? <span /> : (
+                  {r.upcoming ? <span /> : rowPaid ? (
+                    // จ่ายบรรทัดนี้ไปแล้วจริง — ติ๊กถูกให้เลย ไม่ต้องรอให้ผู้ใช้มาติ๊กเอง
+                    // สีเขียว (ไม่ใช่สีมะนาวของเครื่องหมายตรวจสลิป) เพราะคนละความหมาย:
+                    // อันนี้คือเงินออกไปแล้ว ส่วนอีกอันคือแค่ไล่เช็คกับสลิปแล้ว
+                    <span
+                      title={`จ่ายรายการนี้แล้ว${lastPaidAt || lastPrepaidAt ? ` เมื่อ ${formatIsoThaiShort(lastPaidAt ?? lastPrepaidAt)}` : ''}`}
+                      className="w-[19px] h-[19px] rounded-[6px] bg-income border border-income text-white flex items-center justify-center"
+                    >
+                      <Icon name="check" size={14} />
+                    </span>
+                  ) : (
                   <button
                     onClick={() => setMarkTarget({ row: r, on: !marked })}
                     disabled={busy}
@@ -1097,7 +1169,7 @@ export default function CardDetailView({ cardId }) {
                   )}
                   <span className="tabular-nums text-[11.5px] text-faint">{formatIsoThai(r.date)}</span>
                   <span className="min-w-0">
-                    <span className={`block text-[12.5px] font-medium truncate ${marked ? 'text-muted line-through' : ''}`}>{r.name}</span>
+                    <span className={`block text-[12.5px] font-medium truncate ${marked || rowPaid ? 'text-muted line-through' : ''}`}>{r.name}</span>
                     <span className="block text-[11px] text-faint truncate">{r.cat}</span>
                     {prog && (
                       <span className="flex items-center gap-2 mt-1 flex-wrap">
@@ -1108,9 +1180,13 @@ export default function CardDetailView({ cardId }) {
                           rows={prog.rows}
                           currentSeq={r.owed?.seq ?? insEntry.e?.seq ?? r.entry?.seq}
                           closingDay={card.closingDay}
+                          paidViaBill={entryPaidViaBill}
                         />
                         <span className="text-[10.5px] text-faint">
-                          จ่ายแล้ว {prog.paidCount + prog.prepaidCount} จาก {insEntry.i.months} งวด
+                          {/* งวดที่จ่ายผ่านบิลไปแล้วต้องนับด้วย ไม่งั้นเลขนี้กับสีของป้ายจะขัดกันเอง */}
+                          จ่ายแล้ว {prog.paidCount + prog.prepaidCount + prog.rows.filter(
+                            (x) => x.status !== 'paid' && x.status !== 'prepaid' && entryPaidViaBill.has(x.id)
+                          ).length} จาก {insEntry.i.months} งวด
                         </span>
                       </span>
                     )}
@@ -1126,14 +1202,25 @@ export default function CardDetailView({ cardId }) {
                         บิลที่ออกแล้ว = จ่ายบิลด้วยยอดของรายการนี้ */}
                     {r.prepayable && (
                       hasBill && billTab === 'this' ? (
+                        fullyPaidInBill ? (
+                          <span
+                            className="text-[10px] text-income font-semibold whitespace-nowrap"
+                            title={r.paidInBill.whole
+                              ? 'บิลใบนี้จ่ายครบแล้ว ทุกรายการในใบจึงถือว่าจ่ายแล้ว'
+                              : 'จ่ายบิลด้วยยอดของรายการนี้ไปแล้ว · ย้อนได้ที่ปุ่มย้อนการจ่ายของบิล'}
+                          >
+                            ✓ จ่ายแล้ว {lastPaidAt ? formatIsoThaiShort(lastPaidAt) : ''}
+                          </span>
+                        ) : (
                         <button
                           disabled={busy}
                           onClick={() => openPayItemInBill(r)}
                           className="text-[10.5px] text-income underline hover:no-underline whitespace-nowrap disabled:opacity-50"
                           title="เปิดหน้าจ่ายบิลโดยใส่ยอดของรายการนี้ให้ — ส่วนที่เหลือของบิลยังค้างอยู่"
                         >
-                          จ่ายยอดนี้
+                          {r.paidInBill ? 'จ่ายส่วนที่เหลือ' : 'จ่ายยอดนี้'}
                         </button>
+                        )
                       ) : fullyPrepaid ? (
                         <span
                           className="text-[10px] text-income font-semibold whitespace-nowrap"
@@ -1184,12 +1271,17 @@ export default function CardDetailView({ cardId }) {
                     r.amount < 0 ? 'text-income' : r.upcoming ? 'text-muted' : 'text-ink'
                   }`}>
                     {/* จ่ายไปแล้ว = ขีดฆ่ายอดเดิม จ่ายบางส่วน = บอกยอดที่ยังจะเข้าบิล */}
-                    <span className={fullyPrepaid ? 'line-through text-faint font-normal' : ''}>
+                    <span className={rowPaid ? 'line-through text-faint font-normal' : ''}>
                       {r.amount < 0 ? `−${fmt(-r.amount)}` : fmt(r.amount)}
                     </span>
                     {r.prepaid && !fullyPrepaid && (
                       <span className="block text-[10px] text-income font-normal whitespace-nowrap">
                         จ่ายแล้ว {fmt(r.prepaid.amount)} · เหลือ {fmt(prepaidLeft)}
+                      </span>
+                    )}
+                    {r.paidInBill && !fullyPaidInBill && (
+                      <span className="block text-[10px] text-income font-normal whitespace-nowrap">
+                        จ่ายแล้ว {fmt(r.paidInBill.amount)} · เหลือ {fmt(paidInBillLeft)}
                       </span>
                     )}
                   </span>
@@ -1282,8 +1374,14 @@ export default function CardDetailView({ cardId }) {
           ) : installments.map((i) => {
             const p = getInstallmentProgress(i.id)
             if (!p) return null
-            const done = p.paidCount + p.prepaidCount
-            const next = p.rows.find((r) => r.status === 'pending' || r.status === 'billed')
+            // งวดที่จ่ายผ่านบิลไปแล้วนับเป็นจ่ายแล้วด้วย (สถานะยังเป็น billed ตามกฎการลบสัญญา)
+            const doneViaBill = p.rows.filter(
+              (r) => r.status !== 'paid' && r.status !== 'prepaid' && entryPaidViaBill.has(r.id)
+            ).length
+            const done = p.paidCount + p.prepaidCount + doneViaBill
+            const next = p.rows.find(
+              (r) => (r.status === 'pending' || r.status === 'billed') && !entryPaidViaBill.has(r.id)
+            )
             return (
               <div key={i.id} className="border-t border-[#F6F4EF] pt-2.5 mt-2.5">
                 <div className="flex items-baseline gap-2">
@@ -1329,7 +1427,7 @@ export default function CardDetailView({ cardId }) {
                 {/* แถบเดียวบอกได้แค่สัดส่วน ซึ่งข้อความ "งวด x จาก y" บรรทัดบนบอกไปแล้ว
                     ป้ายรายงวดบอกต่อได้ว่างวดไหนครบกำหนดวันไหนและงวดไหนกำลังจะถูกเก็บ */}
                 <div className="mt-1.5">
-                  <EntryPips rows={p.rows} closingDay={card.closingDay} />
+                  <EntryPips rows={p.rows} closingDay={card.closingDay} paidViaBill={entryPaidViaBill} />
                 </div>
                 {next && (
                   <div className="flex items-center gap-2 mt-1.5">

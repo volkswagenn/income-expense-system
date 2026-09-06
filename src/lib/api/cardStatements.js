@@ -56,16 +56,29 @@ export async function closeStatement(cardId, period) {
 }
 
 /** จ่ายบิล — ย้ายเงินสองขาในทรานแซกชันเดียว ไม่สร้างรายจ่ายใหม่ */
-export async function payStatement(statementId, { method, accountId = null, amount, date, log = null }) {
-  const row = await unwrap(supabase.rpc('pay_card_statement', {
+export async function payStatement(
+  statementId,
+  // transactionId = จ่ายบิลด้วยยอดของรายการเดียวในบิล ขาที่จ่ายจะผูกกับรายการนั้น
+  // หน้าจอจึงติ๊กถูกหน้าบรรทัดได้ว่าจ่ายไปแล้ว (ไม่ส่ง = จ่ายทั้งบิลเหมือนเดิม)
+  { method, accountId = null, amount, date, log = null, transactionId = null },
+) {
+  const args = {
     p_statement: statementId,
     p_method: method,
     p_account: accountId,
     p_amount: amount,
     p_date: date,
     p_log: log,
-  }))
-  return fromRow('card_statements', row)
+  }
+  const { data, error } = await supabase.rpc('pay_card_statement', { ...args, p_transaction: transactionId })
+  if (!error) return fromRow('card_statements', data)
+
+  // ฐานข้อมูลที่ยังไม่ได้รัน card.sql รอบใหม่จะไม่รู้จัก p_transaction (PGRST202)
+  // ยอมจ่ายบิลแบบเดิมไปก่อนดีกว่าจ่ายไม่ได้เลย — แค่ไม่รู้ว่าเป็นของบรรทัดไหน
+  if (error.code === 'PGRST202' || /p_transaction/i.test(error.message ?? '')) {
+    return fromRow('card_statements', await unwrap(supabase.rpc('pay_card_statement', args)))
+  }
+  throw new Error(toThaiError(error))
 }
 
 /** ย้อนการจ่ายบิล — คืนเงินเข้ากระเป๋าเดิมและหนี้บัตรกลับมาเท่าเดิม */
