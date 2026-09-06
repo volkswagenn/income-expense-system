@@ -111,7 +111,12 @@ export default function CardsPage() {
           ขึ้นบรรทัดใหม่ได้ทุกขนาดจอ ของเดิมบังคับแถวเดียวตั้งแต่ md ขึ้นไป
           พอมีบัตรหลายใบ (เช่น 7 ใบ = 9 การ์ด × อย่างน้อย 190px ≈ 1,800px)
           จะกว้างเกินพื้นที่เนื้อหาแล้วล้นออกนอกจอ เพราะไม่มีตัวรับการเลื่อน
-          ส่วน max-w กันไม่ให้การ์ดใบสุดท้ายที่เหลืออยู่ตัวเดียวในบรรทัดยืดเต็มแถว */}
+          ส่วน max-w กันไม่ให้การ์ดใบสุดท้ายที่เหลืออยู่ตัวเดียวในบรรทัดยืดเต็มแถว
+
+          ชื่อบัตรกับยอดเงินอยู่คนละบรรทัด ไม่ใช่ซ้าย-ขวาแบบเดิม
+          ของเดิมชื่อบัตรต้องแบ่งความกว้างกับยอดและข้อความ "บิลครบกำหนด 7 ก.ย. 69"
+          ซึ่งห้ามตัดบรรทัด พอมีบัตร 8 ใบทุกใบถูกบีบจนเหลือ 190px ชื่อจึงโดนตัดเป็น
+          "ไทย…" กับ "S.." อ่านไม่ออกว่าใบไหนเป็นใบไหน — ซึ่งเป็นงานเดียวของแถวนี้ */}
       <div className="flex gap-2 flex-none flex-wrap">
         {tabs.map((t) => {
           const on = t.key === view || (t.key === 'all' && !isCard && view !== 'debt')
@@ -120,27 +125,30 @@ export default function CardsPage() {
               key={t.key}
               onClick={() => setView(t.key)}
               style={{ flex: `${t.grow} 1 0` }}
-              className={`min-w-[190px] max-w-[340px] flex items-center gap-2.5 rounded-[14px] border px-[11px] py-[9px] text-left transition ${
+              title={`${t.label} · ${t.kicker} · ${t.sub} ${t.unit}`}
+              className={`min-w-[218px] max-w-[340px] flex flex-col gap-[7px] rounded-[14px] border px-[11px] py-[9px] text-left transition ${
                 on ? 'border-ink shadow-[0_0_0_1px_#16181D] bg-white' : 'border-hairline bg-white hover:border-ink'
               }`}
             >
-              {t.isCard ? (
-                // ไอคอนที่ตั้งไว้กับบัตร หรือรูปบัตรกลางๆ ถ้ายังไม่เลือก — ไม่เดาโลโก้จากชื่อธนาคาร
-                <span className="w-[34px] h-[34px] flex-none rounded-[10px] bg-paper flex items-center justify-center">
-                  <AppIcon value={t.cardIcon} size={20} fallback={DEFAULT_ICONS.card} />
+              <span className="flex items-center gap-2.5 w-full">
+                {t.isCard ? (
+                  // ไอคอนที่ตั้งไว้กับบัตร หรือรูปบัตรกลางๆ ถ้ายังไม่เลือก — ไม่เดาโลโก้จากชื่อธนาคาร
+                  <span className="w-[32px] h-[32px] flex-none rounded-[10px] bg-paper flex items-center justify-center">
+                    <AppIcon value={t.cardIcon} size={19} fallback={DEFAULT_ICONS.card} />
+                  </span>
+                ) : (
+                  <span className="w-[32px] h-[32px] flex-none rounded-[10px] bg-paper flex items-center justify-center">
+                    <Icon name={t.icon} size={18} style={{ color: t.iconFg }} />
+                  </span>
+                )}
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[12.5px] font-semibold truncate leading-[1.3]">{t.label}</span>
+                  <span className="block text-[10.5px] text-faint truncate">{t.kicker}</span>
                 </span>
-              ) : (
-                <span className="w-[34px] h-[34px] flex-none rounded-[10px] bg-paper flex items-center justify-center">
-                  <Icon name={t.icon} size={19} style={{ color: t.iconFg }} />
-                </span>
-              )}
-              <span className="flex-1 min-w-0">
-                <span className="block text-[12.5px] font-semibold truncate">{t.label}</span>
-                <span className="block text-[10.5px] text-faint truncate">{t.kicker}</span>
               </span>
-              <span className="flex-none text-right">
-                <span className={`tabular-nums block text-sm font-bold leading-[1.2] ${t.subTone ?? ''}`}>{t.sub}</span>
-                <span className="block text-[10px] text-faint whitespace-nowrap">{t.unit}</span>
+              <span className="flex items-baseline gap-2 w-full border-t border-[#F2F0EA] pt-[6px]">
+                <span className={`tabular-nums flex-none text-sm font-bold leading-[1.2] ${t.subTone ?? ''}`}>{t.sub}</span>
+                <span className="flex-1 min-w-0 text-[10px] text-faint text-right truncate">{t.unit}</span>
               </span>
             </button>
           )
