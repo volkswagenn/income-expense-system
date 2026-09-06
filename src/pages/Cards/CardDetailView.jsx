@@ -728,40 +728,6 @@ export default function CardDetailView({ cardId }) {
                     {billBreakdown.credit > 0 && <span>เงินคืน <b className="tabular-nums">−{fmt(billBreakdown.credit)}</b></span>}
                   </div>
                 )}
-                {/* รายการที่ถูกใส่เข้าใบนี้หลังออกบิล — ต้องเห็นว่ามีอะไรบ้าง และเอาออกได้
-                    ไม่งั้นยอดบิลขยับโดยหาที่มาไม่เจอ */}
-                {(() => {
-                  const attached = transactions.filter((t) => t.cardStatementId === bill.id)
-                  if (attached.length === 0) return null
-                  return (
-                    <div className="mt-2 border-t border-[#F0C4BE] pt-1.5 space-y-0.5">
-                      <div className="text-[11px] text-[#7A5B56]">ใส่เพิ่มเข้าบิลใบนี้หลังออกบิล {attached.length} รายการ</div>
-                      {attached.map((t) => (
-                        <div key={t.id} className="flex items-center gap-2 text-[11.5px]">
-                          <span className="tabular-nums text-faint flex-none">{formatIsoThai(t.date)}</span>
-                          <span className="min-w-0 flex-1 truncate">{t.itemName || '(ไม่ระบุชื่อ)'}</span>
-                          <span className={`tabular-nums flex-none font-semibold ${t.type === 'income' ? 'text-income' : ''}`}>
-                            {t.type === 'income' ? '−' : ''}{fmt(t.amount)}
-                          </span>
-                          <button
-                            className="flex-none text-[11px] text-[#A93A2E] underline hover:no-underline"
-                            title="เอาออกจากบิลใบนี้ — รายการจะไปอยู่บิลรอบถัดไปตามวันที่รูด"
-                            onClick={() => run(async () => {
-                              await detachTxFromStatement(t.id)
-                              await addLog(buildLogEntry({
-                                activityType: 'CARD_STATEMENT_DETACH',
-                                description: `เอา "${t.itemName}" ${fmt(t.amount)} บาท ออกจากบิลที่ครบกำหนด ${formatIsoThai(bill.dueDate)} ของบัตร "${formatCard(card)}"`,
-                                oldValue: { transactionId: t.id, statementId: bill.id, cardId: card.id },
-                              }))
-                            })}
-                          >
-                            เอาออก
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
               </div>
               <div className="flex flex-col gap-1.5 w-[196px] flex-none">
                 <button
@@ -776,6 +742,55 @@ export default function CardDetailView({ cardId }) {
                 </span>
               </div>
             </div>
+
+            {/* รายการที่ถูกใส่เข้าใบนี้หลังออกบิล — แสดงเป็นแถวเต็มความกว้างเหมือนรายการ
+                ในรอบบิล เพราะพอใส่เข้าใบแล้วมันจะหายจาก "รายการในรอบบิลนี้" ข้างล่าง
+                ถ้าเหลือแค่บรรทัดเล็กๆ ผู้ใช้จะเลื่อนผ่านแล้วนึกว่ารายการหาย */}
+            {(() => {
+              const attached = transactions
+                .filter((t) => t.cardStatementId === bill.id)
+                .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+              if (attached.length === 0) return null
+              return (
+                <div className="mt-3 border-t border-[#F0C4BE] pt-2.5">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-[12px] font-semibold text-[#A93A2E]">รายการที่ใส่เพิ่มเข้าบิลใบนี้หลังออกบิล</span>
+                    <span className="tabular-nums text-[11px] font-semibold bg-white border border-[#F0C4BE] text-[#A93A2E] rounded-full px-2">
+                      {attached.length} รายการ
+                    </span>
+                    <span className="text-[11px] text-[#7A5B56]">ไม่แสดงในรอบบิลปัจจุบันข้างล่าง เพราะอยู่ในใบนี้แล้ว</span>
+                  </div>
+                  <div className="divide-y divide-[#F5D9D5]">
+                    {attached.map((t) => (
+                      <div key={t.id} className="flex items-center gap-3 py-1.5 bg-white/60 rounded-lg px-2.5">
+                        <span className="tabular-nums text-[11.5px] text-faint flex-none w-[84px]">{formatIsoThai(t.date)}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[13px] font-semibold truncate">{t.itemName || '(ไม่ระบุชื่อ)'}</span>
+                          <span className="block text-[11px] text-faint truncate">{getCategoryName(t.category) || 'ไม่ระบุหมวดหมู่'}</span>
+                        </span>
+                        <span className={`tabular-nums flex-none text-[13.5px] font-semibold ${t.type === 'income' ? 'text-income' : ''}`}>
+                          {t.type === 'income' ? '−' : ''}{fmt(t.amount)}
+                        </span>
+                        <button
+                          className="flex-none h-7 px-2.5 rounded-[8px] border border-[#F0C4BE] bg-white text-[11.5px] text-[#A93A2E] hover:bg-expense-soft"
+                          title="เอาออกจากบิลใบนี้ — รายการจะกลับไปอยู่บิลรอบถัดไปตามวันที่รูด"
+                          onClick={() => run(async () => {
+                            await detachTxFromStatement(t.id)
+                            await addLog(buildLogEntry({
+                              activityType: 'CARD_STATEMENT_DETACH',
+                              description: `เอา "${t.itemName}" ${fmt(t.amount)} บาท ออกจากบิลที่ครบกำหนด ${formatIsoThai(bill.dueDate)} ของบัตร "${formatCard(card)}"`,
+                              oldValue: { transactionId: t.id, statementId: bill.id, cardId: card.id },
+                            }))
+                          })}
+                        >
+                          เอาออกจากบิล
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
 

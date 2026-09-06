@@ -86,6 +86,9 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
       : { ...EMPTY, method: formDefaults.method },
   )
   const [saved, setSaved] = useState(false)
+  // ข้อความต่อท้าย "บันทึกสำเร็จ" เมื่อรายการถูกใส่เข้าบิลใบที่ออกไปแล้ว — รายการจะไม่โผล่
+  // ในรอบบิลปัจจุบัน ถ้าไม่บอกว่าไปอยู่ไหน ผู้ใช้จะนึกว่ามันหาย
+  const [savedNote, setSavedNote] = useState('')
   const [errMsg, setErrMsg] = useState('')
   // ระบบออนไลน์อย่างเดียว การบันทึกต้องรอผลจริงจากเซิร์ฟเวอร์ จึงต้องกันกดซ้ำระหว่างรอ
   const [saving, setSaving] = useState(false)
@@ -402,7 +405,13 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
     // ผู้ใช้บอกว่ารายการนี้อยู่ในบิลใบที่ออกไปแล้ว — ใส่เข้าใบนั้น ยอดบิลบวกเพิ่มทันที
     // ทำหลังบันทึกรายการเสร็จ ถ้าล้มตรงนี้ รายการยังอยู่ (savedRef) กดบันทึกซ้ำจะมาต่อที่นี่
     if (tx && cardId && billChoiceRef.current) {
+      const target = getUnpaidStatements().find((s) => s.id === billChoiceRef.current)
       await attachTxToStatement(tx.id, billChoiceRef.current)
+      setSavedNote(
+        target
+          ? `ใส่เข้าบิลที่ครบกำหนด ${formatThaiDate(new Date(`${target.dueDate}T00:00:00`))} แล้ว — ดูได้ในกล่อง "ยอดที่ต้องชำระ" ของหน้าบัตร ไม่อยู่ในรอบบิลปัจจุบัน`
+          : 'ใส่เข้าบิลที่ออกไปแล้วเรียบร้อย'
+      )
       await addLog(buildLogEntry({
         activityType: 'CARD_STATEMENT_ATTACH',
         description: `ใส่ "${form.itemName}" ${amt.toLocaleString()} บาท เข้าบิลที่ออกไปแล้วของบัตร`,
@@ -436,7 +445,9 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
     onSaved?.()
     setUploadStatus(null)
     setAttachments([])
+    // ข้อความบอกว่ารายการไปอยู่บิลใบไหน ต้องอยู่นานพอให้อ่าน ไม่ใช่วูบเดียวเหมือนติ๊กถูก
     setTimeout(() => setSaved(false), 2000)
+    setTimeout(() => setSavedNote(''), 8000)
     } catch (err) {
       // ยังไม่ล้างฟอร์ม ผู้ใช้จะได้กดบันทึกซ้ำได้โดยไม่ต้องกรอกใหม่
       // (ขั้นที่สำเร็จไปแล้วจะถูกข้าม ไม่สร้างรายการหรือตัดเงินซ้ำ)
@@ -1525,6 +1536,11 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
           )}
 
           {saved && <span className="text-income text-sm font-medium">✓ บันทึกสำเร็จ</span>}
+          {savedNote && (
+            <span className="w-full text-[12px] text-[#A93A2E] bg-expense-soft border border-[#F0C4BE] rounded-ctl px-3 py-1.5">
+              {savedNote}
+            </span>
+          )}
           {errMsg && <span className="text-expense text-sm">{errMsg}</span>}
         </div>
       </div>
