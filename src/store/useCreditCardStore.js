@@ -15,7 +15,10 @@ import useTransactionStore from './useTransactionStore'
  * บัตรเป็นหนี้ ไม่ใช่ทรัพย์สิน จึงไม่ถูกรวมเข้า total() ของกระเป๋าเงิน
  * ยอดรวมหน้าแรกยังตอบคำถามว่า "มีเงินเท่าไร" ไม่ใช่ "รวยเท่าไร"
  */
-export const INITIAL = { cards: [], statements: [], installments: [], entries: [], advances: [], rowMarks: [], closing: false }
+export const INITIAL = {
+  cards: [], statements: [], installments: [], entries: [], advances: [],
+  statementPayments: [], rowMarks: [], closing: false,
+}
 
 const useCreditCardStore = create((set, get) => ({
   ...INITIAL,
@@ -27,19 +30,21 @@ const useCreditCardStore = create((set, get) => ({
     installments: data?.installments ?? [],
     entries: data?.entries ?? [],
     advances: data?.advances ?? [],
+    statementPayments: data?.statementPayments ?? [],
     rowMarks: data?.rowMarks ?? [],
   }),
 
   refresh: async () => {
-    const [cards, statements, inst, advances, rowMarks] = await Promise.all([
+    const [cards, statements, inst, advances, rowMarks, statementPayments] = await Promise.all([
       cardApi.listCreditCards(),
       stmtApi.listCardStatements(),
       instApi.listInstallments(),
       cardApi.listCardAdvances(),
       cardApi.listCardRowMarks(),
+      stmtApi.listStatementPayments(),
     ])
-    set({ cards, statements, installments: inst.installments, entries: inst.entries, advances, rowMarks })
-    return { cards, statements, advances, rowMarks, ...inst }
+    set({ cards, statements, installments: inst.installments, entries: inst.entries, advances, rowMarks, statementPayments })
+    return { cards, statements, advances, rowMarks, statementPayments, ...inst }
   },
 
   // ── เครื่องหมายถูกรายแถวในบิล — ไม่แตะยอดเงิน เป็นแค่ตัวช่วยไล่เช็คบิลกับสลิป ──

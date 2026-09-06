@@ -4,6 +4,7 @@ import useCategoryStore from './useCategoryStore'
 import useCreditCardStore from './useCreditCardStore'
 import useDebtStore from './useDebtStore'
 import useNoteStore from './useNoteStore'
+import usePaymentSlipStore from './usePaymentSlipStore'
 import usePendingStore from './usePendingStore'
 import useRecurringStore from './useRecurringStore'
 import useTransactionStore from './useTransactionStore'
@@ -26,6 +27,7 @@ const STORES = [
   [useAppStore, (d) => d.settings],
   [useCreditCardStore, (d) => d.creditCards],
   [useDebtStore, (d) => d.debts],
+  [usePaymentSlipStore, (d) => d.paymentSlips],
 ]
 
 export async function hydrateStores() {

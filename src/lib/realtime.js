@@ -4,6 +4,7 @@ import useCategoryStore from '../store/useCategoryStore'
 import useCreditCardStore from '../store/useCreditCardStore'
 import useDebtStore from '../store/useDebtStore'
 import useNoteStore from '../store/useNoteStore'
+import usePaymentSlipStore from '../store/usePaymentSlipStore'
 import usePendingStore from '../store/usePendingStore'
 import useRecurringStore from '../store/useRecurringStore'
 import useTransactionStore from '../store/useTransactionStore'
@@ -35,6 +36,7 @@ const TABLE_STORES = {
   card_installments: [useCreditCardStore],
   card_installment_entries: [useCreditCardStore],
   card_advances: [useCreditCardStore],
+  card_statement_payments: [useCreditCardStore],
   debts: [useDebtStore],
   debt_entries: [useDebtStore],
   pending_payments: [usePendingStore],
@@ -47,6 +49,7 @@ const TABLE_STORES = {
   quick_items: [useCategoryStore],
   calendar_notes: [useNoteStore],
   shop_settings: [useAppStore],
+  payment_slips: [usePaymentSlipStore],
 }
 
 const DEBOUNCE_MS = 400

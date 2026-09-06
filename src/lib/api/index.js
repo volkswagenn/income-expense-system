@@ -5,13 +5,14 @@ import * as creditCards from './creditCards'
 import * as debts from './debts'
 import * as logs from './logs'
 import * as notes from './notes'
+import * as paymentSlips from './paymentSlips'
 import * as pending from './pending'
 import * as recurring from './recurring'
 import * as settings from './settings'
 import * as transactions from './transactions'
 import * as wallet from './wallet'
 
-export { cardInstallments, cardStatements, categories, creditCards, debts, logs, notes, pending, recurring, settings, transactions, wallet }
+export { cardInstallments, cardStatements, categories, creditCards, debts, logs, notes, paymentSlips, pending, recurring, settings, transactions, wallet }
 export { getShopId, hasShop, setShopId } from './context'
 
 /**
@@ -40,6 +41,8 @@ export async function loadAllData() {
     inst,
     debtData,
     advances,
+    slips,
+    statementPayments,
   ] = await Promise.all([
     wallet.loadWallet(),
     transactions.listTransactions(),
@@ -58,6 +61,8 @@ export async function loadAllData() {
     cardInstallments.listInstallments(),
     debts.listDebts(),
     creditCards.listCardAdvances(),
+    paymentSlips.listPaymentSlips(),
+    cardStatements.listStatementPayments(),
   ])
 
   return {
@@ -73,7 +78,8 @@ export async function loadAllData() {
     recurringEntries,
     notes: noteMap,
     settings: shopSettings,
-    creditCards: { cards, statements, installments: inst.installments, entries: inst.entries, advances },
+    creditCards: { cards, statements, installments: inst.installments, entries: inst.entries, advances, statementPayments },
     debts: debtData,
+    paymentSlips: slips,
   }
 }

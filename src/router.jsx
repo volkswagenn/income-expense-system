@@ -18,6 +18,7 @@ import PendingTasksPage from './pages/PendingTasks'
  * ก่อนแยก ทุกหน้าต้องรอไฟล์พวกนี้โหลดจบก่อนถึงจะเห็นหน้าแรก
  */
 const ManagePage = lazyPage(() => import('./pages/Manage'))
+const PaymentsPage = lazyPage(() => import('./pages/Payments'))
 const ReportsPage = lazyPage(() => import('./pages/Reports'))
 const HistoryPage = lazyPage(() => import('./pages/History'))
 const ImportPage = lazyPage(() => import('./pages/Import'))
@@ -92,6 +93,7 @@ export const router = createHashRouter([
       { path: 'manage', element: <Navigate to="/manage/categories" replace /> },
       { path: 'manage/:tab', element: lazyRoute(ManagePage) },
       { path: 'categories', element: <Navigate to="/manage/categories" replace /> },
+      { path: 'payments', element: lazyRoute(PaymentsPage) },
       { path: 'reports', element: lazyRoute(ReportsPage) },
       { path: 'history', element: lazyRoute(HistoryPage) },
       { path: 'import', element: lazyRoute(ImportPage) },

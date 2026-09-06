@@ -21,6 +21,7 @@ export function buildLogEntry({
 }
 
 export const ACTIVITY_LABELS = {
+  ATTACH_PAYMENT_SLIP: 'แนบสลิปการจ่าย',
   ADD_INCOME: 'เพิ่มรายรับ',
   ADD_EXPENSE: 'เพิ่มรายจ่าย',
   EDIT_INCOME: 'แก้ไขรายรับ',

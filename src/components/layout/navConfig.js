@@ -21,6 +21,7 @@ export const NAV_GROUPS = [
     items: [
       { to: '/wallet', icon: 'account_balance_wallet', label: 'กระเป๋าเงิน' },
       { to: '/cards', icon: 'credit_card', label: 'บัตรและหนี้สิน', badges: ['cardBill'], badgeTone: 'amber' },
+      { to: '/payments', icon: 'receipt_long', label: 'ประวัติการจ่าย' },
       { to: '/reports', icon: 'bar_chart', label: 'รายงาน' },
     ],
   },
@@ -42,6 +43,7 @@ export const PAGE_HEADS = {
   '/pending-tasks': { title: 'รอดำเนินการ', sub: 'ทุกอย่างที่ต้องจ่ายและรอรับ รวมไว้ที่เดียว' },
   '/wallet': { title: 'กระเป๋าเงิน', sub: 'เงินสด บัญชีธนาคาร และกระเป๋าย่อยทั้งหมด' },
   '/cards': { title: 'บัตรและหนี้สิน', sub: 'บิลบัตรเครดิต สัญญาผ่อน และเงินกู้' },
+  '/payments': { title: 'ประวัติการจ่าย', sub: 'ทุกครั้งที่จ่ายเงินออกไป พร้อมสลิปที่แนบไว้' },
   '/reports': { title: 'รายงาน', sub: 'เลือกช่วงเวลาและประเภท แล้วส่งออกได้ทันที' },
   '/manage': { title: 'จัดการข้อมูล', sub: 'หมวดหมู่ บัญชี บัตร และสัญญาหนี้' },
   '/history': { title: 'ประวัติทั้งหมด', sub: 'ทุกการเปลี่ยนแปลง พร้อมชื่อคนที่ทำ' },

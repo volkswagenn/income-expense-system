@@ -77,3 +77,27 @@ export async function undoPayment(statementId, amount, log = null) {
   }))
   return fromRow('card_statements', row)
 }
+
+/**
+ * ขาการจ่ายบิลทั้งหมด — บิลใบเดียวจ่ายได้หลายครั้งจากคนละกระเป๋า
+ *
+ * ใช้ทำหน้าประวัติการจ่าย และเป็นตัวที่ undo_card_payment ใช้คืนเงินทีละขา
+ * ตารางนี้เพิ่งมีในรุ่นหลัง บิลที่จ่ายไปก่อนหน้านั้นจึงไม่มีขา — หน้าประวัติ
+ * จะถอยไปอ่าน paid_at/paid_method ที่ตัวใบแทน
+ */
+export async function listStatementPayments() {
+  const { data, error } = await supabase
+    .from('card_statement_payments')
+    .select('*')
+    .eq('shop_id', getShopId())
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    if (isMissingTable(error)) {
+      console.warn('ยังไม่มีตาราง card_statement_payments — รัน supabase/card.sql')
+      return []
+    }
+    throw new Error(toThaiError(error))
+  }
+  return fromRows('card_statement_payments', data)
+}
