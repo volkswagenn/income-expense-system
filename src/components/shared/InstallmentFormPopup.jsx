@@ -8,6 +8,7 @@ import CreditCardPicker from './CreditCardPicker'
 import ConfirmPopup from './ConfirmPopup'
 import useCreditCardStore from '../../store/useCreditCardStore'
 import useWalletStore from '../../store/useWalletStore'
+import useTransactionStore from '../../store/useTransactionStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import InstallmentPips from './InstallmentPips'
 import PerInstallmentPopup from './PerInstallmentPopup'
@@ -234,8 +235,10 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
           newValue: { ...data, cardId: form.cardId },
         }))
       }
-      // งวดที่จ่ายไปแล้วอาจถูกคืนเงินจากฝั่งฐานข้อมูล ยอดกระเป๋าจึงต้องดึงใหม่
-      await refreshWallet()
+      // ฝั่งฐานข้อมูลอาจคืนเงินงวดที่จ่ายไปแล้ว และอาจ "สร้างรายจ่าย" ให้งวดที่ตกใน
+      // รอบที่ออกบิลไปแล้ว (attach_installment_to_closed_statements) — รายการในรอบบิล
+      // ของหน้าบัตรอ่านจากรายจ่ายพวกนั้น ถ้าไม่ดึงรายการใหม่ด้วย จะไม่เห็นจนกว่าจะรีเฟรชหน้า
+      await Promise.all([refreshWallet(), useTransactionStore.getState().refresh()])
       onSaved?.()
       onClose()
     } catch (e) {
