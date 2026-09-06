@@ -105,3 +105,29 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #D6D3CA; border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: #BEBAB0; }
+
+/* ── แท็บแบบแฟ้ม (folder tab) ────────────────────────────────────────────────
+   แถบเข้มด้านบน แท็บที่เลือกเป็นสีขาวเชื่อมต่อลงมาถึงเนื้อหาข้างล่างเป็นชิ้นเดียว
+   มุมเว้าโค้งสองข้างที่โคนแท็บทำด้วย box-shadow บน pseudo-element (วิธีมาตรฐาน
+   ที่ไม่ต้องใช้รูป) ใช้ที่หน้าบัตร: รายการในรอบบิลนี้ / รอบบิลหน้า */
+.folder-tab { position: relative; }
+.folder-tab.is-active::before,
+.folder-tab.is-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  background: transparent;
+  pointer-events: none;
+}
+.folder-tab.is-active::before {
+  left: -12px;
+  border-bottom-right-radius: 12px;
+  box-shadow: 6px 6px 0 6px #fff;
+}
+.folder-tab.is-active::after {
+  right: -12px;
+  border-bottom-left-radius: 12px;
+  box-shadow: -6px 6px 0 6px #fff;
+}

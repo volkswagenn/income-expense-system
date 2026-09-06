@@ -267,6 +267,11 @@ export default function CardDetailView({ cardId }) {
   // วันนี้แบบ 'YYYY-MM-DD' ตามเวลาเครื่อง — ใช้ตัดสินว่างวดที่ค้างเลยกำหนดหรือยัง
   const todayStr = toDateString(new Date())
 
+  // งวดผ่อนของรอบหน้าค่อยโผล่ในรายการหลังพ้นกำหนดชำระบิลใบปัจจุบัน (หรือจ่ายแล้ว)
+  // ก่อนหน้านั้นคนกำลังไล่บิลใบที่ต้องจ่าย ถ้าเห็นงวดถัดไปโผล่มาพร้อมกัน
+  // จะสับสนว่าต้องจ่ายงวดไหนกันแน่ (ยอดเงินยังนับรวมในกล่องสรุปตามเดิม)
+  const upcomingVisible = !bill || bill.dueDate < todayStr
+
   // รายการในรอบบิลที่กำลังเดินอยู่ — รวมยอดรูด เงินคืน และเงินสดที่กดจากบัตร
   const cycleRows = useMemo(() => {
     if (!card) return []
@@ -301,6 +306,9 @@ export default function CardDetailView({ cardId }) {
         // รวมงวดตกค้างจากรอบก่อนที่ยังไม่ถูกเก็บด้วย — บิลใบนี้จะกวาดมันมาเก็บ
         if (e.status !== 'pending' || e.cycle > p.cycle) continue
         if (billedIds.has(e.id)) continue
+        // งวดของรอบนี้เอง รอให้พ้นกำหนดชำระบิลใบก่อนค่อยแสดง — งวดตกค้างจากรอบก่อน
+        // ยังแสดงเสมอ เพราะเป็นของที่ค้างจริงและควรเห็นทันที
+        if (!upcomingVisible && e.cycle === p.cycle) continue
 
         // งวดของสัญญานี้ที่ "เข้าบิลไปแล้วแต่ยังไม่ได้จ่าย" (อยู่ในใบก่อนหน้า) — ถ้ามี
         // นั่นคืองวดที่ผู้ใช้ค้างอยู่จริง หัวแถวต้องพูดถึงงวดนั้น ไม่ใช่งวดที่กำลังจะเข้าบิลนี้
@@ -335,7 +343,7 @@ export default function CardDetailView({ cardId }) {
     }
 
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr])
+  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr, upcomingVisible])
 
   /**
    * รายการของบิลใบที่ออกไปแล้วและยังไม่จ่าย (แท็บ "รอบบิลนี้") — มาจากสามที่
@@ -896,47 +904,46 @@ export default function CardDetailView({ cardId }) {
 
         <div className="card flex flex-col overflow-hidden">
           {/* สองแท็บ = สองบิล รายการอยู่แท็บไหนถูกเรียกเก็บในบิลนั้น
-              รูดหลังวันสรุปยอดมาลง "รอบบิลหน้า" เอง ถ้าธนาคารเก็บในใบที่ออกแล้วก็กดย้าย */}
-          <div className="flex items-center gap-2.5 px-4 pt-3 pb-2 flex-none flex-wrap">
-            {showTabs ? (
-              <div className="flex gap-1.5 flex-wrap">
-                {[
-                  { k: 'this', t: 'รายการในรอบบิลนี้', s: `ครบกำหนด ${formatIsoThai(bill.dueDate)} · ออกบิลแล้ว`, n: billRows.length },
-                  { k: 'next', t: 'รายการในรอบบิลหน้า', s: current ? `ตัดรอบ ${formatThaiDate(current.end)} · ครบกำหนด ${formatThaiDate(current.due)}` : '', n: cycleRows.length },
-                ].map((tab) => {
-                  const on = billTab === tab.k
-                  return (
-                    <button
-                      key={tab.k}
-                      onClick={() => setBillTab(tab.k)}
-                      className={`h-9 px-3 rounded-[10px] flex items-center gap-2 border transition ${
-                        on ? 'bg-ink text-white border-ink' : 'bg-white border-hairline hover:bg-paper'
-                      }`}
-                    >
-                      <span className="text-[12.5px] font-semibold">{tab.t}</span>
-                      <span className={`hidden sm:inline text-[10.5px] ${on ? 'text-white/70' : 'text-faint'}`}>{tab.s}</span>
-                      <span className={`tabular-nums text-[10.5px] font-semibold rounded-md px-1.5 py-px ${
-                        on ? 'bg-white/15 text-white' : 'bg-expense-soft text-[#A93A2E]'
-                      }`}>
-                        {tab.n}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <>
-                <span className="text-sm font-semibold">รายการในรอบบิลนี้</span>
-                <span className="tabular-nums text-[11px] font-semibold bg-expense-soft text-[#A93A2E] rounded-md px-2 py-0.5">
-                  {cycleRows.length} รายการ
-                </span>
-                <span className="ml-auto text-xs text-faint">
-                  {current ? `รอบ ${current.cycle} · สรุปยอด ${formatThaiDate(current.end)}` : ''}
-                </span>
-              </>
-            )}
-          </div>
-          <div className="px-4 pb-1 text-[11px] text-faint">
+              รูดหลังวันสรุปยอดมาลง "รอบบิลหน้า" เอง ถ้าธนาคารเก็บในใบที่ออกแล้วก็กดย้าย
+              แท็บแบบแฟ้ม: แถบเข้มด้านบน แท็บที่เลือกเป็นสีขาวเชื่อมกับเนื้อหาข้างล่าง */}
+          {showTabs ? (
+            <div className="flex items-end gap-1 px-3 pt-2 bg-ink flex-none">
+              {[
+                { k: 'this', t: 'รายการในรอบบิลนี้', s: `ครบกำหนด ${formatIsoThai(bill.dueDate)} · ออกบิลแล้ว`, n: billRows.length },
+                { k: 'next', t: 'รายการในรอบบิลหน้า', s: current ? `ตัดรอบ ${formatThaiDate(current.end)} · ครบกำหนด ${formatThaiDate(current.due)}` : '', n: cycleRows.length },
+              ].map((tab) => {
+                const on = billTab === tab.k
+                return (
+                  <button
+                    key={tab.k}
+                    onClick={() => setBillTab(tab.k)}
+                    className={`folder-tab ${on ? 'is-active' : ''} h-10 px-4 rounded-t-[12px] flex items-center gap-2 transition-colors ${
+                      on ? 'bg-white text-ink' : 'text-white/75 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="text-[12.5px] font-semibold whitespace-nowrap">{tab.t}</span>
+                    <span className={`hidden md:inline text-[10.5px] whitespace-nowrap ${on ? 'text-faint' : 'text-white/55'}`}>{tab.s}</span>
+                    <span className={`tabular-nums text-[10.5px] font-semibold rounded-full px-1.5 py-px ${
+                      on ? 'bg-ink text-white' : 'bg-white/20 text-white'
+                    }`}>
+                      {tab.n}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 px-4 pt-3 pb-2 flex-none flex-wrap">
+              <span className="text-sm font-semibold">รายการในรอบบิลนี้</span>
+              <span className="tabular-nums text-[11px] font-semibold bg-expense-soft text-[#A93A2E] rounded-md px-2 py-0.5">
+                {cycleRows.length} รายการ
+              </span>
+              <span className="ml-auto text-xs text-faint">
+                {current ? `รอบ ${current.cycle} · สรุปยอด ${formatThaiDate(current.end)}` : ''}
+              </span>
+            </div>
+          )}
+          <div className={`px-4 pb-1 text-[11px] text-faint ${showTabs ? 'pt-2.5' : ''}`}>
             {showTabs && billTab === 'this'
               ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
               : (showTabs ? 'รายการที่รูดหลังวันสรุปยอดมาอยู่ที่นี่ จะถูกเรียกเก็บในบิลรอบถัดไป · ถ้าธนาคารเก็บในบิลใบที่ออกแล้ว กด "ย้ายไปรอบบิลนี้" · ' : 'รายการที่รูดหลังวันสรุปยอดจะย้ายไปอยู่บิลรอบถัดไปให้เอง · ')
@@ -1053,6 +1060,9 @@ export default function CardDetailView({ cardId }) {
                 <div>
                   งวดผ่อนที่จะรวมมากับบิลรอบนี้ <b className="tabular-nums">{installmentOutlook.thisCount}</b> งวด
                   รวม <b className="tabular-nums">{fmt(installmentOutlook.thisAmount)}</b> บาท
+                  {!upcomingVisible && bill && (
+                    <> — จะขึ้นเป็นรายการหลังพ้นกำหนดชำระบิลใบปัจจุบัน ({formatIsoThai(bill.dueDate)}) หรือเมื่อจ่ายบิลแล้ว</>
+                  )}
                 </div>
               )}
               {installmentOutlook.laterCount > 0 && (
