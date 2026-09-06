@@ -110,6 +110,7 @@ select * from (
     ('card_installment_entries', 'paid_at',             'card.sql'),
     ('card_installment_entries', 'paid_method',         'card.sql'),
     ('card_installment_entries', 'transfer_account_id', 'card.sql'),
+    ('transactions',             'card_statement_id',   'card.sql'),
     ('categories',               'sort_order',          'categories.sql')
   ) as t(tbl, col, file)
 
@@ -124,6 +125,10 @@ select * from (
   from (values
     ('pay_installment_entry',  'card.sql'),
     ('undo_installment_entry', 'card.sql'),
+    ('attach_installment_to_closed_statements', 'card.sql'),
+    ('attach_transaction_to_statement',         'card.sql'),
+    ('detach_transaction_from_statement',       'card.sql'),
+    ('apply_statement_delta',                   'card.sql'),
     ('reorder_categories',     'categories.sql')
   ) as t(fn, file)
 

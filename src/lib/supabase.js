@@ -65,7 +65,13 @@ export function toThaiError(error) {
   // PGRST204 = ส่งคอลัมน์ที่ตารางยังไม่มี แปลว่าโค้ดใหม่ถูก deploy ไปแล้วแต่ยังไม่ได้
   // อัปเดตโครงสร้างฐานข้อมูล — ข้อความดิบเป็นภาษาอังกฤษที่ผู้ใช้เดาทางแก้ไม่ออกเลย
   if (error.code === 'PGRST204' || /Could not find the .* column|schema cache/i.test(msg)) {
-    return 'ฐานข้อมูลยังไม่ได้อัปเดตโครงสร้าง — เปิด Supabase → SQL Editor แล้วรัน supabase/check.sql เพื่อดูว่าขาดอะไรและต้องรันไฟล์ไหน (รันซ้ำได้ ข้อมูลเดิมไม่หาย)'
+    // บอกชื่อสิ่งที่ขาดไปเลย — "ฐานข้อมูลยังไม่ได้อัปเดต" เฉยๆ ผู้ใช้จะเถียงว่ารันแล้ว
+    // (ซึ่งมักรันไฟล์เก่าที่ค้างในแท็บ) พอเห็นชื่อฟังก์ชันจะรู้ทันทีว่าไฟล์ที่รันไม่ใช่ตัวล่าสุด
+    const fn = msg.match(/function\s+(?:public\.)?([a-z_]+)\s*\(/i)?.[1]
+    const col = msg.match(/the '?([a-z_]+)'? column/i)?.[1]
+    const what = fn ? `ฟังก์ชัน ${fn}` : col ? `คอลัมน์ ${col}` : 'บางส่วนของโครงสร้าง'
+    const file = /card|statement|installment|advance/i.test(fn ?? col ?? '') ? 'supabase/card.sql' : 'supabase/check.sql'
+    return `ฐานข้อมูลยังไม่มี${what} — เปิด Supabase → SQL Editor วาง ${file} ตัวล่าสุดจาก repo ทับทั้งไฟล์แล้ว Run (ถ้ารันแล้วยังขึ้น แปลว่าไฟล์ในแท็บเป็นตัวเก่า) รันซ้ำได้ ข้อมูลเดิมไม่หาย`
   }
   if (/Invalid login credentials/i.test(msg)) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
   if (/Email not confirmed/i.test(msg)) return 'บัญชีนี้ยังไม่ได้ยืนยัน ติดต่อเจ้าของร้าน'
