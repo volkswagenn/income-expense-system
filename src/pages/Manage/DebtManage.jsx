@@ -83,7 +83,7 @@ function DebtEditPopup({ debt, entries = [], onSave, onClose, busy }) {
     firstDue: debt.firstDue ?? '',
     prepaid: (debt.prepaidCount ?? 0) > 0,
     prepaidCount: String(debt.prepaidCount ?? ''),
-    method: debt.defaultMethod ?? 'transfer',
+    method: debt.defaultMethod ?? '',
     accountId: debt.defaultAccountId ?? '',
   }))
   const [error, setError] = useState('')

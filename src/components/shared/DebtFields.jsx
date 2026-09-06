@@ -24,7 +24,8 @@ export const EMPTY_DEBT = {
   firstDue: '',
   prepaid: false,
   prepaidCount: '',
-  method: 'transfer',
+  // ว่าง = ยังไม่ระบุ ไปเลือกเอาตอนกดจ่ายจริง (ดูเหตุผลใน validateDebt)
+  method: '',
   accountId: '',
   categoryId: '',
   term: 'auto',           // 'auto' = ไม่เกิน 12 งวดเป็นระยะสั้น ที่เหลือระยะยาว | 'short' | 'long'
@@ -95,7 +96,8 @@ export function validateDebt(v, calc) {
     return `งวดแรกครบกำหนดใกล้เกินไป ผ่อนมาแล้วได้มากสุด ${calc.maxPrepaid} งวด` +
       (calc.suggestFirstDue ? ` — ตั้งงวดแรกไม่เกิน ${formatThaiDate(calc.suggestFirstDue)}` : '')
   }
-  if (v.method === 'transfer' && !v.accountId) return 'เลือกบัญชีที่จะใช้จ่าย'
+  // ไม่บังคับให้เลือกบัญชีตั้งแต่ตอนสร้าง — ตอนทำสัญญายังไม่รู้ว่างวดหน้าจะจ่ายจากไหน
+  // และมันเปลี่ยนได้ทุกงวดอยู่แล้ว ที่ที่ต้องรู้จริงคือตอนกดจ่าย ซึ่งป๊อปอัปจ่ายบังคับอยู่แล้ว
   return null
 }
 
@@ -259,18 +261,34 @@ export default function DebtFields({ value: v, onChange, hideName = false, hideC
           </div>
         )}
 
+        {/* ช่องนี้ไม่บังคับ — ตอนทำสัญญายังไม่รู้ว่างวดหน้าจะจ่ายจากไหน และเปลี่ยนได้ทุกงวด
+            ตั้งไว้ก็แค่ช่วยให้ป๊อปอัปจ่ายเลือกให้ล่วงหน้า ไม่ตั้งก็ไปเลือกตอนกดจ่าย */}
         <div>
-          <label className="label">{isRecv ? 'รับคืนเข้า (ค่าเริ่มต้น)' : 'จ่ายจาก (ค่าเริ่มต้น)'}</label>
-          <div className="flex gap-1.5 mb-1.5">
-            {[{ k: 'cash', t: '💵 เงินสด' }, { k: 'transfer', t: '🏦 เงินโอน' }].map((o) => (
-              <button key={o.k} type="button"
+          <label className="label">
+            {isRecv ? 'รับคืนเข้า' : 'จ่ายจาก'}
+            <span className="ml-1.5 font-normal text-faint">ไม่บังคับ</span>
+          </label>
+          <div className="flex gap-1.5 mb-1.5 flex-wrap">
+            {[
+              { k: '', t: 'ยังไม่ระบุ' },
+              { k: 'cash', t: '💵 เงินสด' },
+              { k: 'transfer', t: '🏦 เงินโอน' },
+            ].map((o) => (
+              <button key={o.k || 'none'} type="button"
                 className={`btn text-xs py-1 px-3 ${v.method === o.k ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => set('method', o.k)}>{o.t}</button>
+                onClick={() => set(
+                  'method', o.k,
+                )}>{o.t}</button>
             ))}
           </div>
           {v.method === 'transfer' && (
             <TransferAccountPicker value={v.accountId} onChange={(id) => set('accountId', id)} label="" />
           )}
+          <p className="text-[11px] text-faint leading-snug mt-1">
+            {v.method
+              ? 'ตั้งไว้เป็นค่าเริ่มต้น ตอนกดจ่ายแต่ละงวดยังเปลี่ยนได้'
+              : 'ข้ามได้เลย ตอนกดจ่ายแต่ละงวดค่อยเลือกว่าจะตัดจากไหน'}
+          </p>
         </div>
 
         {/* ป้ายงวด — บันทึกหนี้ที่ผ่อนมาก่อนแล้ว ต้องเห็นวันที่ของแต่ละงวดถึงจะรู้ว่า

@@ -177,6 +177,10 @@ const useCreditCardStore = create((set, get) => ({
   createInstallment: async (cardId, data, schedule, log) => {
     const ins = await instApi.createInstallment(cardId, data, schedule, log)
     await get().refresh()
+    // สัญญาที่บันทึกย้อนหลังมักมีงวดตกอยู่ในรอบที่ผ่านไปแล้วและยังไม่มีใบแจ้งยอด
+    // ปิดรอบพวกนั้นให้ทันที งวดจะได้ขึ้นบิลของรอบตัวเองพร้อมวันครบกำหนดที่ถูกต้อง
+    // แทนที่จะไปกองรวมอยู่ในบิลใบหน้าจนกว่าจะมีใครเปิดหน้าบัตรอีกครั้ง
+    await get().ensureStatements()
     return ins
   },
 
@@ -216,6 +220,8 @@ const useCreditCardStore = create((set, get) => ({
   updateInstallmentPlan: async (id, cardId, data, schedule, log) => {
     const ins = await instApi.updateInstallmentPlan(id, cardId, data, schedule, log)
     await get().refresh()
+    // แก้แผนแล้ววันที่ของงวดขยับได้ อาจมีงวดตกไปอยู่ในรอบที่ผ่านมาแล้ว — เหตุผลเดียวกับตอนสร้าง
+    await get().ensureStatements()
     return ins
   },
 

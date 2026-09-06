@@ -64,7 +64,8 @@ function Meta({ label, value }) {
 
 /**
  * สีป้ายงวด — สามสถานะที่ต้องแยกออกจากกันให้ได้ในแวบเดียว
- *   จ่ายแล้ว = เขียว · งวดที่กำลังถูกเก็บ = กล่องขาวขอบเข้ม · ยังไม่ถึงรอบ = เทาจาง
+ *   จ่ายแล้ว = เขียว · งวดของแถวนี้ = กล่องขาวขอบเข้ม · เข้าบิลแล้วรอจ่ายบิล = ชมพู
+ *   ยังไม่ถึงรอบ = เทาจาง
  *
  * งวดที่กำลังถูกเก็บต้องเป็นกล่องขาว ไม่ใช่เทาแบบเดียวกับงวดที่ยังมาไม่ถึง
  * เพราะสองอย่างนี้คนละเรื่องกันโดยสิ้นเชิง อันหนึ่งต้องเตรียมเงินไว้เดี๋ยวนี้
@@ -74,6 +75,10 @@ const PIP_TONE = {
   paid:    'bg-lime border-[#A9CF3A] text-ink',
   prepaid: 'bg-lime border-[#A9CF3A] text-ink',
   current: 'bg-white border-ink text-ink shadow-[0_0_0_1px_#16181D]',
+  // งวดที่ค้างอยู่และเลยวันครบกำหนดของใบมาแล้ว — กรอบแดง ไม่ใช่ขาว
+  overdue: 'bg-white border-expense text-expense shadow-[0_0_0_1px_#C03A2D]',
+  // เข้าบิลไปแล้วแต่ยังไม่ได้จ่ายบิลใบนั้น และไม่ใช่งวดที่เน้น — ชมพูจาง
+  billed:  'bg-expense-soft border-[#F0C4BE] text-[#A93A2E]',
   pending: 'bg-paper border-hairline text-faint',
 }
 const PIP_LABEL = {
@@ -94,18 +99,22 @@ const PIP_LIMIT = 12
  *
  * ป้ายกว้างเท่าเนื้อหาพอดีและตัดบรรทัดเอง จึงลงในที่ว่างของแถวได้โดยไม่ดันคอลัมน์อื่น
  */
-function EntryPips({ rows }) {
+function EntryPips({ rows, currentSeq: currentSeqProp = null, overdue = false }) {
   const list = (rows ?? []).filter((r) => r.status !== 'cancelled')
   if (list.length === 0) return null
   const shown = list.slice(0, PIP_LIMIT)
   const hidden = list.length - shown.length
-  // งวดที่กำลังถูกเก็บ = งวดแรกที่ยังไม่จ่าย ไม่ว่าจะเข้าบิลแล้วหรือกำลังจะเข้า
-  // (ก่อนตัดรอบสถานะยังเป็น pending เหมือนงวดปีหน้า จึงดูจากลำดับแทนสถานะ)
-  const currentSeq = list.find((r) => r.status !== 'paid' && r.status !== 'prepaid')?.seq ?? null
+  // งวดที่เน้น = งวดที่ผู้ใช้ค้างอยู่จริงตอนนี้: งวดแรกที่ยังไม่จ่าย ไม่ว่าจะเข้าบิลแล้ว
+  // (billed) หรือกำลังจะเข้า (pending) — ตามที่ธนาคารมอง งวดที่เข้าบิลแล้วแต่ยังไม่จ่าย
+  // ยังเป็นภาระของงวดนั้น ไม่ได้ถูกเลื่อนไปงวดถัดไป ที่เรียกใช้ระบุมาแทนได้
+  const currentSeq = currentSeqProp
+    ?? list.find((r) => r.status !== 'paid' && r.status !== 'prepaid')?.seq
+    ?? null
   const toneOf = (r) =>
     r.status === 'paid' || r.status === 'prepaid' ? PIP_TONE[r.status]
-      : r.seq === currentSeq || r.status === 'billed' ? PIP_TONE.current
-        : PIP_TONE.pending
+      : r.seq === currentSeq ? (overdue ? PIP_TONE.overdue : PIP_TONE.current)
+        : r.status === 'billed' ? PIP_TONE.billed
+          : PIP_TONE.pending
   return (
     <span className="flex flex-wrap items-center gap-1">
       {shown.map((r) => (
@@ -113,7 +122,7 @@ function EntryPips({ rows }) {
           key={r.seq}
           title={'งวดที่ ' + r.seq + ' จาก ' + list.length + ' · ครบกำหนด ' + formatIsoThai(r.dueDate)
             + ' · ' + fmt(r.amount) + ' บาท · '
-            + (r.seq === currentSeq && r.status === 'pending' ? 'งวดที่กำลังถูกเก็บ' : (PIP_LABEL[r.status] ?? r.status))}
+            + (r.seq === currentSeq && r.status === 'pending' ? 'งวดที่แถวนี้พูดถึง' : (PIP_LABEL[r.status] ?? r.status))}
           className={'inline-flex items-center gap-1 h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums '
             + toneOf(r)}
         >
@@ -202,6 +211,9 @@ export default function CardDetailView({ cardId }) {
   )
   const unbilledAdvances = advances.filter((a) => !a.statementId)
 
+  // วันนี้แบบ 'YYYY-MM-DD' ตามเวลาเครื่อง — ใช้ตัดสินว่างวดที่ค้างเลยกำหนดหรือยัง
+  const todayStr = toDateString(new Date())
+
   // รายการในรอบบิลที่กำลังเดินอยู่ — รวมยอดรูด เงินคืน และเงินสดที่กดจากบัตร
   const cycleRows = useMemo(() => {
     if (!card) return []
@@ -236,25 +248,45 @@ export default function CardDetailView({ cardId }) {
         // รวมงวดตกค้างจากรอบก่อนที่ยังไม่ถูกเก็บด้วย — บิลใบนี้จะกวาดมันมาเก็บ
         if (e.status !== 'pending' || e.cycle > p.cycle) continue
         if (billedIds.has(e.id)) continue
+
+        // งวดของสัญญานี้ที่ "เข้าบิลไปแล้วแต่ยังไม่ได้จ่าย" (อยู่ในใบก่อนหน้า) — ถ้ามี
+        // นั่นคืองวดที่ผู้ใช้ค้างอยู่จริง หัวแถวต้องพูดถึงงวดนั้น ไม่ใช่งวดที่กำลังจะเข้าบิลนี้
+        // ธนาคารไม่ได้ "เลื่อน" งวดที่ค้าง มันยังอยู่ในใบเดิม แค่ยอดถูกยกมา (ยอดยกมา)
+        const owed = allEntries
+          .filter((x) => x.installmentId === ins.id && x.status === 'billed')
+          .sort((a, b) => a.seq - b.seq)[0] ?? null
+        const owedStmt = owed ? statements.find((s) => s.id === owed.statementId) : null
+        const owedDue = owedStmt?.dueDate ?? owed?.dueDate ?? null
+        const owedOverdue = !!owedDue && owedDue < todayStr
+
         rows.push({
           key: `ie-${e.id}`, tx: null, date: to, upcoming: true, installment: ins,
-          name: `${ins.name} — งวดที่ ${e.seq}/${ins.months}`,
-          cat: `ครบกำหนด ${formatIsoThai(e.dueDate)}`,
+          // งวดที่ค้างอยู่ขึ้นก่อน (ถ้ามี) ไม่งั้นก็งวดที่จะเข้าบิลนี้
+          name: owed
+            ? `${ins.name} — งวดที่ ${owed.seq}/${ins.months} ${owedOverdue ? 'เกินกำหนด' : 'รอจ่ายบิล'} ${formatIsoThai(owedDue)}`
+            : `${ins.name} — งวดที่ ${e.seq}/${ins.months}`,
+          // งวด "เข้าบิล" ตอนตัดรอบ ไม่ใช่ตอนครบกำหนด — สองวันนี้คนละความหมาย
+          // ตัดรอบ = ธนาคารบันทึกงวดลงใบ · ครบกำหนด = วันสุดท้ายที่ต้องจ่ายใบนั้น
+          cat: `งวด ${e.seq} เข้าบิลนี้ตอนตัดรอบ ${formatThaiDate(p.end)} · ชำระภายใน ${formatThaiDate(p.due)}`,
           tag: 'งวดผ่อน', amount: Number(e.amount || 0), entry: e,
+          owed, owedOverdue,
         })
       }
     }
 
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions])
+  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr])
 
   // สรุปงวดผ่อน: ที่รวมอยู่ในบิลรอบนี้ กับที่เหลือไปรอบถัดๆ ไป
   const installmentOutlook = useMemo(() => {
     const ids = new Set(installments.map((i) => i.id))
     const pending = allEntries.filter((e) => ids.has(e.installmentId) && e.status === 'pending')
+    // <= ไม่ใช่ = : งวดที่ตกค้างจากรอบก่อน (รอบที่ยังไม่มีใบแจ้งยอด) จะถูกกวาดมา
+    // เก็บในบิลใบถัดไปด้วย ต้องนับเป็น "รอบนี้" ให้ตรงกับรายการที่แสดงข้างบน
+    // ไม่งั้นกล่องสรุปจะบอกจำนวนงวดไม่ตรงกับที่เห็นในรายการ
     const cycle = current?.cycle
-    const inThis = pending.filter((e) => e.cycle === cycle)
-    const later = pending.filter((e) => e.cycle !== cycle)
+    const inThis = pending.filter((e) => e.cycle <= cycle)
+    const later = pending.filter((e) => e.cycle > cycle)
     const sum = (list) => list.reduce((t, e) => t + Number(e.amount || 0), 0)
     return {
       thisCount: inThis.length, thisAmount: sum(inThis),
@@ -777,7 +809,14 @@ export default function CardDetailView({ cardId }) {
                     <span className="block text-[11px] text-faint truncate">{r.cat}</span>
                     {prog && (
                       <span className="flex items-center gap-2 mt-1 flex-wrap">
-                        <EntryPips rows={prog.rows} />
+                        {/* เน้นงวดที่ "แถวนี้" พูดถึง ไม่ใช่งวดแรกที่ยังไม่จ่ายของทั้งสัญญา
+                            สองอันนี้ต่างกันได้ เช่นงวดก่อนหน้าเข้าบิลใบที่แล้วแต่ยังไม่ได้จ่ายบิล
+                            ถ้าเน้นผิดตัว หัวแถวจะบอกงวดหนึ่งแต่กรอบขาวไปอยู่อีกงวด */}
+                        <EntryPips
+                          rows={prog.rows}
+                          currentSeq={r.owed?.seq ?? insEntry.e?.seq ?? r.entry?.seq}
+                          overdue={!!r.owedOverdue}
+                        />
                         <span className="text-[10.5px] text-faint">
                           จ่ายแล้ว {prog.paidCount + prog.prepaidCount} จาก {insEntry.i.months} งวด
                         </span>
@@ -928,7 +967,15 @@ export default function CardDetailView({ cardId }) {
                 {/* แถบเดียวบอกได้แค่สัดส่วน ซึ่งข้อความ "งวด x จาก y" บรรทัดบนบอกไปแล้ว
                     ป้ายรายงวดบอกต่อได้ว่างวดไหนครบกำหนดวันไหนและงวดไหนกำลังจะถูกเก็บ */}
                 <div className="mt-1.5">
-                  <EntryPips rows={p.rows} />
+                  {/* กรอบแดงถ้างวดที่ค้างอยู่เลยวันครบกำหนดของใบมาแล้ว */}
+                  <EntryPips
+                    rows={p.rows}
+                    overdue={(() => {
+                      const owed = p.rows.find((x) => x.status === 'billed')
+                      const due = owed ? (statements.find((s) => s.id === owed.statementId)?.dueDate ?? owed.dueDate) : null
+                      return !!due && due < todayStr
+                    })()}
+                  />
                 </div>
                 {next && (
                   <div className="flex items-center gap-2 mt-1.5">
