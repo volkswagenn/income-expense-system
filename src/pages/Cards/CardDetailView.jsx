@@ -394,7 +394,10 @@ export default function CardDetailView({ cardId }) {
         amount: t.type === 'income' ? -Number(t.amount || 0) : Number(t.amount || 0),
         movable: !!t.cardStatementId,
         // ในบิลที่ออกแล้ว "จ่ายยอดนี้" = จ่ายบิลด้วยยอดของรายการ (ไม่ใช่ขาจ่ายล่วงหน้า)
-        prepayable: t.type === 'expense' && !t.installmentEntryId,
+        // ค่างวดผ่อนก็จ่ายแบบนี้ได้ ต่างจากรอบที่ยังไม่ออกบิลซึ่งงวดยังไม่เป็นรายจ่าย
+        // และมีปุ่มจ่ายค่างวดของตัวเองอยู่แล้ว — พองวดเข้าบิลไปแล้วมันคือยอดหนึ่งบรรทัด
+        // ในบิลเหมือนรายการอื่น จ่ายเฉพาะบรรทัดนั้นได้ ที่เหลือของบิลยังค้างต่อไป
+        prepayable: t.type === 'expense',
       }))
     for (const a of advances) {
       if (a.statementId !== bill.id) continue
@@ -407,9 +410,23 @@ export default function CardDetailView({ cardId }) {
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
   }, [bill, transactions, advances, cardId, getCategoryName])
 
-  // ไม่มีบิลค้าง = ไม่มีแท็บ ตารางคือรอบที่กำลังสะสมอย่างเดียว
-  const showTabs = !!bill
-  const shownRows = showTabs && billTab === 'this' ? billRows : cycleRows
+  /**
+   * สองแท็บมีเสมอทุกใบ ไม่ว่าจะมีบิลค้างหรือไม่
+   *
+   * ของเดิมซ่อนแท็บทิ้งเมื่อไม่มีบิลค้าง แล้วโชว์รายการก้อนเดียวโดยพาดหัวว่า
+   * "รายการในรอบบิลนี้" — ซึ่งเป็นคนละความหมายกับแท็บชื่อเดียวกันของบัตรที่มีบิลค้าง
+   * (ที่นั่นหมายถึงบิลที่ออกแล้ว ที่นี่หมายถึงรอบที่ยังสะสมอยู่) บัตรแต่ละใบจึงหน้าตา
+   * ไม่เหมือนกัน และคำเดียวกันแปลได้สองอย่าง คนอ่านเลยนึกว่าบัตรใบอื่นไม่มีรอบบิลหน้า
+   *
+   * ให้โครงเหมือนกันทุกใบแทน: แท็บซ้าย = บิลที่ออกแล้ว (ไม่มีก็บอกว่าไม่มีบิลค้าง)
+   * แท็บขวา = รอบที่กำลังสะสม ซึ่งมีอยู่ทุกใบเสมอ
+   */
+  const hasBill = !!bill
+  const shownRows = billTab === 'this' ? billRows : cycleRows
+
+  // ไม่มีบิลค้างก็เปิดมาที่แท็บรอบบิลหน้า ซึ่งเป็นก้อนเดียวที่มีของให้ดู
+  // ผูก dependency กับ "มี/ไม่มีบิล" อย่างเดียว กดสลับแท็บเองทีหลังจึงไม่ถูกดีดกลับ
+  useEffect(() => { if (!hasBill) setBillTab('next') }, [hasBill])
 
   // สรุปงวดผ่อน: ที่รวมอยู่ในบิลรอบนี้ กับที่เหลือไปรอบถัดๆ ไป
   const installmentOutlook = useMemo(() => {
@@ -565,7 +582,7 @@ export default function CardDetailView({ cardId }) {
    */
   const rowMenuItems = (r, ins) => {
     if (r.tx) {
-      const inIssuedBill = showTabs && billTab === 'this'
+      const inIssuedBill = hasBill && billTab === 'this'
       const prepaidLeft = r.prepayable ? Math.abs(r.amount) - (r.prepaid?.amount ?? 0) : 0
       return [
         // จ่ายเฉพาะรายการนี้ — รูดแล้วโอนคืนทันทีไม่รอบิล (วิธีที่คนใช้บัตรจำนวนมากทำ)
@@ -1004,10 +1021,9 @@ export default function CardDetailView({ cardId }) {
           {/* สองแท็บ = สองบิล รายการอยู่แท็บไหนถูกเรียกเก็บในบิลนั้น
               รูดหลังวันสรุปยอดมาลง "รอบบิลหน้า" เอง ถ้าธนาคารเก็บในใบที่ออกแล้วก็กดย้าย
               แท็บแบบแฟ้ม: แถบเข้มด้านบน แท็บที่เลือกเป็นสีขาวเชื่อมกับเนื้อหาข้างล่าง */}
-          {showTabs ? (
-            <div className="flex items-end gap-1 px-3 pt-2 bg-ink flex-none">
+          <div className="flex items-end gap-1 px-3 pt-2 bg-ink flex-none">
               {[
-                { k: 'this', t: 'รายการในรอบบิลนี้', s: `ครบกำหนด ${formatIsoThai(bill.dueDate)} · ออกบิลแล้ว`, n: billRows.length },
+                { k: 'this', t: 'รายการในรอบบิลนี้', s: bill ? `ครบกำหนด ${formatIsoThai(bill.dueDate)} · ออกบิลแล้ว` : 'ไม่มีบิลค้าง', n: billRows.length },
                 { k: 'next', t: 'รายการในรอบบิลหน้า', s: current ? `ตัดรอบ ${formatThaiDate(current.end)} · ครบกำหนด ${formatThaiDate(current.due)}` : '', n: cycleRows.length },
               ].map((tab) => {
                 const on = billTab === tab.k
@@ -1029,28 +1045,23 @@ export default function CardDetailView({ cardId }) {
                   </button>
                 )
               })}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2.5 px-4 pt-3 pb-2 flex-none flex-wrap">
-              <span className="text-sm font-semibold">รายการในรอบบิลนี้</span>
-              <span className="tabular-nums text-[11px] font-semibold bg-expense-soft text-[#A93A2E] rounded-md px-2 py-0.5">
-                {cycleRows.length} รายการ
-              </span>
-              <span className="ml-auto text-xs text-faint">
-                {current ? `รอบ ${current.cycle} · สรุปยอด ${formatThaiDate(current.end)}` : ''}
-              </span>
-            </div>
-          )}
-          <div className={`px-4 pb-1 text-[11px] text-faint ${showTabs ? 'pt-2.5' : ''}`}>
-            {showTabs && billTab === 'this'
-              ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
-              : (showTabs ? 'รายการที่รูดหลังวันสรุปยอดมาอยู่ที่นี่ จะถูกเรียกเก็บในบิลรอบถัดไป · ถ้าธนาคารเก็บในบิลใบที่ออกแล้ว กด "ย้ายไปรอบบิลนี้" · ' : 'รายการที่รูดหลังวันสรุปยอดจะย้ายไปอยู่บิลรอบถัดไปให้เอง · ')
+          </div>
+          <div className="px-4 pb-1 pt-2.5 text-[11px] text-faint">
+            {billTab === 'this'
+              ? (hasBill
+                ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
+                : 'บัตรใบนี้ไม่มีบิลที่ต้องจ่าย · บิลใบถัดไปจะออกเองตอนสรุปยอด แล้วรายการจากแท็บ "รอบบิลหน้า" จะย้ายมาอยู่ที่นี่')
+              : (hasBill ? 'รายการที่รูดหลังวันสรุปยอดมาอยู่ที่นี่ จะถูกเรียกเก็บในบิลรอบถัดไป · ถ้าธนาคารเก็บในบิลใบที่ออกแล้ว กด "ย้ายไปรอบบิลนี้" · ' : 'ทุกรายการที่รูดในรอบนี้อยู่ที่นี่ และจะกลายเป็นบิลใบถัดไปตอนสรุปยอด · ')
                 + 'รูดแล้วโอนคืนทันที กด "จ่ายรายการนี้" ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง · กดปุ่ม ⋮ ท้ายแถวเพื่อจัดการรายการนั้น · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) · งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด'}
           </div>
           <div className="px-4 pb-3 overflow-x-auto">
             {shownRows.length === 0 ? (
               <p className="text-center text-[12.5px] text-faint py-8">
-                {showTabs && billTab === 'this' ? 'บิลใบนี้ไม่มีรายการ' : 'ยังไม่มีรายการในรอบนี้'}
+                {billTab === 'this'
+                  ? (hasBill
+                    ? 'บิลใบนี้ไม่มีรายการ'
+                    : `ไม่มีบิลที่ต้องจ่าย — บิลใบถัดไปจะออกตอนสรุปยอด${current ? ` ${formatThaiDate(current.end)}` : ''}`)
+                  : 'ยังไม่มีรายการในรอบนี้'}
               </p>
             ) : shownRows.map((r) => {
               const insEntry = r.upcoming
@@ -1114,7 +1125,7 @@ export default function CardDetailView({ cardId }) {
                         รอบที่ยังไม่ออกบิล = จ่ายล่วงหน้า (ยอดหายจากรอบสะสมทันที)
                         บิลที่ออกแล้ว = จ่ายบิลด้วยยอดของรายการนี้ */}
                     {r.prepayable && (
-                      showTabs && billTab === 'this' ? (
+                      hasBill && billTab === 'this' ? (
                         <button
                           disabled={busy}
                           onClick={() => openPayItemInBill(r)}
@@ -1143,7 +1154,7 @@ export default function CardDetailView({ cardId }) {
                     )}
                     {/* ปุ่มย้ายรอบบิล — เห็นได้เลยไม่ต้องเปิดเมนู เพราะเป็นงานที่ทำตอนไล่บิล
                         ทีละบรรทัด งวดผ่อนไม่มีปุ่ม (ตารางงวดกำหนดเอง) */}
-                    {showTabs && r.tx && !r.tx.installmentEntryId && (
+                    {hasBill && r.tx && !r.tx.installmentEntryId && (
                       billTab === 'next' ? (
                         <button
                           disabled={busy}
@@ -1198,7 +1209,7 @@ export default function CardDetailView({ cardId }) {
               )
             })}
           </div>
-          {(!showTabs || billTab === 'next') && (installmentOutlook.thisCount > 0 || installmentOutlook.laterCount > 0) && (
+          {billTab === 'next' && (installmentOutlook.thisCount > 0 || installmentOutlook.laterCount > 0) && (
             <div className="mx-4 mb-3 bg-recurring-soft rounded-[9px] px-2.5 py-2 text-[11px] text-[#5A3C90] leading-relaxed">
               {installmentOutlook.thisCount > 0 && (
                 <div>
