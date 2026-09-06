@@ -1756,15 +1756,46 @@ notify pgrst, 'reload schema';
 --   • เติมงวดเข้าบิลใบที่ยังไม่จ่ายจบของรอบนั้น (สร้างรายจ่าย + เพิ่มหนี้บัตร + ยกยอดบิล)
 --   • บิลที่จ่ายจบแล้วไม่แตะ งวดนั้นจะไปรวมกับบิลรอบถัดไปตามเดิม ซึ่งถูกต้องแล้ว
 -- รันซ้ำได้ไม่มีผลข้างเคียง งวดที่เติมไปแล้วเปลี่ยนสถานะเป็น billed จึงไม่ถูกหยิบอีก
+--
+-- รันจาก SQL Editor ไม่มีผู้ใช้ล็อกอิน auth.uid() จึงเป็น NULL แต่ฟังก์ชันที่เรียกต่อ
+-- (apply_wallet_effect → assert_can_edit) ตรวจสิทธิ์จาก auth.uid() → ล้มด้วย 42501
+-- "ไม่มีสิทธิ์แก้ไขข้อมูลของร้านนี้" แล้วทั้งไฟล์หยุดตรงนี้ ส่วนที่ 15 ไม่ได้รัน
+-- จึงต้องสวมตัวตนเจ้าของร้านชั่วคราวผ่าน claim ของ JWT (มีผลเฉพาะใน transaction นี้)
+-- รายจ่ายที่ถูกสร้างจะมี created_by เป็นเจ้าของร้าน เหมือนเจ้าของกดเองจากแอป
 do $$
 declare
-  v_id    uuid;
+  v_ins   record;
+  v_owner uuid;
   v_total int := 0;
+  v_skip  int := 0;
 begin
-  for v_id in select id from card_installments where status = 'active' loop
-    v_total := v_total + coalesce(attach_installment_to_closed_statements(v_id), 0);
+  for v_ins in
+    select i.id, i.shop_id from card_installments i where i.status = 'active'
+  loop
+    select user_id into v_owner
+      from shop_members
+     where shop_id = v_ins.shop_id and role in ('owner', 'editor')
+     order by case role when 'owner' then 0 else 1 end, created_at
+     limit 1;
+    if v_owner is null then
+      v_skip := v_skip + 1;
+      continue;
+    end if;
+
+    -- auth.uid() ของ Supabase อ่านจาก request.jwt.claims (รุ่นใหม่) หรือ request.jwt.claim.sub (รุ่นเก่า)
+    perform set_config('request.jwt.claims',
+      json_build_object('sub', v_owner::text, 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claim.sub', v_owner::text, true);
+
+    v_total := v_total + coalesce(attach_installment_to_closed_statements(v_ins.id), 0);
   end loop;
-  raise notice 'เติมงวดผ่อนเข้าบิลที่ออกไปแล้ว % งวด', v_total;
+
+  -- ถอดตัวตนออก ไม่ให้คำสั่งถัดไปในไฟล์ทำงานในนามใคร
+  -- ('{}' ไม่ใช่ '' เพราะ auth.uid() แปลงค่านี้เป็น jsonb สตริงว่างจะพังตอนอ่าน)
+  perform set_config('request.jwt.claims', '{}', true);
+  perform set_config('request.jwt.claim.sub', '', true);
+
+  raise notice 'เติมงวดผ่อนเข้าบิลที่ออกไปแล้ว % งวด (ข้ามร้านที่ไม่มีเจ้าของ % สัญญา)', v_total, v_skip;
 end $$;
 
 
