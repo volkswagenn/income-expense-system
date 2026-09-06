@@ -9,7 +9,7 @@ import AmountDisplay from '../../components/shared/AmountDisplay'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
-import AccountMenuPopup from './AccountMenuPopup'
+import WalletItemPopup from './WalletItemPopup'
 import { kindLabel } from '../Manage/AccountManage'
 
 /**
@@ -155,7 +155,7 @@ export default function TransferAccountList() {
         <MovePopup accounts={accounts} onConfirm={handleMove} onClose={() => setMoveOpen(false)} />
       )}
       {menuAccount && (
-        <AccountMenuPopup account={menuAccount} onClose={() => setMenuAccount(null)} />
+        <WalletItemPopup kind="bank" item={menuAccount} onClose={() => setMenuAccount(null)} />
       )}
     </div>
   )

@@ -119,3 +119,10 @@ export function yearsWithMovement(logs, getDelta) {
   }
   return [...set].filter(Boolean).sort((a, b) => b - a)
 }
+
+/** ยอดที่ log ใบนี้ทำให้เงินสดในร้านขยับ (บวก = เงินเข้า) */
+export function deltaForCash(log) {
+  return legsOf(log)
+    .filter((l) => l?.target === 'cash')
+    .reduce((s, l) => s + (Number(l.delta) || 0), 0)
+}

@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import WalletItemPopup from './WalletItemPopup'
 import MainWalletCard from './MainWalletCard'
 import LoanSummary from './LoanSummary'
 import SubWalletList from './SubWalletList'
@@ -49,6 +51,7 @@ function CardLink({ to, children }) {
  */
 export default function WalletPage() {
   const cash = useWalletStore((s) => s.cash)
+  const [cashOpen, setCashOpen] = useState(false)
   const accountCount = useWalletStore((s) => s.transferAccounts.length)
   const subCount = useWalletStore((s) => s.subWallets.length)
   const loansCount = useWalletStore((s) => s.loans.filter((l) => !l.returned).length)
@@ -81,7 +84,7 @@ export default function WalletPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 wide:grid-cols-3 gap-3 items-start">
         <WalletSection
           title="เงินสด"
-          hint="กดปุ่ม ⋮ ที่บัญชีเพื่อฝากเข้าบัญชี ถอนออกมา หรือดูความเคลื่อนไหว"
+          hint="กดปุ่ม ⋮ เพื่อฝากเข้าบัญชี ถอนออกมา กันเข้ากระเป๋าย่อย หรือดูความเคลื่อนไหวของเงินสด"
         >
           <div className="flex items-center gap-[11px] py-2.5 border-t border-[#F2F0EA] mt-2">
             <span className="w-8 h-8 flex-none rounded-[10px] bg-[#F2FAD9] text-[#5C7A0F] text-[10.5px] font-bold flex items-center justify-center">
@@ -92,7 +95,15 @@ export default function WalletPage() {
               <span className="block text-[11px] text-faint truncate">ยอดที่ระบบบันทึกไว้ ณ ตอนนี้</span>
             </span>
             <span className="tabular-nums flex-none text-sm font-bold text-income">{fmt(cash)}</span>
+            <button
+              onClick={() => setCashOpen(true)}
+              title="ฝากเข้าบัญชี ถอนเป็นเงินสด กันเข้ากระเป๋าย่อย หรือดูความเคลื่อนไหว"
+              className="flex-none w-8 h-8 rounded-ctl border border-hairline bg-white flex items-center justify-center text-muted hover:text-ink hover:bg-paper"
+            >
+              <Icon name="more_vert" size={17} />
+            </button>
           </div>
+          {cashOpen && <WalletItemPopup kind="cash" onClose={() => setCashOpen(false)} />}
 
           {cashMoves.length > 0 && (
             <div className="flex-none border-t border-hairline pt-2.5 mt-2.5">

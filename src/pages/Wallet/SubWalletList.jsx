@@ -184,7 +184,7 @@ export default function SubWalletList() {
           <p className="text-sm">ยังไม่มีกระเป๋าตังค์ กดสร้างเพื่อเพิ่ม</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="flex flex-col">
           {subWallets.map((w) => (
             <SubWalletCard
               key={w.id}
