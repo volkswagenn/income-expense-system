@@ -42,8 +42,10 @@
 --   trigger กันลบรายจ่ายที่เป็นค่างวด
 -- • งวดของสัญญาที่บันทึกย้อนหลังซึ่งตกในรอบที่ออกบิลไปแล้ว ถูกเติมเข้าบิลใบนั้น
 --   ทันทีตอนสร้าง/แก้แผน (attach_installment_to_closed_statements) — ต้องรันไฟล์นี้ซ้ำ
--- (เปิดแท็บเดิมใน SQL Editor ลบของเก่า วางทั้งไฟล์ Run) ข้อมูลเดิมไม่ถูกแตะ
--- ผลตรวจท้ายไฟล์ต้องได้ ตาราง 6/6 · คอลัมน์ 12/12 · ฟังก์ชัน 13/13
+-- • ส่วนที่ 14: ซ่อมย้อนหลังให้สัญญาที่มีอยู่ก่อนแพตช์นั้น (ตอนนั้นแก้ให้เฉพาะสัญญา
+--   ที่สร้าง/แก้ใหม่) สัญญาเก่าจึงยังโชว์สองงวดของใบเดียวกันในบิลรอบเดียว
+-- (เปิดแท็บเดิมใน SQL Editor ลบของเก่า วางทั้งไฟล์ Run) ไม่มีการลบข้อมูล
+-- ผลตรวจต้องได้ ตาราง 6/6 · คอลัมน์ 12/12 · ฟังก์ชัน 13/13 และท้ายไฟล์เป็น 0 ทั้งสองแถว
 -- ============================================================================
 
 
@@ -1731,5 +1733,52 @@ drop trigger if exists transactions_installment_guard on transactions;
 create trigger transactions_installment_guard
   before update or delete on transactions
   for each row execute function public.guard_installment_transaction();
+
+notify pgrst, 'reload schema';
+
+
+-- ###########################################################################
+-- ##  14. ซ่อมย้อนหลัง — งวดของสัญญาที่มีอยู่ก่อนแพตช์นี้
+-- ###########################################################################
+--
+-- attach_installment_to_closed_statements ถูกเรียกตอน "สร้าง/แก้" แผนผ่อนเท่านั้น
+-- สัญญาที่บันทึกไว้ก่อนหน้านั้นจึงยังมีงวดค้างเป็น pending อยู่ในรอบที่ออกบิลไปแล้ว
+-- ผลที่เห็นบนหน้าจอคือบิลรอบปัจจุบันกวาดสองงวดของสัญญาเดียวกันมารวมกัน
+-- (งวดที่ตกค้าง + งวดของรอบนี้) ดูเหมือนระบบสร้างรายการซ้ำ ทั้งที่ยอดรวมถูก
+--
+-- บล็อกนี้ไล่เรียกฟังก์ชันเดิมให้ทุกสัญญาที่ยังผ่อนอยู่ ทำงานเหมือนกันทุกอย่าง
+--   • เติมงวดเข้าบิลใบที่ยังไม่จ่ายจบของรอบนั้น (สร้างรายจ่าย + เพิ่มหนี้บัตร + ยกยอดบิล)
+--   • บิลที่จ่ายจบแล้วไม่แตะ งวดนั้นจะไปรวมกับบิลรอบถัดไปตามเดิม ซึ่งถูกต้องแล้ว
+-- รันซ้ำได้ไม่มีผลข้างเคียง งวดที่เติมไปแล้วเปลี่ยนสถานะเป็น billed จึงไม่ถูกหยิบอีก
+do $$
+declare
+  v_id    uuid;
+  v_total int := 0;
+begin
+  for v_id in select id from card_installments where status = 'active' loop
+    v_total := v_total + coalesce(attach_installment_to_closed_statements(v_id), 0);
+  end loop;
+  raise notice 'เติมงวดผ่อนเข้าบิลที่ออกไปแล้ว % งวด', v_total;
+end $$;
+
+
+-- ── ตรวจผลของส่วนที่ 14 ─────────────────────────────────────────────────────
+-- ทั้งสองแถวต้องเป็น 0 ถ้าไม่ใช่ ให้ส่งผลลัพธ์นี้กลับมา
+select 'งวดที่ยังค้างในรอบที่ออกบิลไปแล้ว' as "ตรวจผล",
+       count(*)::text as "จำนวน (ต้องเป็น 0)"
+  from card_installment_entries e
+  join card_installments i on i.id = e.installment_id
+  join card_statements   s on s.card_id = i.card_id and s.cycle = e.cycle and s.status <> 'paid'
+ where e.status = 'pending'
+union all
+select 'สัญญาที่มีเกินหนึ่งงวดในรอบเดียวกัน',
+       count(*)::text
+  from (
+    select e.installment_id
+      from card_installment_entries e
+     where e.status = 'pending'
+     group by e.installment_id, e.cycle
+    having count(*) > 1
+  ) x;
 
 notify pgrst, 'reload schema';

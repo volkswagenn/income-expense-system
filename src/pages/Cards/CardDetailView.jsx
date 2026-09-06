@@ -48,6 +48,8 @@ const AUTOPAY_LABEL = { full: '(เต็มจำนวน)', minimum: '(ขั
 const TAG_TONE = {
   'รูดบัตร': 'bg-paper text-muted',
   'งวดผ่อน': 'bg-recurring-soft text-[#5A3C90]',
+  // งวดของรอบก่อนที่บิลใบนี้กวาดมารวม — สีเข้มกว่าเพื่อให้เห็นว่าไม่ใช่งวดปกติของรอบ
+  'งวดตกค้าง': 'bg-pending-soft text-[#8A6A15]',
   'กดเงินสด': 'bg-[#FBEFE4] text-[#B4571E]',
   'ค่าธรรมเนียม': 'bg-pending-soft text-[#8A6A15]',
   'เงินคืน': 'bg-income-soft text-income',
@@ -161,6 +163,8 @@ function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null 
   return (
     // เรียงต่อกันแล้วตัดบรรทัดเหมือนเดิม แต่ป้ายทุกใบกว้างเท่ากัน (กำหนดตายตัว ไม่ยืดตามช่อง)
     // ขอบป้ายจึงตรงกันเป็นคอลัมน์โดยไม่ต้องใช้ตาราง ซึ่งจะยืดป้ายให้เต็มแถวจนดูหนา
+    // 86px คือความกว้างที่เคสยาวสุด "28 มี.ค. 69" (วันสองหลัก + เดือน 4 ตัวอักษร + ปี พ.ศ.)
+    // ยังอยู่ครบในฟอนต์ 9.5px — แคบกว่านี้ปีจะถูกตัดเป็น … ซึ่งคือสิ่งที่ผู้ใช้ทักมา
     <span className="flex flex-wrap gap-1">
       {shown.map((r) => (
         <span
@@ -168,13 +172,13 @@ function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null 
           title={'งวดที่ ' + r.seq + ' จาก ' + list.length + ' · ครบกำหนด ' + formatIsoThai(r.dueDate)
             + ' · ' + fmt(r.amount) + ' บาท · '
             + labelOf(r)}
-          className={'flex items-center gap-1 w-[72px] flex-none h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums '
+          className={'flex items-center gap-1 w-[86px] flex-none h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums whitespace-nowrap '
             + toneOf(r)}
         >
           {/* เลขงวดกว้างคงที่ชิดขวา เส้นคั่นทุกใบจึงอยู่ตำแหน่งเดียวกันทั้งคอลัมน์ */}
           <span className="font-bold w-[13px] text-right flex-none">{r.seq}</span>
           <span className="w-px h-[9px] bg-current opacity-30 flex-none" />
-          <span className="opacity-80 truncate">{formatIsoThaiShort(r.dueDate)}</span>
+          <span className="opacity-80">{formatIsoThaiShort(r.dueDate)}</span>
         </span>
       ))}
     </span>
@@ -304,16 +308,23 @@ export default function CardDetailView({ cardId }) {
         const owedDue = owedStmt?.dueDate ?? owed?.dueDate ?? null
         const owedOverdue = !!owedDue && owedDue < todayStr
 
+        // งวดของรอบก่อนที่ไม่มีบิลใบไหนเก็บไป บิลใบนี้จะกวาดมารวม — สัญญาเดียวจึงมี
+        // ได้สองแถวในรอบเดียว (งวดตกค้าง + งวดของรอบนี้) ต้องเขียนให้อ่านออกว่าทำไม
+        // ไม่งั้นดูเหมือนระบบสร้างรายการซ้ำ ซึ่งเป็นสิ่งแรกที่คนคิดเมื่อเห็นชื่อเดียวกันสองบรรทัด
+        const carried = e.cycle < p.cycle
+
         rows.push({
           key: `ie-${e.id}`, tx: null, date: to, upcoming: true, installment: ins,
           // งวดที่ค้างอยู่ขึ้นก่อน (ถ้ามี) ไม่งั้นก็งวดที่จะเข้าบิลนี้
           name: owed
             ? `${ins.name} — งวดที่ ${owed.seq}/${ins.months} ${owedOverdue ? 'เกินกำหนด' : 'รอจ่ายบิล'} ${formatIsoThai(owedDue)}`
-            : `${ins.name} — งวดที่ ${e.seq}/${ins.months}`,
+            : `${ins.name} — งวดที่ ${e.seq}/${ins.months}${carried ? ' (ตกค้างจากรอบก่อน)' : ''}`,
           // งวด "เข้าบิล" ตอนตัดรอบ ไม่ใช่ตอนครบกำหนด — สองวันนี้คนละความหมาย
           // ตัดรอบ = ธนาคารบันทึกงวดลงใบ · ครบกำหนด = วันสุดท้ายที่ต้องจ่ายใบนั้น
-          cat: `งวด ${e.seq} เข้าบิลนี้ตอนตัดรอบ ${formatThaiDate(p.end)} · ชำระภายใน ${formatThaiDate(p.due)}`,
-          tag: 'งวดผ่อน', amount: Number(e.amount || 0), entry: e,
+          cat: carried
+            ? `งวด ${e.seq} เป็นของรอบ ${e.cycle} ที่ไม่มีบิลเก็บไว้ บิลใบนี้จึงกวาดมารวม · ชำระภายใน ${formatThaiDate(p.due)}`
+            : `งวด ${e.seq} เข้าบิลนี้ตอนตัดรอบ ${formatThaiDate(p.end)} · ชำระภายใน ${formatThaiDate(p.due)}`,
+          tag: carried ? 'งวดตกค้าง' : 'งวดผ่อน', amount: Number(e.amount || 0), entry: e,
           owed, owedOverdue,
         })
       }
