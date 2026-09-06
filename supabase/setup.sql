@@ -1651,6 +1651,7 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'expense'
      and t.date <= p_end
+     and t.card_statement_id is null
      and not exists (
        select 1 from card_statements s
         where s.card_id = p_card and t.date between s.period_start and s.period_end
@@ -1661,6 +1662,7 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'income'
      and t.date <= p_end
+     and t.card_statement_id is null
      and not exists (
        select 1 from card_statements s
         where s.card_id = p_card and t.date between s.period_start and s.period_end
@@ -2693,6 +2695,7 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'expense'
      and t.date <= p_end
+     and t.card_statement_id is null
      and not exists (
        select 1 from card_statements s
         where s.card_id = p_card and t.date between s.period_start and s.period_end
@@ -2703,6 +2706,7 @@ begin
     from transactions t
    where t.card_id = p_card and t.shop_id = p_shop and t.type = 'income'
      and t.date <= p_end
+     and t.card_statement_id is null
      and not exists (
        select 1 from card_statements s
         where s.card_id = p_card and t.date between s.period_start and s.period_end
@@ -3595,5 +3599,170 @@ begin
   return v_n;
 end;
 $$;
+
+notify pgrst, 'reload schema';
+
+
+-- ###########################################################################
+-- ##  15. รายการรูดที่ต้องไปอยู่ในบิลที่ออกไปแล้ว
+-- ###########################################################################
+--
+-- ปัญหา: เปิดบิลจริงของธนาคารแล้วมาคีย์รายการที่เห็นในบิลลงแอป วันที่ที่คีย์คือวันนี้
+-- ซึ่งเลยวันสรุปยอดไปแล้ว รายการจึงไปตกบิลรอบหน้า ทั้งที่ธนาคารเก็บในบิลใบที่กำลัง
+-- จะจ่ายพรุ่งนี้ ยอดที่ต้องชำระในแอปเลยไม่ตรงกับบิลจริง
+--
+-- ย้อนวันที่เองไม่ช่วย และแย่กว่าเดิม: กฎการเก็บของบิลคือ "เก็บทุกอย่างที่ยังไม่มีใบไหน
+-- ครอบช่วงวันที่" ถ้าย้อนวันที่เข้าไปในรอบที่ออกบิลแล้ว บิลใหม่จะข้ามมัน (ถือว่ามีใบครอบ)
+-- ส่วนใบเก่าก็ปิดยอดไปแล้วไม่ได้รวมไว้ → รายการหายจากทุกบิลทั้งที่หนี้บัตรเพิ่มจริง
+--
+-- ทางแก้คือผูกรายการกับใบตรงๆ ผ่าน transactions.card_statement_id
+--   • ผูกแล้ว = ใบนั้นเก็บรายการนี้ ยอดบิลกับขั้นต่ำถูกคิดใหม่ทันที
+--   • บิลรอบถัดไปข้ามรายการที่ผูกใบแล้วเสมอ จึงไม่มีทางถูกเก็บซ้ำสองใบ
+--   • ย้ายออกได้ ยอดบิลลดกลับให้เอง · แก้ยอด/ลบรายการ ยอดบิลขยับตามผ่าน trigger
+--   • ใบที่จ่ายจบแล้วห้ามแตะ ต้องย้อนการจ่ายก่อน
+
+alter table transactions add column if not exists card_statement_id uuid
+  references card_statements(id) on delete set null;
+create index if not exists transactions_card_statement_idx
+  on transactions (card_statement_id);
+
+
+-- ── คิดยอดบิลใหม่หลังมีของเข้า/ออก ───────────────────────────────────────────
+-- ที่เดียวที่แก้ยอดใบ เพื่อให้ขั้นต่ำและสถานะถูกคิดด้วยกฎเดียวกันเสมอ
+create or replace function public.apply_statement_delta(
+  p_statement uuid,
+  p_spend     numeric,
+  p_credit    numeric
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_st     card_statements;
+  v_rate   numeric(5,2);
+  v_amount numeric(12,2);
+begin
+  select * into v_st from card_statements where id = p_statement;
+  if not found then return; end if;
+  select coalesce(card_min_rate, 8) into v_rate from shop_settings where shop_id = v_st.shop_id;
+
+  v_amount := v_st.amount + p_spend - p_credit;
+  update card_statements
+     set spend_amount   = greatest(0, spend_amount + p_spend),
+         credit_amount  = greatest(0, credit_amount + p_credit),
+         amount         = v_amount,
+         minimum_amount = greatest(0, least(v_amount, round(v_amount * coalesce(v_rate, 8) / 100, 2))),
+         -- จ่ายครบพอดีหรือเกิน = ปิดใบ · จ่ายมาบางส่วน = partial · ยังไม่จ่าย = closed
+         status = case when v_amount - paid_amount <= 0 then 'paid'
+                       when paid_amount > 0 then 'partial'
+                       else 'closed' end
+   where id = p_statement;
+end;
+$$;
+
+
+-- ── ใส่รายการเข้าบิลใบที่ออกไปแล้ว ───────────────────────────────────────────
+create or replace function public.attach_transaction_to_statement(
+  p_transaction uuid,
+  p_statement   uuid
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_tx transactions;
+  v_st card_statements;
+begin
+  select * into v_tx from transactions where id = p_transaction;
+  if not found then raise exception 'ไม่พบรายการที่จะใส่เข้าบิล'; end if;
+  select * into v_st from card_statements where id = p_statement;
+  if not found then raise exception 'ไม่พบบิลใบนี้'; end if;
+
+  if v_tx.shop_id <> v_st.shop_id then raise exception 'รายการกับบิลอยู่คนละร้าน'; end if;
+  if v_tx.card_id is null or v_tx.card_id <> v_st.card_id then
+    raise exception 'รายการนี้ไม่ได้รูดกับบัตรใบเดียวกับบิล';
+  end if;
+  if v_st.status = 'paid' then
+    raise exception 'บิลใบนี้จ่ายจบแล้ว ใส่รายการเพิ่มไม่ได้ — ย้อนการจ่ายก่อน';
+  end if;
+  if v_tx.card_statement_id is not distinct from p_statement then return; end if;
+  if v_tx.card_statement_id is not null then
+    perform detach_transaction_from_statement(p_transaction);
+  end if;
+
+  update transactions set card_statement_id = p_statement where id = p_transaction;
+  perform apply_statement_delta(
+    p_statement,
+    case when v_tx.type = 'income' then 0 else v_tx.amount end,
+    case when v_tx.type = 'income' then v_tx.amount else 0 end
+  );
+end;
+$$;
+
+
+-- ── เอารายการออกจากบิล ──────────────────────────────────────────────────────
+-- ออกแล้วรายการกลับไปเป็น "ยังไม่มีใบครอบ" บิลรอบถัดไปจะกวาดไปเก็บตามปกติ
+create or replace function public.detach_transaction_from_statement(
+  p_transaction uuid
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_tx transactions;
+  v_st card_statements;
+begin
+  select * into v_tx from transactions where id = p_transaction;
+  if not found or v_tx.card_statement_id is null then return; end if;
+  select * into v_st from card_statements where id = v_tx.card_statement_id;
+  if found and v_st.status = 'paid' then
+    raise exception 'บิลใบนี้จ่ายจบแล้ว เอารายการออกไม่ได้ — ย้อนการจ่ายก่อน';
+  end if;
+
+  update transactions set card_statement_id = null where id = p_transaction;
+  perform apply_statement_delta(
+    v_tx.card_statement_id,
+    case when v_tx.type = 'income' then 0 else -v_tx.amount end,
+    case when v_tx.type = 'income' then -v_tx.amount else 0 end
+  );
+end;
+$$;
+
+
+-- ── แก้/ลบรายการที่ผูกใบไว้ ยอดบิลต้องขยับตาม ────────────────────────────────
+-- ถ้าไม่มี trigger นี้ ลบรายการที่ผูกใบแล้ว หนี้บัตรลดแต่ยอดบิลยังค้างเท่าเดิม
+-- ผู้ใช้จะจ่ายบิลด้วยยอดที่ไม่มีอยู่จริง
+create or replace function public.sync_statement_on_transaction() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.card_statement_id is null then return old; end if;
+    -- ลบทั้งร้าน (cascade) แถวร้านหายไปแล้ว ปล่อยผ่าน
+    if not exists (select 1 from shops where id = old.shop_id) then return old; end if;
+    if exists (select 1 from card_statements where id = old.card_statement_id and status = 'paid') then
+      raise exception 'รายการนี้อยู่ในบิลที่จ่ายจบแล้ว ลบไม่ได้ — ย้อนการจ่ายบิลก่อน';
+    end if;
+    perform apply_statement_delta(
+      old.card_statement_id,
+      case when old.type = 'income' then 0 else -old.amount end,
+      case when old.type = 'income' then -old.amount else 0 end
+    );
+    return old;
+  end if;
+
+  -- ย้ายใบเป็นหน้าที่ของ attach/detach ซึ่งคิดยอดเองแล้ว ตรงนี้ไม่ต้องทำซ้ำ
+  if new.card_statement_id is distinct from old.card_statement_id then return new; end if;
+  if new.card_statement_id is null then return new; end if;
+  if new.amount = old.amount and new.type = old.type then return new; end if;
+  if exists (select 1 from card_statements where id = new.card_statement_id and status = 'paid') then
+    raise exception 'รายการนี้อยู่ในบิลที่จ่ายจบแล้ว แก้ยอดไม่ได้ — ย้อนการจ่ายบิลก่อน';
+  end if;
+
+  perform apply_statement_delta(
+    new.card_statement_id,
+    (case when new.type = 'income' then 0 else new.amount end)
+      - (case when old.type = 'income' then 0 else old.amount end),
+    (case when new.type = 'income' then new.amount else 0 end)
+      - (case when old.type = 'income' then old.amount else 0 end)
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists transactions_statement_sync on transactions;
+create trigger transactions_statement_sync
+  after update or delete on transactions
+  for each row execute function public.sync_statement_on_transaction();
 
 notify pgrst, 'reload schema';

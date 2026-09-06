@@ -410,8 +410,23 @@ const useCreditCardStore = create((set, get) => ({
       .filter((s) => s.cardId === cardId)
       .map((s) => [s.periodStart, s.periodEnd])
     const covered = (d) => periods.some(([a, b]) => d >= a && d <= b)
+    // รายการที่ถูกใส่เข้าบิลใบไหนไปแล้วตรงๆ (card_statement_id) ถือว่ามีใบครอบ
+    // ไม่ว่าวันที่ของมันจะอยู่ช่วงไหน — กฎเดียวกับ close_card_statement ฝั่งฐานข้อมูล
     return useTransactionStore.getState().transactions
-      .filter((t) => t.cardId === cardId && t.date <= upTo && !covered(t.date))
+      .filter((t) => t.cardId === cardId && t.date <= upTo && !t.cardStatementId && !covered(t.date))
+  },
+
+  /**
+   * ใส่รายการรูดเข้าบิลใบที่ออกไปแล้ว / เอาออก
+   * ยอดบิลถูกคิดใหม่ที่ฐานข้อมูล ต้องดึงทั้งใบและรายการมาใหม่ให้ตรงกัน
+   */
+  attachTransactionToStatement: async (transactionId, statementId) => {
+    await stmtApi.attachTransaction(transactionId, statementId)
+    await Promise.all([get().refresh(), useTransactionStore.getState().refresh()])
+  },
+  detachTransactionFromStatement: async (transactionId) => {
+    await stmtApi.detachTransaction(transactionId)
+    await Promise.all([get().refresh(), useTransactionStore.getState().refresh()])
   },
 
   /** ยอดที่ต้องจ่ายรวมทุกใบที่ยังค้าง */

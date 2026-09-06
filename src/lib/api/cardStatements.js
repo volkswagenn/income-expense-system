@@ -101,3 +101,20 @@ export async function listStatementPayments() {
   }
   return fromRows('card_statement_payments', data)
 }
+
+/**
+ * ใส่รายการรูดเข้าบิลใบที่ออกไปแล้ว — ยอดบิลกับขั้นต่ำถูกคิดใหม่ที่ฐานข้อมูล
+ * ใช้ตอนคีย์รายการที่เห็นในบิลจริงของธนาคารหลังวันสรุปยอดผ่านไปแล้ว
+ * (เหตุผลเต็มดู supabase/card.sql ส่วนที่ 15)
+ */
+export async function attachTransaction(transactionId, statementId) {
+  await unwrap(supabase.rpc('attach_transaction_to_statement', {
+    p_transaction: transactionId,
+    p_statement: statementId,
+  }))
+}
+
+/** เอารายการออกจากบิล — กลับไปเป็นรายการที่ยังไม่มีใบครอบ บิลรอบถัดไปจะเก็บแทน */
+export async function detachTransaction(transactionId) {
+  await unwrap(supabase.rpc('detach_transaction_from_statement', { p_transaction: transactionId }))
+}

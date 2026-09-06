@@ -26,6 +26,7 @@ import {
 } from '../../lib/cardCycle'
 import InstallmentPips from '../../components/shared/InstallmentPips'
 import PerInstallmentPopup from '../../components/shared/PerInstallmentPopup'
+import BillTargetPopup from '../../components/shared/BillTargetPopup'
 import useTransactionStore from '../../store/useTransactionStore'
 import usePendingStore from '../../store/usePendingStore'
 import useCategoryStore from '../../store/useCategoryStore'
@@ -91,6 +92,11 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
   const [uploadOpen, setUploadOpen] = useState(false)
   const [numpadOpen, setNumpadOpen] = useState(false)
   const [tierEditOpen, setTierEditOpen] = useState(false)
+  // ป๊อปอัปเลือกบิลปลายทางของยอดรูด — ขึ้นเมื่อบัตรมีบิลที่ปิดรอบแล้วแต่ยังไม่จ่าย
+  // null = ปิด · { statements } = เปิดพร้อมรายการบิลให้เลือก
+  const [billPick, setBillPick] = useState(null)
+  // undefined = ยังไม่ได้ถาม · null = บิลรอบถัดไปตามปกติ · string = id ของบิลใบที่เลือก
+  const billChoiceRef = useRef(undefined)
   const [uploadStatus, setUploadStatus] = useState(null)
   const [attachments, setAttachments] = useState([])
   const { warning, check, proceed, cancel } = useNegativeConfirm()
@@ -109,6 +115,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
   const refreshCards = useCreditCardStore((s) => s.refresh)
   const createInstallment = useCreditCardStore((s) => s.createInstallment)
   const cards = useCreditCardStore((s) => s.cards)
+  const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
+  const attachTxToStatement = useCreditCardStore((s) => s.attachTransactionToStatement)
   const createDebt = useDebtStore((s) => s.createDebt)
 
   // สิ่งที่บันทึกลงเซิร์ฟเวอร์สำเร็จแล้วในรอบนี้ (รายการ / รายการค้าง) — ถ้าขั้นถัดไปล้ม
@@ -391,6 +399,17 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
       else await refreshWallet()
     }
 
+    // ผู้ใช้บอกว่ารายการนี้อยู่ในบิลใบที่ออกไปแล้ว — ใส่เข้าใบนั้น ยอดบิลบวกเพิ่มทันที
+    // ทำหลังบันทึกรายการเสร็จ ถ้าล้มตรงนี้ รายการยังอยู่ (savedRef) กดบันทึกซ้ำจะมาต่อที่นี่
+    if (tx && cardId && billChoiceRef.current) {
+      await attachTxToStatement(tx.id, billChoiceRef.current)
+      await addLog(buildLogEntry({
+        activityType: 'CARD_STATEMENT_ATTACH',
+        description: `ใส่ "${form.itemName}" ${amt.toLocaleString()} บาท เข้าบิลที่ออกไปแล้วของบัตร`,
+        newValue: { transactionId: tx.id, statementId: billChoiceRef.current, cardId },
+      }))
+    }
+
     if (form.taxStatus === 'waiting') {
       const tax = await addTaxInvoice({
         ...(tx ? { transactionId: tx.id } : {}),
@@ -412,6 +431,8 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
     // เปิดอยู่ = ล้างฟอร์มให้กรอกรายการถัดไปต่อได้เลย (ค่าตั้งต้นคือเปิด)
     if (formDefaults.reopenAfterSave) clearDraft()
     setSaved(true)
+    // รายการถัดไปต้องถูกถามใหม่ ไม่ใช่จำคำตอบของรายการก่อน
+    billChoiceRef.current = undefined
     onSaved?.()
     setUploadStatus(null)
     setAttachments([])
@@ -476,6 +497,16 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
       }
     }
     setErrMsg('')
+
+    // รูดบัตรตอนที่บัตรมีบิลปิดรอบแล้วแต่ยังไม่จ่าย → ถามก่อนว่ารายการนี้อยู่ในบิลใบไหน
+    // (คนที่เปิดบิลจริงมาคีย์ตาม จะได้ใส่เข้าใบที่กำลังจะจ่าย ไม่ใช่ไหลไปรอบหน้าเงียบๆ)
+    // ยอดผ่อนไม่ถาม เพราะงวดถูกวางลงบิลตามตารางของมันเองอยู่แล้ว
+    if (form.method === 'card' && !form.installment && billChoiceRef.current === undefined) {
+      const cid = resolveCard(form.cardId)
+      const issued = getUnpaidStatements().filter((s) => s.cardId === cid)
+      if (issued.length > 0) return setBillPick({ statements: issued })
+    }
+
     // บัตรเครดิตไม่ต้องเช็คยอดติดลบ — เป็นหนี้อยู่แล้วโดยธรรมชาติ และไม่บล็อกเรื่องวงเงิน
     if (form.method === 'pending' || form.method === 'card') {
       execute()
@@ -1545,6 +1576,21 @@ export default function ExpenseForm({ onPreviewChange, lockCardId = null, onSave
           />
         )
       })()}
+
+      {billPick && selectedCard && (
+        <BillTargetPopup
+          card={selectedCard}
+          amount={Number(form.amount)}
+          date={date}
+          statements={billPick.statements}
+          onClose={() => setBillPick(null)}
+          onPick={(statementId) => {
+            billChoiceRef.current = statementId
+            setBillPick(null)
+            execute()
+          }}
+        />
+      )}
 
       {numpadOpen && (
         <AmountNumpadPopup

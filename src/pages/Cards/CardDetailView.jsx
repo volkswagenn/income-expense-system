@@ -217,6 +217,8 @@ export default function CardDetailView({ cardId }) {
   } = useCreditCardStore()
   const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
   const cancelInstallment = useCreditCardStore((s) => s.cancelInstallment)
+  const attachTxToStatement = useCreditCardStore((s) => s.attachTransactionToStatement)
+  const detachTxFromStatement = useCreditCardStore((s) => s.detachTransactionFromStatement)
   const refreshCards = useCreditCardStore((s) => s.refresh)
   const refreshWallet = useWalletStore((s) => s.refresh)
   const refreshTransactions = useTransactionStore((s) => s.refresh)
@@ -472,6 +474,21 @@ export default function CardDetailView({ cardId }) {
           desc: 'แก้ยอด วันที่ หมวดหมู่ หรือย้ายไปช่องทางอื่น',
           onClick: () => setEditingTx(r.tx),
         },
+        // รายการที่ธนาคารเก็บในบิลใบที่ออกไปแล้ว (คีย์ตามบิลจริงหลังวันสรุปยอด)
+        // ใส่เข้าใบนั้นได้จากตรงนี้ ยอดบิลบวกเพิ่ม และรายการหายจากรอบนี้ไปอยู่ใบนั้น
+        ...(r.tx.installmentEntryId ? [] : unpaid.map((s) => ({
+          icon: 'receipt_long',
+          label: `ใส่เข้าบิลที่ครบกำหนด ${formatIsoThai(s.dueDate)}`,
+          desc: `ปิดรอบ ${formatIsoThai(s.periodEnd)} · ยอดบิลจะเพิ่มเป็น ${fmt(Number(s.amount) - Number(s.paidAmount) + Math.abs(r.amount))}`,
+          onClick: () => run(async () => {
+            await attachTxToStatement(r.tx.id, s.id)
+            await addLog(buildLogEntry({
+              activityType: 'CARD_STATEMENT_ATTACH',
+              description: `ใส่ "${r.name}" ${fmt(Math.abs(r.amount))} บาท เข้าบิลที่ครบกำหนด ${formatIsoThai(s.dueDate)} ของบัตร "${formatCard(card)}"`,
+              newValue: { transactionId: r.tx.id, statementId: s.id, cardId: card.id },
+            }))
+          }),
+        }))),
         {
           icon: 'delete',
           label: 'ลบรายการนี้',
@@ -711,6 +728,40 @@ export default function CardDetailView({ cardId }) {
                     {billBreakdown.credit > 0 && <span>เงินคืน <b className="tabular-nums">−{fmt(billBreakdown.credit)}</b></span>}
                   </div>
                 )}
+                {/* รายการที่ถูกใส่เข้าใบนี้หลังออกบิล — ต้องเห็นว่ามีอะไรบ้าง และเอาออกได้
+                    ไม่งั้นยอดบิลขยับโดยหาที่มาไม่เจอ */}
+                {(() => {
+                  const attached = transactions.filter((t) => t.cardStatementId === bill.id)
+                  if (attached.length === 0) return null
+                  return (
+                    <div className="mt-2 border-t border-[#F0C4BE] pt-1.5 space-y-0.5">
+                      <div className="text-[11px] text-[#7A5B56]">ใส่เพิ่มเข้าบิลใบนี้หลังออกบิล {attached.length} รายการ</div>
+                      {attached.map((t) => (
+                        <div key={t.id} className="flex items-center gap-2 text-[11.5px]">
+                          <span className="tabular-nums text-faint flex-none">{formatIsoThai(t.date)}</span>
+                          <span className="min-w-0 flex-1 truncate">{t.itemName || '(ไม่ระบุชื่อ)'}</span>
+                          <span className={`tabular-nums flex-none font-semibold ${t.type === 'income' ? 'text-income' : ''}`}>
+                            {t.type === 'income' ? '−' : ''}{fmt(t.amount)}
+                          </span>
+                          <button
+                            className="flex-none text-[11px] text-[#A93A2E] underline hover:no-underline"
+                            title="เอาออกจากบิลใบนี้ — รายการจะไปอยู่บิลรอบถัดไปตามวันที่รูด"
+                            onClick={() => run(async () => {
+                              await detachTxFromStatement(t.id)
+                              await addLog(buildLogEntry({
+                                activityType: 'CARD_STATEMENT_DETACH',
+                                description: `เอา "${t.itemName}" ${fmt(t.amount)} บาท ออกจากบิลที่ครบกำหนด ${formatIsoThai(bill.dueDate)} ของบัตร "${formatCard(card)}"`,
+                                oldValue: { transactionId: t.id, statementId: bill.id, cardId: card.id },
+                              }))
+                            })}
+                          >
+                            เอาออก
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
               <div className="flex flex-col gap-1.5 w-[196px] flex-none">
                 <button
