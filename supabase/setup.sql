@@ -2930,6 +2930,82 @@ begin
   execute 'create policy card_statement_payments_delete on card_statement_payments for delete using (can_edit(shop_id))';
 end $$;
 
+-- ── งวดที่ตกในรอบที่ออกบิลไปแล้ว → เพิ่มเข้าบิลใบนั้นเลย ────────────────────
+--
+-- บันทึกสัญญาผ่อนย้อนหลัง (เช่น "ผ่อนมาแล้ว 22 งวด") แล้วงวดถัดไปครบกำหนดในรอบที่
+-- ระบบออกบิลไปแล้ว — ของจริงธนาคารใส่งวดนั้นในบิลใบนั้นตั้งแต่ต้น แต่บิลในระบบ
+-- ถูกปิดก่อนที่จะรู้จักสัญญานี้ จึงขาดงวดนั้นไป
+--
+-- ถ้าปล่อยไว้ งวดจะค้างเป็น pending ในรอบที่ปิดแล้ว ตัวปิดรอบถัดไปจะกวาดไปรวม
+-- กับบิลใบหน้า ยอดรวมถูกแต่ช้าไปหนึ่งเดือน และหน้าจอโชว์สองงวดในรอบเดียวจนดูเหมือน
+-- ระบบสร้างซ้ำ ที่ถูกคือ "เติมเข้าบิลใบเดิม" เหมือนที่ธนาคารเห็น
+--
+-- ทำเฉพาะใบที่ยังไม่ถูกจ่ายครบ ใบที่จ่ายจบไปแล้วห้ามแตะ (จ่ายไปแล้วเปิดกลับไม่ได้)
+-- งวดของใบนั้นปล่อยให้ตัวปิดรอบกวาดไปบิลถัดไปตามเดิม
+create or replace function public.attach_installment_to_closed_statements(
+  p_installment uuid
+) returns int language plpgsql security definer set search_path = public as $$
+declare
+  v_ins   card_installments;
+  v_entry record;
+  v_st    card_statements;
+  v_tx    transactions;
+  v_rate  numeric(5,2);
+  v_n     int := 0;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then return 0; end if;
+  select coalesce(card_min_rate, 8) into v_rate from shop_settings where shop_id = v_ins.shop_id;
+
+  for v_entry in
+    select e.*, s.id as st_id
+      from card_installment_entries e
+      join card_statements s
+        on s.card_id = v_ins.card_id and s.cycle = e.cycle and s.status <> 'paid'
+     where e.installment_id = p_installment and e.status = 'pending'
+     order by e.seq
+  loop
+    select * into v_st from card_statements where id = v_entry.st_id;
+
+    -- แบบเดียวกับที่ close_card_statement ทำตอนปิดรอบ: รายจ่ายหนึ่งแถว + หนี้บัตรเพิ่ม
+    insert into transactions (
+      shop_id, date, type, amount, method, category_id, item_name, vendor,
+      card_id, installment_entry_id, note, created_by
+    ) values (
+      v_ins.shop_id, v_st.period_end, 'expense', v_entry.amount, 'card', v_ins.category_id,
+      v_ins.name || ' (งวด ' || v_entry.seq || '/' || v_ins.months || ')',
+      v_ins.vendor, v_ins.card_id, v_entry.id,
+      'งวดผ่อนที่เพิ่มเข้าบิลรอบที่ออกไปแล้ว', auth.uid()
+    ) returning * into v_tx;
+    perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_ins.card_id, -v_entry.amount);
+
+    update card_installment_entries
+       set status = 'billed', transaction_id = v_tx.id, billed_at = v_st.period_end,
+           statement_id = v_st.id
+     where id = v_entry.id;
+
+    -- ยอดบิลขยับตาม ขั้นต่ำคิดใหม่จากยอดใหม่ สถานะ: ยังไม่จ่ายเลย = closed, จ่ายบางส่วน = partial
+    update card_statements
+       set spend_amount   = spend_amount + v_entry.amount,
+           amount         = amount + v_entry.amount,
+           minimum_amount = greatest(0, least(amount + v_entry.amount,
+                              round((amount + v_entry.amount) * coalesce(v_rate, 8) / 100, 2))),
+           status         = case when paid_amount > 0 then 'partial' else 'closed' end
+     where id = v_st.id;
+
+    v_n := v_n + 1;
+  end loop;
+
+  -- สัญญาที่ทุกงวดถูกเก็บครบแล้ว
+  update card_installments
+     set status = 'completed', updated_at = now()
+   where id = p_installment and status = 'active'
+     and not exists (select 1 from card_installment_entries where installment_id = p_installment and status = 'pending');
+
+  return v_n;
+end;
+$$;
+
 -- ── กระเป๋าที่จะคืนเงินให้ ───────────────────────────────────────────────────
 -- บัญชีเงินโอนที่ถูกลบไปแล้ว คืนเงินเข้าไม่ได้ (apply_wallet_effect จะ raise)
 -- ให้คืนเข้าเงินสดแทน — ดีกว่าย้อนไม่ได้เลย และผู้ใช้โอนต่อเองได้
@@ -3300,6 +3376,223 @@ begin
   update wallet_state set cash = 0, updated_at = now() where shop_id = p_shop;
   insert into categories (shop_id, name, type)
   values (p_shop, 'อื่นๆ', 'expense'), (p_shop, 'อื่นๆ', 'income');
+end;
+$$;
+
+create or replace function public.create_card_installment(
+  p_shop    uuid,
+  p_card    uuid,
+  p_data    jsonb,
+  p_entries jsonb,
+  p_log     jsonb default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare v_ins card_installments; v_e jsonb;
+begin
+  perform assert_can_edit(p_shop);
+  if not exists (select 1 from credit_cards where id = p_card and shop_id = p_shop) then
+    raise exception 'ไม่พบบัตรเครดิตของร้านนี้';
+  end if;
+  if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
+    raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
+  end if;
+
+  insert into card_installments (
+    shop_id, card_id, name, vendor, category_id, note,
+    principal_amount, total_amount, months, monthly_amount, interest_rate,
+    tiers, prepaid_count, purchase_date, first_cycle, created_by
+  ) values (
+    p_shop, p_card,
+    coalesce(p_data->>'name', ''),
+    p_data->>'vendor',
+    nullif(p_data->>'category_id', '')::uuid,
+    p_data->>'note',
+    coalesce((p_data->>'principal_amount')::numeric, (p_data->>'total_amount')::numeric),
+    (p_data->>'total_amount')::numeric,
+    (p_data->>'months')::int,
+    (p_data->>'monthly_amount')::numeric,
+    coalesce((p_data->>'interest_rate')::numeric, 0),
+    p_data->'tiers',
+    coalesce((p_data->>'prepaid_count')::int, 0),
+    (p_data->>'purchase_date')::date,
+    p_data->>'first_cycle',
+    auth.uid()
+  ) returning * into v_ins;
+
+  for v_e in select * from jsonb_array_elements(p_entries) loop
+    insert into card_installment_entries (shop_id, installment_id, seq, cycle, due_date, amount, status)
+    values (
+      p_shop, v_ins.id,
+      (v_e->>'seq')::int,
+      v_e->>'cycle',
+      (v_e->>'due_date')::date,
+      (v_e->>'amount')::numeric,
+      coalesce(v_e->>'status', 'pending')
+    );
+  end loop;
+
+  -- ยังไม่แตะ outstanding และยังไม่สร้าง transactions โดยเจตนา
+  -- งวด prepaid จะไม่ถูกเรียกเก็บเลย เพราะ close_card_statement กรองเฉพาะ pending
+  --
+  -- ยกเว้นงวดที่ตกในรอบที่ออกบิลไปแล้ว — เติมเข้าบิลใบนั้นเลย (ดูส่วนที่ 12)
+  -- ไม่งั้นมันจะค้างในรอบที่ปิดแล้ว รอถูกกวาดไปบิลใบหน้า ช้าไปหนึ่งเดือนและดูเหมือนซ้ำ
+  perform attach_installment_to_closed_statements(v_ins.id);
+
+  perform write_log(p_shop, p_log);
+  return v_ins;
+end;
+$$;
+
+create or replace function public.update_card_installment(
+  p_installment uuid,
+  p_card        uuid    default null,
+  p_data        jsonb   default null,
+  p_entries     jsonb   default null,
+  p_log         jsonb   default null
+) returns card_installments language plpgsql security definer set search_path = public as $$
+declare
+  v_ins    card_installments;
+  v_e      jsonb;
+  v_locked int;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then raise exception 'ไม่พบรายการผ่อนนี้'; end if;
+  perform assert_can_edit(v_ins.shop_id);
+
+  if v_ins.status <> 'active' then
+    raise exception 'สัญญานี้ปิดหรือยกเลิกไปแล้ว แก้ไขไม่ได้';
+  end if;
+
+  -- ข้อมูลอธิบาย แก้ได้เสมอ ไม่กระทบเงินสักบาท
+  update card_installments
+     set name        = coalesce(p_data->>'name', name),
+         vendor      = case when p_data ? 'vendor'      then nullif(p_data->>'vendor', '')                else vendor end,
+         category_id = case when p_data ? 'category_id' then nullif(p_data->>'category_id', '')::uuid     else category_id end,
+         note        = case when p_data ? 'note'        then nullif(p_data->>'note', '')                  else note end,
+         updated_at  = now()
+   where id = p_installment
+   returning * into v_ins;
+
+  if p_entries is null then
+    perform write_log(v_ins.shop_id, p_log);
+    return v_ins;
+  end if;
+
+  -- ตั้งแต่บรรทัดนี้ลงไปคือแก้ทั้งแผน ต้องไม่มีงวดไหนเกิดขึ้นจริงไปแล้ว
+  select count(*) into v_locked
+    from card_installment_entries
+   where installment_id = p_installment and status in ('billed', 'paid');
+  if v_locked > 0 then
+    raise exception 'มีงวดที่เรียกเก็บหรือจ่ายไปแล้ว % งวด แก้จำนวนงวดหรือยอดต่องวดไม่ได้ — ย้อนงวดที่จ่ายไว้ก่อน', v_locked;
+  end if;
+
+  if jsonb_array_length(coalesce(p_entries, '[]'::jsonb)) = 0 then
+    raise exception 'ต้องมีอย่างน้อยหนึ่งงวด';
+  end if;
+
+  if p_card is not null then
+    if not exists (select 1 from credit_cards where id = p_card and shop_id = v_ins.shop_id) then
+      raise exception 'ไม่พบบัตรเครดิตของร้านนี้';
+    end if;
+  end if;
+
+  update card_installments
+     set card_id          = coalesce(p_card, card_id),
+         principal_amount = coalesce((p_data->>'principal_amount')::numeric, (p_data->>'total_amount')::numeric, principal_amount),
+         total_amount     = coalesce((p_data->>'total_amount')::numeric, total_amount),
+         months           = coalesce((p_data->>'months')::int, months),
+         monthly_amount   = coalesce((p_data->>'monthly_amount')::numeric, monthly_amount),
+         interest_rate    = coalesce((p_data->>'interest_rate')::numeric, interest_rate),
+         tiers            = case when p_data ? 'tiers' then p_data->'tiers' else tiers end,
+         prepaid_count    = coalesce((p_data->>'prepaid_count')::int, prepaid_count),
+         purchase_date    = coalesce((p_data->>'purchase_date')::date, purchase_date),
+         first_cycle      = coalesce(p_data->>'first_cycle', first_cycle),
+         updated_at       = now()
+   where id = p_installment
+   returning * into v_ins;
+
+  delete from card_installment_entries where installment_id = p_installment;
+
+  for v_e in select * from jsonb_array_elements(p_entries) loop
+    insert into card_installment_entries (shop_id, installment_id, seq, cycle, due_date, amount, status)
+    values (
+      v_ins.shop_id, v_ins.id,
+      (v_e->>'seq')::int,
+      v_e->>'cycle',
+      (v_e->>'due_date')::date,
+      (v_e->>'amount')::numeric,
+      coalesce(v_e->>'status', 'pending')
+    );
+  end loop;
+
+  -- งวดที่ตกในรอบที่ออกบิลไปแล้ว เติมเข้าบิลใบนั้นทันที (ดูส่วนที่ 12)
+  perform attach_installment_to_closed_statements(v_ins.id);
+
+  perform write_log(v_ins.shop_id, p_log);
+  return v_ins;
+end;
+$$;
+
+create or replace function public.attach_installment_to_closed_statements(
+  p_installment uuid
+) returns int language plpgsql security definer set search_path = public as $$
+declare
+  v_ins   card_installments;
+  v_entry record;
+  v_st    card_statements;
+  v_tx    transactions;
+  v_rate  numeric(5,2);
+  v_n     int := 0;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then return 0; end if;
+  select coalesce(card_min_rate, 8) into v_rate from shop_settings where shop_id = v_ins.shop_id;
+
+  for v_entry in
+    select e.*, s.id as st_id
+      from card_installment_entries e
+      join card_statements s
+        on s.card_id = v_ins.card_id and s.cycle = e.cycle and s.status <> 'paid'
+     where e.installment_id = p_installment and e.status = 'pending'
+     order by e.seq
+  loop
+    select * into v_st from card_statements where id = v_entry.st_id;
+
+    -- แบบเดียวกับที่ close_card_statement ทำตอนปิดรอบ: รายจ่ายหนึ่งแถว + หนี้บัตรเพิ่ม
+    insert into transactions (
+      shop_id, date, type, amount, method, category_id, item_name, vendor,
+      card_id, installment_entry_id, note, created_by
+    ) values (
+      v_ins.shop_id, v_st.period_end, 'expense', v_entry.amount, 'card', v_ins.category_id,
+      v_ins.name || ' (งวด ' || v_entry.seq || '/' || v_ins.months || ')',
+      v_ins.vendor, v_ins.card_id, v_entry.id,
+      'งวดผ่อนที่เพิ่มเข้าบิลรอบที่ออกไปแล้ว', auth.uid()
+    ) returning * into v_tx;
+    perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_ins.card_id, -v_entry.amount);
+
+    update card_installment_entries
+       set status = 'billed', transaction_id = v_tx.id, billed_at = v_st.period_end,
+           statement_id = v_st.id
+     where id = v_entry.id;
+
+    -- ยอดบิลขยับตาม ขั้นต่ำคิดใหม่จากยอดใหม่ สถานะ: ยังไม่จ่ายเลย = closed, จ่ายบางส่วน = partial
+    update card_statements
+       set spend_amount   = spend_amount + v_entry.amount,
+           amount         = amount + v_entry.amount,
+           minimum_amount = greatest(0, least(amount + v_entry.amount,
+                              round((amount + v_entry.amount) * coalesce(v_rate, 8) / 100, 2))),
+           status         = case when paid_amount > 0 then 'partial' else 'closed' end
+     where id = v_st.id;
+
+    v_n := v_n + 1;
+  end loop;
+
+  -- สัญญาที่ทุกงวดถูกเก็บครบแล้ว
+  update card_installments
+     set status = 'completed', updated_at = now()
+   where id = p_installment and status = 'active'
+     and not exists (select 1 from card_installment_entries where installment_id = p_installment and status = 'pending');
+
+  return v_n;
 end;
 $$;
 

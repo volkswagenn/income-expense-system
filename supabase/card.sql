@@ -39,9 +39,11 @@
 -- ── อัปเดตล่าสุด ─────────────────────────────────────────────────────────────
 -- • close_card_statement เปลี่ยนกฎการเก็บตามข้อ 5
 -- • ส่วนที่ 12: ตารางขาการจ่ายบิล / paid_amount ของงวด / refund_source /
---   trigger กันลบรายจ่ายที่เป็นค่างวด — ต้องรันไฟล์นี้ซ้ำ
+--   trigger กันลบรายจ่ายที่เป็นค่างวด
+-- • งวดของสัญญาที่บันทึกย้อนหลังซึ่งตกในรอบที่ออกบิลไปแล้ว ถูกเติมเข้าบิลใบนั้น
+--   ทันทีตอนสร้าง/แก้แผน (attach_installment_to_closed_statements) — ต้องรันไฟล์นี้ซ้ำ
 -- (เปิดแท็บเดิมใน SQL Editor ลบของเก่า วางทั้งไฟล์ Run) ข้อมูลเดิมไม่ถูกแตะ
--- ผลตรวจท้ายไฟล์ต้องได้ ตาราง 6/6 · คอลัมน์ 12/12 · ฟังก์ชัน 12/12
+-- ผลตรวจท้ายไฟล์ต้องได้ ตาราง 6/6 · คอลัมน์ 12/12 · ฟังก์ชัน 13/13
 -- ============================================================================
 
 
@@ -1092,13 +1094,14 @@ select 'คอลัมน์ที่เติมเพิ่ม', count(*)::te
      or (table_name='recurring_entries' and column_name = 'card_id')
      or (table_name='shop_settings'     and column_name = 'card_min_rate'))
 union all
-select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 12'
+select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 13'
   from information_schema.routines
  where routine_schema = 'public'
    and routine_name in ('close_card_statement','pay_card_statement','undo_card_payment',
      'create_card_installment','settle_card_installment','cancel_card_installment',
      'card_cash_advance','undo_card_advance',
-     'pay_installment_entry','undo_installment_entry','delete_card_installment','refund_source')
+     'pay_installment_entry','undo_installment_entry','delete_card_installment','refund_source',
+     'attach_installment_to_closed_statements')
 union all
 select 'รับ method = card แล้ว',
        case when exists (
@@ -1339,6 +1342,11 @@ begin
 
   -- ยังไม่แตะ outstanding และยังไม่สร้าง transactions โดยเจตนา
   -- งวด prepaid จะไม่ถูกเรียกเก็บเลย เพราะ close_card_statement กรองเฉพาะ pending
+  --
+  -- ยกเว้นงวดที่ตกในรอบที่ออกบิลไปแล้ว — เติมเข้าบิลใบนั้นเลย (ดูส่วนที่ 12)
+  -- ไม่งั้นมันจะค้างในรอบที่ปิดแล้ว รอถูกกวาดไปบิลใบหน้า ช้าไปหนึ่งเดือนและดูเหมือนซ้ำ
+  perform attach_installment_to_closed_statements(v_ins.id);
+
   perform write_log(p_shop, p_log);
   return v_ins;
 end;
@@ -1504,6 +1512,9 @@ begin
     );
   end loop;
 
+  -- งวดที่ตกในรอบที่ออกบิลไปแล้ว เติมเข้าบิลใบนั้นทันที (ดูส่วนที่ 12)
+  perform attach_installment_to_closed_statements(v_ins.id);
+
   perform write_log(v_ins.shop_id, p_log);
   return v_ins;
 end;
@@ -1595,6 +1606,82 @@ begin
   execute 'drop policy if exists card_statement_payments_delete on card_statement_payments';
   execute 'create policy card_statement_payments_delete on card_statement_payments for delete using (can_edit(shop_id))';
 end $$;
+
+-- ── งวดที่ตกในรอบที่ออกบิลไปแล้ว → เพิ่มเข้าบิลใบนั้นเลย ────────────────────
+--
+-- บันทึกสัญญาผ่อนย้อนหลัง (เช่น "ผ่อนมาแล้ว 22 งวด") แล้วงวดถัดไปครบกำหนดในรอบที่
+-- ระบบออกบิลไปแล้ว — ของจริงธนาคารใส่งวดนั้นในบิลใบนั้นตั้งแต่ต้น แต่บิลในระบบ
+-- ถูกปิดก่อนที่จะรู้จักสัญญานี้ จึงขาดงวดนั้นไป
+--
+-- ถ้าปล่อยไว้ งวดจะค้างเป็น pending ในรอบที่ปิดแล้ว ตัวปิดรอบถัดไปจะกวาดไปรวม
+-- กับบิลใบหน้า ยอดรวมถูกแต่ช้าไปหนึ่งเดือน และหน้าจอโชว์สองงวดในรอบเดียวจนดูเหมือน
+-- ระบบสร้างซ้ำ ที่ถูกคือ "เติมเข้าบิลใบเดิม" เหมือนที่ธนาคารเห็น
+--
+-- ทำเฉพาะใบที่ยังไม่ถูกจ่ายครบ ใบที่จ่ายจบไปแล้วห้ามแตะ (จ่ายไปแล้วเปิดกลับไม่ได้)
+-- งวดของใบนั้นปล่อยให้ตัวปิดรอบกวาดไปบิลถัดไปตามเดิม
+create or replace function public.attach_installment_to_closed_statements(
+  p_installment uuid
+) returns int language plpgsql security definer set search_path = public as $$
+declare
+  v_ins   card_installments;
+  v_entry record;
+  v_st    card_statements;
+  v_tx    transactions;
+  v_rate  numeric(5,2);
+  v_n     int := 0;
+begin
+  select * into v_ins from card_installments where id = p_installment;
+  if not found then return 0; end if;
+  select coalesce(card_min_rate, 8) into v_rate from shop_settings where shop_id = v_ins.shop_id;
+
+  for v_entry in
+    select e.*, s.id as st_id
+      from card_installment_entries e
+      join card_statements s
+        on s.card_id = v_ins.card_id and s.cycle = e.cycle and s.status <> 'paid'
+     where e.installment_id = p_installment and e.status = 'pending'
+     order by e.seq
+  loop
+    select * into v_st from card_statements where id = v_entry.st_id;
+
+    -- แบบเดียวกับที่ close_card_statement ทำตอนปิดรอบ: รายจ่ายหนึ่งแถว + หนี้บัตรเพิ่ม
+    insert into transactions (
+      shop_id, date, type, amount, method, category_id, item_name, vendor,
+      card_id, installment_entry_id, note, created_by
+    ) values (
+      v_ins.shop_id, v_st.period_end, 'expense', v_entry.amount, 'card', v_ins.category_id,
+      v_ins.name || ' (งวด ' || v_entry.seq || '/' || v_ins.months || ')',
+      v_ins.vendor, v_ins.card_id, v_entry.id,
+      'งวดผ่อนที่เพิ่มเข้าบิลรอบที่ออกไปแล้ว', auth.uid()
+    ) returning * into v_tx;
+    perform apply_wallet_effect(v_ins.shop_id, 'card:' || v_ins.card_id, -v_entry.amount);
+
+    update card_installment_entries
+       set status = 'billed', transaction_id = v_tx.id, billed_at = v_st.period_end,
+           statement_id = v_st.id
+     where id = v_entry.id;
+
+    -- ยอดบิลขยับตาม ขั้นต่ำคิดใหม่จากยอดใหม่ สถานะ: ยังไม่จ่ายเลย = closed, จ่ายบางส่วน = partial
+    update card_statements
+       set spend_amount   = spend_amount + v_entry.amount,
+           amount         = amount + v_entry.amount,
+           minimum_amount = greatest(0, least(amount + v_entry.amount,
+                              round((amount + v_entry.amount) * coalesce(v_rate, 8) / 100, 2))),
+           status         = case when paid_amount > 0 then 'partial' else 'closed' end
+     where id = v_st.id;
+
+    v_n := v_n + 1;
+  end loop;
+
+  -- สัญญาที่ทุกงวดถูกเก็บครบแล้ว
+  update card_installments
+     set status = 'completed', updated_at = now()
+   where id = p_installment and status = 'active'
+     and not exists (select 1 from card_installment_entries where installment_id = p_installment and status = 'pending');
+
+  return v_n;
+end;
+$$;
 
 -- ── กระเป๋าที่จะคืนเงินให้ ───────────────────────────────────────────────────
 -- บัญชีเงินโอนที่ถูกลบไปแล้ว คืนเงินเข้าไม่ได้ (apply_wallet_effect จะ raise)

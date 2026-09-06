@@ -83,6 +83,7 @@ function formOf(ins) {
 export default function InstallmentFormPopup({ installment = null, cardId = '', onClose, onSaved }) {
   const isEdit = !!installment
   const cards = useCreditCardStore((s) => s.cards)
+  const statements = useCreditCardStore((s) => s.statements)
   const getEntries = useCreditCardStore((s) => s.getEntries)
   const createInstallment = useCreditCardStore((s) => s.createInstallment)
   const updateInstallment = useCreditCardStore((s) => s.updateInstallment)
@@ -533,6 +534,33 @@ export default function InstallmentFormPopup({ installment = null, cardId = '', 
                 <span className="tabular-nums">{fmt(preview.remainingTotal)} บาท</span>
               </div>
             )}
+            {/* งวดที่ตกในรอบที่ระบบออกบิลไปแล้ว — บอกล่วงหน้าว่าจะเกิดอะไร ไม่ให้ไปงงทีหลัง
+                ว่าทำไมบิลใบเก่ายอดเปลี่ยน หรือทำไมมีสองงวดโผล่ในรอบเดียว */}
+            {(() => {
+              const closed = preview.rows.slice(preview.prepaidCount).map((r) => ({
+                r, st: statements.find((s) => s.cardId === form.cardId && s.cycle === r.cycle),
+              })).filter((x) => x.st)
+              if (closed.length === 0) return null
+              const attach = closed.filter((x) => x.st.status !== 'paid')
+              const sweep = closed.filter((x) => x.st.status === 'paid')
+              return (
+                <div className="text-[11px] text-[#8A6A15] bg-pending-soft border border-pending-line rounded-lg px-2.5 py-2 leading-relaxed">
+                  {attach.length > 0 && (
+                    <div>
+                      งวด {attach.map((x) => x.r.seq).join(', ')} อยู่ในรอบที่ออกบิลไปแล้ว —
+                      ระบบจะเพิ่มเข้าบิลใบนั้นให้ทันที (บิลรอบ {attach.map((x) => x.st.cycle).join(', ')} ยอดจะเพิ่มขึ้น
+                      {' '}{fmt(attach.reduce((n, x) => n + x.r.amount, 0))} บาท)
+                      ถ้างวดนี้จ่ายไปแล้วจริง ให้เพิ่มจำนวน "ผ่อนมาก่อนแล้ว" แทน
+                    </div>
+                  )}
+                  {sweep.length > 0 && (
+                    <div>
+                      งวด {sweep.map((x) => x.r.seq).join(', ')} อยู่ในรอบที่จ่ายบิลจบไปแล้ว — จะถูกเก็บรวมในบิลรอบถัดไป
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             <p className="text-[11px] text-faint pt-1 border-t border-hairline">
               ยังไม่ตัดเงินและยังไม่ขึ้นเป็นรายจ่ายตอนนี้ — งวดจะทยอยเข้าบิลบัตรตามรอบ
             </p>

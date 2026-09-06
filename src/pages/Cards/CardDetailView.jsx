@@ -10,7 +10,7 @@ import useLogStore from '../../store/useLogStore'
 import { buildLogEntry } from '../../lib/logBuilder'
 import { walletTarget } from '../../lib/api/transactions'
 import { formatCard } from '../../components/shared/CreditCardPicker'
-import { nextClosingDate, formatThaiDate, formatIsoThai, formatIsoThaiShort, daysUntil, cyclePeriod, toDateString } from '../../lib/cardCycle'
+import { nextClosingDate, formatThaiDate, formatIsoThai, formatIsoThaiShort, daysUntil, cyclePeriod, toDateString, clampedDate } from '../../lib/cardCycle'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 import Icon from '../../components/shared/Icon'
@@ -72,12 +72,18 @@ function Meta({ label, value }) {
  * อีกอันยังไม่ต้องทำอะไร ถ้าสีเหมือนกันก็ต้องไล่อ่านวันที่ทุกป้ายถึงจะรู้
  */
 const PIP_TONE = {
+  // จ่ายแล้วทันกำหนด
   paid:    'bg-lime border-[#A9CF3A] text-ink',
   prepaid: 'bg-lime border-[#A9CF3A] text-ink',
+  // จ่ายแล้วแต่ช้ากว่าวันครบกำหนด — ข้างในเขียว (จ่ายแล้วจริง) กรอบแดง (ช้า)
+  paidLate: 'bg-lime border-expense text-ink shadow-[0_0_0_1px_#C03A2D]',
+  // งวดที่ค้างอยู่ตอนนี้ ยังไม่ถึงกำหนด
   current: 'bg-white border-ink text-ink shadow-[0_0_0_1px_#16181D]',
-  // งวดที่ค้างอยู่และเลยวันครบกำหนดของใบมาแล้ว — กรอบแดง ไม่ใช่ขาว
+  // เลยวันครบกำหนดแล้วยังไม่จ่าย แต่ยังไม่ถึงวันตัดรอบถัดไป — กรอบแดง
   overdue: 'bg-white border-expense text-expense shadow-[0_0_0_1px_#C03A2D]',
-  // เข้าบิลไปแล้วแต่ยังไม่ได้จ่ายบิลใบนั้น และไม่ใช่งวดที่เน้น — ชมพูจาง
+  // ค้างข้ามวันตัดรอบถัดไปไปแล้ว — แดงทึบ ไม่มีข้อแก้ตัวแล้ว
+  overdueHard: 'bg-expense border-expense text-white',
+  // เข้าบิลไปแล้ว ยังไม่ถึงกำหนด และไม่ใช่งวดที่เน้น — ชมพูจาง
   billed:  'bg-expense-soft border-[#F0C4BE] text-[#A93A2E]',
   pending: 'bg-paper border-hairline text-faint',
 }
@@ -87,8 +93,6 @@ const PIP_LABEL = {
   billed: 'เข้าบิลแล้ว รอจ่ายบิล',
   pending: 'ยังไม่ถึงกำหนด',
 }
-// สัญญายาวๆ ป้ายจะล้นจนแถวนี้สูงกว่าแถวอื่น ตัดที่ 12 แล้วบอกจำนวนที่เหลือแทน
-const PIP_LIMIT = 12
 
 /**
  * ป้ายงวดผ่อนในแถวรายการ — งวดละหนึ่งป้าย พร้อมวันครบกำหนดของงวดนั้น
@@ -99,39 +103,80 @@ const PIP_LIMIT = 12
  *
  * ป้ายกว้างเท่าเนื้อหาพอดีและตัดบรรทัดเอง จึงลงในที่ว่างของแถวได้โดยไม่ดันคอลัมน์อื่น
  */
-function EntryPips({ rows, currentSeq: currentSeqProp = null, overdue = false }) {
+/** วันที่แบบ 'YYYY-MM-DD' ตามเวลาเครื่อง จากค่าที่อาจเป็น date หรือ timestamptz */
+const dayOf = (v) => {
+  if (!v) return null
+  const s = String(v)
+  if (!s.includes('T')) return s.slice(0, 10)
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? s.slice(0, 10) : toDateString(d)
+}
+
+function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null }) {
   const list = (rows ?? []).filter((r) => r.status !== 'cancelled')
   if (list.length === 0) return null
-  const shown = list.slice(0, PIP_LIMIT)
-  const hidden = list.length - shown.length
+  // แสดงทุกงวดไม่ตัด — สัญญา 84 งวดก็ต้องเห็นครบ ป้ายตัดบรรทัดเองตามความกว้าง
+  // (เคยตัดที่ 12 แล้วขึ้น "+72 งวด" ซึ่งซ่อนสิ่งที่คนเปิดหน้านี้มาดูพอดี)
+  const shown = list
+  const today = toDateString(new Date())
   // งวดที่เน้น = งวดที่ผู้ใช้ค้างอยู่จริงตอนนี้: งวดแรกที่ยังไม่จ่าย ไม่ว่าจะเข้าบิลแล้ว
   // (billed) หรือกำลังจะเข้า (pending) — ตามที่ธนาคารมอง งวดที่เข้าบิลแล้วแต่ยังไม่จ่าย
   // ยังเป็นภาระของงวดนั้น ไม่ได้ถูกเลื่อนไปงวดถัดไป ที่เรียกใช้ระบุมาแทนได้
   const currentSeq = currentSeqProp
     ?? list.find((r) => r.status !== 'paid' && r.status !== 'prepaid')?.seq
     ?? null
-  const toneOf = (r) =>
-    r.status === 'paid' || r.status === 'prepaid' ? PIP_TONE[r.status]
-      : r.seq === currentSeq ? (overdue ? PIP_TONE.overdue : PIP_TONE.current)
-        : r.status === 'billed' ? PIP_TONE.billed
-          : PIP_TONE.pending
+  // วันตัดรอบถัดจากรอบของงวดนี้ — ค้างข้ามวันนี้ไปคือค้างจริงจัง ไม่ใช่แค่ช้าไม่กี่วัน
+  // (รหัสรอบคือเดือนที่ตัด ใช้เป็นเลขเดือน 0-based ของเดือนถัดไปได้พอดี)
+  const nextCutoffOf = (r) => {
+    const [y, m] = String(r.cycle ?? '').split('-').map(Number)
+    if (!y || !m || !closingDay) return null
+    return toDateString(clampedDate(y, m, closingDay))
+  }
+  // สามคำถามเรียงตามลำดับ: จ่ายหรือยัง → จ่ายทันไหม / ค้างนานแค่ไหน → เป็นงวดที่เน้นไหม
+  const toneOf = (r) => {
+    if (r.status === 'prepaid') return PIP_TONE.prepaid
+    if (r.status === 'paid') {
+      const paidDay = dayOf(r.paidAt)
+      return paidDay && r.dueDate && paidDay > r.dueDate ? PIP_TONE.paidLate : PIP_TONE.paid
+    }
+    if (r.dueDate && today > r.dueDate) {
+      const cut = nextCutoffOf(r)
+      return cut && today > cut ? PIP_TONE.overdueHard : PIP_TONE.overdue
+    }
+    if (r.seq === currentSeq) return PIP_TONE.current
+    return r.status === 'billed' ? PIP_TONE.billed : PIP_TONE.pending
+  }
+  const labelOf = (r) => {
+    if (r.status === 'paid') {
+      const paidDay = dayOf(r.paidAt)
+      return paidDay && r.dueDate && paidDay > r.dueDate ? `จ่ายแล้ว แต่ช้ากว่ากำหนด (${formatIsoThai(paidDay)})` : 'จ่ายแล้วทันกำหนด'
+    }
+    if (r.status !== 'prepaid' && r.dueDate && today > r.dueDate) {
+      const cut = nextCutoffOf(r)
+      return cut && today > cut ? 'ค้างข้ามวันตัดรอบถัดไปแล้ว' : 'เลยกำหนดแล้ว ยังไม่จ่าย'
+    }
+    if (r.seq === currentSeq && r.status === 'pending') return 'งวดที่ค้างอยู่ตอนนี้'
+    return PIP_LABEL[r.status] ?? r.status
+  }
   return (
-    <span className="flex flex-wrap items-center gap-1">
+    // เรียงต่อกันแล้วตัดบรรทัดเหมือนเดิม แต่ป้ายทุกใบกว้างเท่ากัน (กำหนดตายตัว ไม่ยืดตามช่อง)
+    // ขอบป้ายจึงตรงกันเป็นคอลัมน์โดยไม่ต้องใช้ตาราง ซึ่งจะยืดป้ายให้เต็มแถวจนดูหนา
+    <span className="flex flex-wrap gap-1">
       {shown.map((r) => (
         <span
           key={r.seq}
           title={'งวดที่ ' + r.seq + ' จาก ' + list.length + ' · ครบกำหนด ' + formatIsoThai(r.dueDate)
             + ' · ' + fmt(r.amount) + ' บาท · '
-            + (r.seq === currentSeq && r.status === 'pending' ? 'งวดที่แถวนี้พูดถึง' : (PIP_LABEL[r.status] ?? r.status))}
-          className={'inline-flex items-center gap-1 h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums '
+            + labelOf(r)}
+          className={'flex items-center gap-1 w-[72px] flex-none h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums '
             + toneOf(r)}
         >
-          <span className="font-bold">{r.seq}</span>
-          <span className="w-px h-[9px] bg-current opacity-30" />
-          <span className="opacity-80">{formatIsoThaiShort(r.dueDate)}</span>
+          {/* เลขงวดกว้างคงที่ชิดขวา เส้นคั่นทุกใบจึงอยู่ตำแหน่งเดียวกันทั้งคอลัมน์ */}
+          <span className="font-bold w-[13px] text-right flex-none">{r.seq}</span>
+          <span className="w-px h-[9px] bg-current opacity-30 flex-none" />
+          <span className="opacity-80 truncate">{formatIsoThaiShort(r.dueDate)}</span>
         </span>
       ))}
-      {hidden > 0 && <span className="text-[9.5px] text-faint">+{hidden} งวด</span>}
     </span>
   )
 }
@@ -815,7 +860,7 @@ export default function CardDetailView({ cardId }) {
                         <EntryPips
                           rows={prog.rows}
                           currentSeq={r.owed?.seq ?? insEntry.e?.seq ?? r.entry?.seq}
-                          overdue={!!r.owedOverdue}
+                          closingDay={card.closingDay}
                         />
                         <span className="text-[10.5px] text-faint">
                           จ่ายแล้ว {prog.paidCount + prog.prepaidCount} จาก {insEntry.i.months} งวด
@@ -967,15 +1012,7 @@ export default function CardDetailView({ cardId }) {
                 {/* แถบเดียวบอกได้แค่สัดส่วน ซึ่งข้อความ "งวด x จาก y" บรรทัดบนบอกไปแล้ว
                     ป้ายรายงวดบอกต่อได้ว่างวดไหนครบกำหนดวันไหนและงวดไหนกำลังจะถูกเก็บ */}
                 <div className="mt-1.5">
-                  {/* กรอบแดงถ้างวดที่ค้างอยู่เลยวันครบกำหนดของใบมาแล้ว */}
-                  <EntryPips
-                    rows={p.rows}
-                    overdue={(() => {
-                      const owed = p.rows.find((x) => x.status === 'billed')
-                      const due = owed ? (statements.find((s) => s.id === owed.statementId)?.dueDate ?? owed.dueDate) : null
-                      return !!due && due < todayStr
-                    })()}
-                  />
+                  <EntryPips rows={p.rows} closingDay={card.closingDay} />
                 </div>
                 {next && (
                   <div className="flex items-center gap-2 mt-1.5">
