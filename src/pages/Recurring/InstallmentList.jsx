@@ -13,6 +13,7 @@ import PayCardBillPopup from '../../components/shared/PayCardBillPopup'
 import PickBillPopup from './PickBillPopup'
 import PayInstallmentPopup from './PayInstallmentPopup'
 import InstallmentFormPopup from '../../components/shared/InstallmentFormPopup'
+import InstallmentHistoryPopup from '../../components/shared/InstallmentHistoryPopup'
 import useWalletStore from '../../store/useWalletStore'
 import { formatIsoThai } from '../../lib/cardCycle'
 import SourceTag from '../../components/shared/SourceTag'
@@ -75,6 +76,7 @@ function SettlePopup({ installment, remaining, count, onConfirm, onCancel, busy 
 
 function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntry, onUndoEntry, onEdit, onDelete }) {
   const [open, setOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const progress = useCreditCardStore((s) => s.getInstallmentProgress(installment.id))
   const cardLabel = useCreditCardStore((s) => s.getCardLabel(installment.cardId))
   const cardShort = useCreditCardStore((s) => s.getCardShortLabel(installment.cardId))
@@ -161,10 +163,18 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
 
       <div className="flex gap-2 items-center">
         <button
-          className="text-xs text-gray-500 hover:text-gray-700 mr-auto"
+          className="text-xs text-gray-500 hover:text-gray-700"
           onClick={() => setOpen((v) => !v)}
         >
           {open ? '▲ ซ่อนตารางงวด' : `▼ ดูตารางงวด (${installment.months} งวด)`}
+        </button>
+        {/* ย้อนดูสัญญาที่ผ่อนจบไปแล้วได้ด้วย จึงไม่ผูกกับ isActive — คำถามที่คนถามหลังผ่อนจบ
+            คือ "งวดไหนจ่ายวันไหน ตรงไหม" ซึ่งตารางงวดด้านบนไม่ได้ตอบ */}
+        <button
+          className="text-xs text-gray-500 hover:text-gray-700 mr-auto"
+          onClick={() => setHistoryOpen(true)}
+        >
+          🧾 ประวัติการผ่อน
         </button>
         {isActive && onEdit && (
           <button className="btn btn-secondary text-xs py-1 px-2.5" onClick={() => onEdit(installment)}>
@@ -190,6 +200,10 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
           </>
         )}
       </div>
+
+      {historyOpen && (
+        <InstallmentHistoryPopup installment={installment} onClose={() => setHistoryOpen(false)} />
+      )}
 
       {open && (
         <div className="border-t pt-2 overflow-x-auto">
