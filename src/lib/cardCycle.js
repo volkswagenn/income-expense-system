@@ -81,9 +81,20 @@ export function cyclePeriod(closingDay, dueDay, on = new Date()) {
  * ถ้าปิดสลับลำดับ ยอดยกมาจะผูกผิดใบ
  *
  * ผู้ใช้ที่ไม่ได้เปิดแอปหลายเดือนจะได้ใบย้อนหลังครบตอนกลับมาเปิด
- * แต่ไม่สร้างใบของช่วงก่อนที่บัตรจะถูกเพิ่มเข้าระบบ เพราะไม่มีข้อมูลรายการอยู่แล้ว
+ *
+ * รอบก่อนวันที่เพิ่มบัตรเข้าระบบ โดยปกติข้าม เพราะไม่มีรายการอะไรอยู่ในนั้น
+ * ยกเว้นรอบที่มีของค้างอยู่จริง — เช่นสัญญาผ่อนที่บันทึกย้อนหลังแล้วมีงวดตกอยู่ใน
+ * รอบที่ผ่านมาแล้ว ถ้าข้ามรอบนั้น งวดนั้นจะไม่มีวันถูกเรียกเก็บ เพราะตัวปิดรอบ
+ * เก็บเฉพาะงวดที่ตรงกับรอบที่กำลังปิดพอดี บัตรบอกวันสรุปยอดกับวันครบกำหนดไว้แล้ว
+ * รอบจึงคำนวณย้อนไปได้เสมอ ไม่ต้องรอให้มีบัตรอยู่ในระบบตอนนั้น
+ *
+ * @param hasData (cycle, start, end) → true ถ้ารอบนั้นมีรายการ/งวดค้างอยู่ — ใช้ตัดสิน
+ *                รอบก่อนวันเพิ่มบัตร ไม่ส่งมา = ใช้กฎเดิม (ข้ามทั้งหมด)
  */
-export function pendingCycles(card, existingCycles, { from = new Date(), maxMonths = 24 } = {}) {
+export function pendingCycles(
+  card, existingCycles,
+  { from = new Date(), maxMonths = 24, hasData = null } = {},
+) {
   const today = atMidnight(from)
   const createdAt = card.createdAt ? atMidnight(new Date(card.createdAt)) : null
   const out = []
@@ -93,15 +104,11 @@ export function pendingCycles(card, existingCycles, { from = new Date(), maxMont
     const end = clampedDate(ref.getFullYear(), ref.getMonth(), card.closingDay)
     // ยังไม่พ้นวันสรุปยอด — รายการของวันนั้นยังนับอยู่ในรอบนี้ ปิดไม่ได้
     if (end >= today) continue
-    if (createdAt && end < createdAt) continue
     const cycle = cycleKey(end)
     if (existingCycles.has(cycle)) continue
-    out.push({
-      cycle,
-      start: startForClosing(end, card.closingDay),
-      end,
-      due: dueDateFor(end, card.dueDay),
-    })
+    const start = startForClosing(end, card.closingDay)
+    if (createdAt && end < createdAt && !(hasData && hasData(cycle, start, end))) continue
+    out.push({ cycle, start, end, due: dueDateFor(end, card.dueDay) })
   }
   return out.reverse()
 }

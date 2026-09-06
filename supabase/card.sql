@@ -31,6 +31,17 @@
 -- 4) จ่ายบิลคือการย้ายเงิน ไม่ใช่รายจ่าย ค่าใช้จ่ายเกิดตอนรูดไปแล้ว
 --    ถ้าบันทึกเป็นรายจ่ายอีกครั้งตอนจ่ายบิล ยอดจะถูกนับซ้ำสองเท่า
 --    pay_card_statement จึงไม่ insert transactions แต่ขยับสองกระเป๋าพร้อมกัน
+--
+-- 5) บิลใบใหม่เก็บ "ทุกอย่างที่ยังไม่มีใบไหนครอบ" ไม่ใช่ "ของในช่วงวันที่ของรอบ"
+--    รายการที่ลงย้อนหลัง งวดผ่อนที่ตกค้างจากรอบที่ข้ามไป และผลจากการเปลี่ยน
+--    วันสรุปยอด จึงไม่หายและไม่ถูกเก็บซ้ำ (ดู close_card_statement ส่วนที่ 5)
+--
+-- ── อัปเดตล่าสุด ─────────────────────────────────────────────────────────────
+-- • close_card_statement เปลี่ยนกฎการเก็บตามข้อ 5
+-- • ส่วนที่ 12: ตารางขาการจ่ายบิล / paid_amount ของงวด / refund_source /
+--   trigger กันลบรายจ่ายที่เป็นค่างวด — ต้องรันไฟล์นี้ซ้ำ
+-- (เปิดแท็บเดิมใน SQL Editor ลบของเก่า วางทั้งไฟล์ Run) ข้อมูลเดิมไม่ถูกแตะ
+-- ผลตรวจท้ายไฟล์ต้องได้ ตาราง 6/6 · คอลัมน์ 12/12 · ฟังก์ชัน 12/12
 -- ============================================================================
 
 
@@ -192,6 +203,28 @@ create table if not exists card_installment_entries (
 
 create index if not exists card_installment_entries_cycle_idx
   on card_installment_entries (installment_id, cycle, status);
+
+-- [payments-table-start]
+-- ── ขาการจ่ายบิล ─────────────────────────────────────────────────────────────
+-- บิลใบเดียวจ่ายได้หลายรอบจากคนละกระเป๋า ต้องจำทีละขา ตอนย้อนถึงคืนถูกกระเป๋า
+-- ต้องอยู่ตรงนี้ ก่อนฟังก์ชันทุกตัว — undo_card_payment ประกาศตัวแปรชนิดตารางนี้
+-- และ Postgres ตรวจชนิดตัวแปรตอนสร้างฟังก์ชัน ถ้าตารางอยู่ท้ายไฟล์จะ error 42704
+create table if not exists card_statement_payments (
+  id                  uuid primary key default gen_random_uuid(),
+  shop_id             uuid not null references shops(id) on delete cascade,
+  statement_id        uuid not null references card_statements(id) on delete cascade,
+  method              text not null check (method in ('cash', 'transfer')),
+  transfer_account_id uuid references transfer_accounts(id) on delete set null,
+  amount              numeric(14,2) not null check (amount > 0),
+  paid_at             date not null,
+  created_at          timestamptz not null default now()
+);
+create index if not exists card_statement_payments_stmt_idx
+  on card_statement_payments (statement_id, created_at desc);
+
+-- ยอดที่จ่ายจริงของงวด แยกจากยอดตามตาราง (ดูส่วนที่ 12)
+alter table card_installment_entries add column if not exists paid_amount numeric(14,2);
+-- [payments-table-end]
 
 
 -- ###########################################################################
@@ -416,19 +449,25 @@ begin
 
   -- ยอดค้างจากใบก่อนหน้าที่ยังไม่ถูกยกไปไหน
   -- รวมใบที่จ่ายเกิน (amount - paid_amount ติดลบ) ด้วย เครดิตจะได้ไหลไปหักรอบถัดไป
+  -- เทียบกับ p_end ไม่ใช่ p_start: ถ้าวันสรุปยอดถูกเปลี่ยนจนรอบใหม่เหลื่อมรอบเก่า
+  -- ใบก่อนหน้าจะมี period_end หลัง p_start แล้วหลุดจากการยกยอดไปหนึ่งรอบเต็มๆ
   select coalesce(sum(amount - paid_amount), 0) into v_prev
     from card_statements
    where card_id = p_card and carried_to is null
-     and (status <> 'paid' or amount - paid_amount < 0) and period_end < p_start;
+     and (status <> 'paid' or amount - paid_amount < 0) and period_end < p_end;
 
   -- งวดผ่อนที่ถึงรอบนี้ → สร้างรายจ่ายหนึ่งแถวต่องวด แล้วเพิ่มหนี้เท่ายอดงวดเดียว
+  --
+  -- e.cycle <= p_cycle ไม่ใช่ = : งวดที่ตกค้างจากรอบก่อน (รอบที่ไม่ได้ถูกปิดเพราะ
+  -- บันทึกสัญญาย้อนหลัง หรือวันสรุปยอดถูกเปลี่ยนจนรอบเก่าหาย) จะถูกกวาดมาเก็บใน
+  -- บิลใบถัดไปเสมอ เหมือนที่ธนาคารทำ แทนที่จะค้างเป็น pending ตลอดไปโดยไม่มีใครเห็น
   for v_entry in
     select e.*, i.name, i.vendor, i.category_id, i.months
       from card_installment_entries e
       join card_installments i on i.id = e.installment_id
      where i.card_id = p_card and i.status = 'active'
-       and e.cycle = p_cycle and e.status = 'pending'
-     order by e.seq
+       and e.cycle <= p_cycle and e.status = 'pending'
+     order by e.cycle, e.seq
   loop
     insert into transactions (
       shop_id, date, type, amount, method, category_id, item_name, vendor,
@@ -457,21 +496,37 @@ begin
         where e.installment_id = i.id and e.status = 'pending'
      );
 
-  select coalesce(sum(amount), 0) into v_spend
-    from transactions
-   where card_id = p_card and shop_id = p_shop and type = 'expense'
-     and date between p_start and p_end;
+  -- ยอดรูดที่เข้าบิลใบนี้ = ทุกรายการถึงวันสรุปยอด ที่ยังไม่มีใบไหนครอบอยู่
+  --
+  -- ไม่ใช่ "รายการในช่วง p_start..p_end" เพราะช่วงวันที่ของรอบเชื่อไม่ได้เสมอไป
+  --   • ลงรายการย้อนหลังเข้ารอบที่ปิดไปแล้ว → ต้องไปเก็บในบิลใบหน้า ไม่ใช่หายไปเฉยๆ
+  --   • เปลี่ยนวันสรุปยอดของบัตร → รอบใหม่อาจเหลื่อมรอบเก่า (เก็บซ้ำ) หรือมีช่องว่าง (ไม่เก็บเลย)
+  -- การถามว่า "มีใบไหนครอบวันนี้แล้วหรือยัง" แทนช่วงวันที่ ปิดทั้งสองรูได้ในกฎเดียว
+  -- และตรงกับ getUncoveredTransactions ฝั่งหน้าจอ ที่ใช้คำนวณยอดรอบที่ยังเปิดอยู่
+  select coalesce(sum(t.amount), 0) into v_spend
+    from transactions t
+   where t.card_id = p_card and t.shop_id = p_shop and t.type = 'expense'
+     and t.date <= p_end
+     and not exists (
+       select 1 from card_statements s
+        where s.card_id = p_card and t.date between s.period_start and s.period_end
+     );
 
   -- รายรับที่ปลายทางเป็นบัตร = เครดิตเงินคืน หรือเงินคืนสินค้า → ลดยอดที่ต้องชำระ
-  select coalesce(sum(amount), 0) into v_credit
-    from transactions
-   where card_id = p_card and shop_id = p_shop and type = 'income'
-     and date between p_start and p_end;
+  select coalesce(sum(t.amount), 0) into v_credit
+    from transactions t
+   where t.card_id = p_card and t.shop_id = p_shop and t.type = 'income'
+     and t.date <= p_end
+     and not exists (
+       select 1 from card_statements s
+        where s.card_id = p_card and t.date between s.period_start and s.period_end
+     );
 
-  -- เงินสดที่กดจากบัตรในรอบนี้ ธนาคารเรียกเก็บเหมือนยอดรูด (ค่าธรรมเนียมเป็นรายจ่ายอยู่ใน v_spend แล้ว)
+  -- เงินสดที่กดจากบัตรที่ยังไม่ถูกเรียกเก็บ ธนาคารเรียกเก็บเหมือนยอดรูด
+  -- (ค่าธรรมเนียมเป็นรายจ่ายอยู่ใน v_spend แล้ว) ใช้ statement_id เป็นตัวบอกว่าเก็บไปแล้วหรือยัง
   select coalesce(sum(amount), 0) into v_adv
     from card_advances
-   where card_id = p_card and shop_id = p_shop and date between p_start and p_end;
+   where card_id = p_card and shop_id = p_shop and statement_id is null and date <= p_end;
 
   v_amount := v_prev + v_spend + v_adv - v_credit;
   -- ติดลบ = เครดิตเหลือ (จ่ายเกินหรือเงินคืนมากกว่ายอดรูด) เก็บเป็นใบสถานะ paid ยอดติดลบ
@@ -490,24 +545,25 @@ begin
   ) returning * into v_st;
 
   -- ผูกงวดที่เพิ่งเข้าบิลกับใบนี้ เพื่อให้อ่านวันที่จ่ายจริงจากใบได้
+  -- (รวมงวดตกค้างจากรอบก่อนที่เพิ่งถูกกวาดมาเก็บในใบนี้ด้วย — ดูเงื่อนไข e.cycle <= p_cycle ข้างบน)
   update card_installment_entries e
      set statement_id = v_st.id
     from card_installments i
    where e.installment_id = i.id and i.card_id = p_card
-     and e.cycle = p_cycle and e.status = 'billed' and e.statement_id is null;
+     and e.cycle <= p_cycle and e.status = 'billed' and e.statement_id is null;
 
-  -- ผูกรายการกดเงินสดของรอบนี้กับใบ — หลังจากนี้ย้อนไม่ได้แล้ว
+  -- ผูกรายการกดเงินสดที่เพิ่งถูกเก็บกับใบ — หลังจากนี้ย้อนไม่ได้แล้ว
   update card_advances
      set statement_id = v_st.id
    where card_id = p_card and shop_id = p_shop and statement_id is null
-     and date between p_start and p_end;
+     and date <= p_end;
 
   -- ใบเก่าที่ยอดถูกยกมาแล้ว ทำเครื่องหมายไว้ไม่ให้ถูกนับอีกรอบหน้า
   update card_statements
      set carried_to = v_st.id
    where card_id = p_card and carried_to is null
      and (status <> 'paid' or amount - paid_amount < 0)
-     and period_end < p_start and id <> v_st.id;
+     and period_end < p_end and id <> v_st.id;
 
   return v_st;
 end;
@@ -556,6 +612,12 @@ begin
   -- ขาที่ 2 หนี้บัตรลดลง (สาขา card กลับเครื่องหมายให้เอง) — ผลรวมสองขาเป็นศูนย์
   perform apply_wallet_effect(v_st.shop_id, 'card:' || v_st.card_id, p_amount);
 
+  -- จำแต่ละ "ขา" ที่จ่ายไว้ทีละครั้ง เพราะบิลใบเดียวจ่ายได้หลายรอบจากคนละกระเป๋า
+  -- ตอนย้อนต้องคืนเข้ากระเป๋าที่ตัดมาจริงทีละขา ไม่ใช่กระเป๋าสุดท้ายทั้งก้อน
+  insert into card_statement_payments (shop_id, statement_id, method, transfer_account_id, amount, paid_at)
+  values (v_st.shop_id, p_statement, p_method,
+          case when p_method = 'transfer' then p_account end, p_amount, p_date);
+
   update card_statements
      set paid_amount = paid_amount + p_amount,
          status = case when paid_amount + p_amount >= amount then 'paid' else 'partial' end,
@@ -570,13 +632,17 @@ begin
 end;
 $$;
 
--- ย้อนการจ่ายบิล — คืนเงินกลับกระเป๋าต้นทาง และหนี้บัตรกลับมาเท่าเดิม
+-- ย้อนการจ่ายบิล — คืนเงินกลับกระเป๋าต้นทางทีละขา และหนี้บัตรกลับมาเท่าเดิม
 create or replace function public.undo_card_payment(
   p_statement uuid,
   p_amount    numeric,
   p_log       jsonb default null
 ) returns card_statements language plpgsql security definer set search_path = public as $$
-declare v_st card_statements; v_src text;
+declare
+  v_st   card_statements;
+  v_leg  card_statement_payments;
+  v_left numeric(14,2);
+  v_take numeric(14,2);
 begin
   select * into v_st from card_statements where id = p_statement;
   if not found then raise exception 'ไม่พบใบแจ้งยอดนี้'; end if;
@@ -586,16 +652,46 @@ begin
   if p_amount is null or p_amount <= 0 or p_amount > v_st.paid_amount then
     raise exception 'จำนวนเงินที่ย้อนไม่ถูกต้อง';
   end if;
-  if v_st.paid_method is null then raise exception 'ไม่รู้ว่าจ่ายจากกระเป๋าไหน ย้อนให้ไม่ได้'; end if;
+  -- ยอดค้างของใบนี้ถูกยกไปอยู่ใน previous_balance ของใบถัดไปแล้ว ถ้าย้อนตรงนี้
+  -- ยอดจะโผล่สองใบพร้อมกันและใบถัดไปไม่รู้เรื่อง ต้องย้อนที่ใบล่าสุดแทน
+  if v_st.carried_to is not null then
+    raise exception 'ใบนี้ถูกยกยอดไปรวมในบิลรอบถัดไปแล้ว ย้อนการจ่ายไม่ได้ — ให้ย้อนที่บิลใบล่าสุดแทน';
+  end if;
 
-  v_src := case when v_st.paid_method = 'cash' then 'cash'
-                else 'transfer:' || v_st.transfer_account_id end;
-  perform apply_wallet_effect(v_st.shop_id, v_src, p_amount);
+  -- ย้อนทีละขา ขาล่าสุดก่อน คืนเข้ากระเป๋าที่ขานั้นตัดมาจริง
+  -- (บัญชีที่ถูกลบไปแล้ว refund_source จะเลี่ยงไปคืนเข้าเงินสดให้)
+  v_left := p_amount;
+  for v_leg in
+    select * from card_statement_payments
+     where statement_id = p_statement
+     order by created_at desc, id desc
+  loop
+    exit when v_left <= 0;
+    v_take := least(v_leg.amount, v_left);
+    perform apply_wallet_effect(v_st.shop_id,
+      refund_source(v_st.shop_id, v_leg.method, v_leg.transfer_account_id), v_take);
+    if v_take >= v_leg.amount then
+      delete from card_statement_payments where id = v_leg.id;
+    else
+      update card_statement_payments set amount = amount - v_take where id = v_leg.id;
+    end if;
+    v_left := v_left - v_take;
+  end loop;
+
+  -- ส่วนที่จ่ายไว้ก่อนจะมีตารางขา (ใบเก่า) — คืนตามวิธีจ่ายล่าสุดที่ใบจำไว้
+  if v_left > 0 then
+    if v_st.paid_method is null then raise exception 'ไม่รู้ว่าจ่ายจากกระเป๋าไหน ย้อนให้ไม่ได้'; end if;
+    perform apply_wallet_effect(v_st.shop_id,
+      refund_source(v_st.shop_id, v_st.paid_method, v_st.transfer_account_id), v_left);
+  end if;
+
   perform apply_wallet_effect(v_st.shop_id, 'card:' || v_st.card_id, -p_amount);
 
   update card_statements
      set paid_amount = paid_amount - p_amount,
-         status = case when paid_amount - p_amount <= 0 then 'closed' else 'partial' end,
+         -- ใบเครดิต (ยอดติดลบ) ถือว่า paid มาตั้งแต่เกิด ห้ามเปิดกลับเป็น closed
+         status = case when amount <= 0 then 'paid'
+                       when paid_amount - p_amount <= 0 then 'closed' else 'partial' end,
          paid_at = case when paid_amount - p_amount <= 0 then null else paid_at end,
          paid_method = case when paid_amount - p_amount <= 0 then null else paid_method end,
          transfer_account_id = case when paid_amount - p_amount <= 0 then null else transfer_account_id end
@@ -772,6 +868,9 @@ begin
   if not is_owner(p_shop) then
     raise exception 'เฉพาะเจ้าของร้านเท่านั้นที่ล้างข้อมูลได้' using errcode = '42501';
   end if;
+
+  -- ล้างทั้งร้านลบรายจ่ายที่ผูกกับงวดผ่อนด้วย ต้องบอก trigger กันลบว่าตั้งใจ
+  perform set_config('jodflow.installment_rpc', '1', true);
 
   delete from tax_invoices             where shop_id = p_shop;
   delete from pending_payments         where shop_id = p_shop;
@@ -976,27 +1075,30 @@ notify pgrst, 'reload schema';
 -- ##  ตรวจผลการติดตั้ง — ต้องได้ครบทุกบรรทัด
 -- ###########################################################################
 
-select 'ตารางบัตร' as "รายการ", count(*)::text || ' / 5' as "ผล"
+select 'ตารางบัตร' as "รายการ", count(*)::text || ' / 6' as "ผล"
   from information_schema.tables
  where table_schema = 'public'
-   and table_name in ('credit_cards','card_statements','card_installments','card_installment_entries','card_advances')
+   and table_name in ('credit_cards','card_statements','card_installments','card_installment_entries','card_advances',
+                      'card_statement_payments')
 union all
-select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 11'
+select 'คอลัมน์ที่เติมเพิ่ม', count(*)::text || ' / 12'
   from information_schema.columns
  where table_schema = 'public'
    and ((table_name='transactions'      and column_name in ('card_id','installment_entry_id'))
      or (table_name='credit_cards'      and column_name in ('autopay_mode','autopay_account_id','autopay_amount','annual_fee','annual_fee_month'))
      or (table_name='card_statements'   and column_name = 'advance_amount')
      or (table_name='card_installments' and column_name = 'principal_amount')
+     or (table_name='card_installment_entries' and column_name = 'paid_amount')
      or (table_name='recurring_entries' and column_name = 'card_id')
      or (table_name='shop_settings'     and column_name = 'card_min_rate'))
 union all
-select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 8'
+select 'ฟังก์ชัน RPC ของบัตร', count(*)::text || ' / 12'
   from information_schema.routines
  where routine_schema = 'public'
    and routine_name in ('close_card_statement','pay_card_statement','undo_card_payment',
      'create_card_installment','settle_card_installment','cancel_card_installment',
-     'card_cash_advance','undo_card_advance')
+     'card_cash_advance','undo_card_advance',
+     'pay_installment_entry','undo_installment_entry','delete_card_installment','refund_source')
 union all
 select 'รับ method = card แล้ว',
        case when exists (
@@ -1052,6 +1154,7 @@ begin
   perform assert_can_edit(v_entry.shop_id);
 
   if v_entry.status = 'paid' then raise exception 'งวดนี้จ่ายไปแล้ว'; end if;
+  if v_entry.status = 'prepaid' then raise exception 'งวดนี้จ่ายมาก่อนเริ่มใช้แอปแล้ว จ่ายซ้ำไม่ได้'; end if;
   if v_entry.status = 'cancelled' then raise exception 'งวดนี้ถูกยกเลิกไปแล้ว'; end if;
   if v_entry.status = 'billed' then
     raise exception 'งวดนี้ถูกเรียกเก็บเข้าบิลรอบ % ไปแล้ว ให้จ่ายผ่านบิลบัตรแทน', v_entry.cycle;
@@ -1087,9 +1190,11 @@ begin
   v_src := case when p_method = 'cash' then 'cash' else 'transfer:' || p_account end;
   perform apply_wallet_effect(v_entry.shop_id, v_src, -p_amount);
 
+  -- ยอดที่จ่ายจริงเก็บแยกใน paid_amount — ยอดตามตาราง (amount) ต้องคงเดิม
+  -- ไม่งั้นจ่ายไม่เต็มงวดครั้งเดียว ผลรวมทุกงวดจะไม่เท่ายอดสัญญาอีกเลย
   update card_installment_entries
      set status = 'paid',
-         amount = p_amount,
+         paid_amount = p_amount,
          paid_at = coalesce(p_paid_at, now()),
          paid_method = p_method,
          transfer_account_id = p_account,
@@ -1117,20 +1222,29 @@ begin
   perform assert_can_edit(v_entry.shop_id);
   if v_entry.status <> 'paid' then raise exception 'งวดนี้ยังไม่ได้จ่าย'; end if;
 
+  -- บอก trigger กันลบว่านี่คือ RPC ของสัญญาผ่อน ลบรายจ่ายที่ผูกไว้ได้
+  perform set_config('jodflow.installment_rpc', '1', true);
+
   -- คืนเงินเข้ากระเป๋าต้นทางก่อน แล้วค่อยลบรายจ่ายที่ผูกไว้
-  v_src := case when v_entry.paid_method = 'cash' then 'cash'
-                else 'transfer:' || v_entry.transfer_account_id end;
-  perform apply_wallet_effect(v_entry.shop_id, v_src, v_entry.amount);
+  -- คืนเท่าที่จ่ายจริง (paid_amount) ไม่ใช่ยอดตามตาราง
+  v_src := refund_source(v_entry.shop_id, v_entry.paid_method, v_entry.transfer_account_id);
+  perform apply_wallet_effect(v_entry.shop_id, v_src, coalesce(v_entry.paid_amount, v_entry.amount));
 
   if v_entry.transaction_id is not null then
     delete from transactions where id = v_entry.transaction_id;
   end if;
 
   update card_installment_entries
-     set status = 'pending', paid_at = null, paid_method = null,
+     set status = 'pending', paid_amount = null, paid_at = null, paid_method = null,
          transfer_account_id = null, transaction_id = null
    where id = p_entry
    returning * into v_entry;
+
+  -- สัญญาที่ถูกปิดเพราะงวดนี้เป็นงวดสุดท้าย ต้องกลับมาเปิด ไม่งั้นงวดที่เพิ่งย้อน
+  -- จะไม่ถูกเรียกเก็บอีกเลย (close_card_statement เก็บเฉพาะสัญญา active)
+  update card_installments
+     set status = 'active', updated_at = now()
+   where id = v_entry.installment_id and status = 'completed';
 
   perform write_log(v_entry.shop_id, p_log);
   return v_entry;
@@ -1428,14 +1542,17 @@ begin
     raise exception 'มีงวดที่เข้าบิลบัตรไปแล้ว % งวด ลบทิ้งไม่ได้ — ใช้ "ยกเลิกสัญญา" แทน', v_billed;
   end if;
 
-  -- คืนเงินงวดที่จ่ายผ่านแอปไปแล้ว ทีละงวด ตามกระเป๋าที่ตัดไปจริง
+  -- บอก trigger กันลบว่านี่คือ RPC ของสัญญาผ่อน ลบรายจ่ายที่ผูกไว้ได้
+  perform set_config('jodflow.installment_rpc', '1', true);
+
+  -- คืนเงินงวดที่จ่ายผ่านแอปไปแล้ว ทีละงวด ตามกระเป๋าที่ตัดไปจริง (เท่าที่จ่ายจริง)
+  -- บัญชีที่ถูกลบไปแล้ว refund_source คืนเข้าเงินสดแทน ไม่งั้นลบสัญญาไม่ได้ตลอดไป
   for v_entry in
     select * from card_installment_entries
      where installment_id = p_installment and status = 'paid'
   loop
-    v_src := case when v_entry.paid_method = 'cash' then 'cash'
-                  else 'transfer:' || v_entry.transfer_account_id end;
-    perform apply_wallet_effect(v_entry.shop_id, v_src, v_entry.amount);
+    v_src := refund_source(v_entry.shop_id, v_entry.paid_method, v_entry.transfer_account_id);
+    perform apply_wallet_effect(v_entry.shop_id, v_src, coalesce(v_entry.paid_amount, v_entry.amount));
     if v_entry.transaction_id is not null then
       delete from transactions where id = v_entry.transaction_id;
     end if;
@@ -1447,5 +1564,85 @@ begin
   perform write_log(v_ins.shop_id, p_log);
 end;
 $$;
+
+
+-- ###########################################################################
+-- ##  12. ย้อนและแก้ทีหลังให้ปลอดภัย
+-- ###########################################################################
+--
+-- ทุกข้อในส่วนนี้เกิดตอน "แก้ทีหลัง" ไม่ใช่ตอนบันทึกครั้งแรก
+--   1) จ่ายบิลจากสองกระเป๋าแล้วย้อน เงินคืนไปกระเป๋าสุดท้ายทั้งก้อน
+--      → เก็บ "ขา" การจ่ายทีละครั้ง (card_statement_payments) แล้วย้อนทีละขา
+--   2) ย้อนแล้วบัญชีต้นทางถูกลบไปแล้ว → ล้มตลอดไป
+--      → refund_source() คืนเข้าเงินสดแทนเมื่อบัญชีหายไป
+--   3) จ่ายค่างวดไม่เต็มยอด ตารางงวดถูกเขียนทับ / งวดที่จ่ายมาก่อนสั่งจ่ายซ้ำได้
+--      → paid_amount แยกจากยอดตามตาราง และกัน prepaid (ใน pay_installment_entry)
+--   4) ย้อนงวดสุดท้ายแล้วสัญญาที่ปิดไปแล้วไม่กลับมาเปิด งวดหายจากทุกบิล
+--      → undo_installment_entry เปิดสัญญากลับเป็น active
+--   5) ยกเลิก "รายการงวดผ่อน" จากหน้าประวัติ ทะลุตัวกันของสัญญาผ่อน
+--      → trigger บน transactions ห้ามลบ/แก้ยอดรายการที่ผูกกับงวด นอกจากผ่าน RPC ของสัญญา
+
+-- ── สิทธิ์เข้าถึงตารางขาการจ่ายบิล (ตัวตารางสร้างไว้ในส่วนที่ 1) ─────────────
+do $$
+begin
+  execute 'alter table card_statement_payments enable row level security';
+  execute 'drop policy if exists card_statement_payments_select on card_statement_payments';
+  execute 'create policy card_statement_payments_select on card_statement_payments for select using (is_member(shop_id))';
+  execute 'drop policy if exists card_statement_payments_insert on card_statement_payments';
+  execute 'create policy card_statement_payments_insert on card_statement_payments for insert with check (can_edit(shop_id))';
+  execute 'drop policy if exists card_statement_payments_update on card_statement_payments';
+  execute 'create policy card_statement_payments_update on card_statement_payments for update using (can_edit(shop_id)) with check (can_edit(shop_id))';
+  execute 'drop policy if exists card_statement_payments_delete on card_statement_payments';
+  execute 'create policy card_statement_payments_delete on card_statement_payments for delete using (can_edit(shop_id))';
+end $$;
+
+-- ── กระเป๋าที่จะคืนเงินให้ ───────────────────────────────────────────────────
+-- บัญชีเงินโอนที่ถูกลบไปแล้ว คืนเงินเข้าไม่ได้ (apply_wallet_effect จะ raise)
+-- ให้คืนเข้าเงินสดแทน — ดีกว่าย้อนไม่ได้เลย และผู้ใช้โอนต่อเองได้
+create or replace function public.refund_source(p_shop uuid, p_method text, p_account uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select case
+    when p_method = 'transfer' and p_account is not null
+         and exists (select 1 from transfer_accounts where id = p_account and shop_id = p_shop)
+      then 'transfer:' || p_account
+    else 'cash'
+  end
+$$;
+
+-- ── กันแก้/ลบรายจ่ายที่เป็นค่างวดผ่อนจากที่อื่น ────────────────────────────────
+-- รายจ่ายที่ผูกกับงวด (installment_entry_id) ถูกสร้างโดยตัวปิดรอบหรือตอนจ่ายค่างวด
+-- ถ้าไปลบจากหน้าประวัติ หนี้บัตรลด แต่งวดยังเป็น billed และบิลยังเก็บอยู่ → ขัดกันถาวร
+-- RPC ของสัญญาผ่อนที่ตั้งใจลบ ตั้ง jodflow.installment_rpc = '1' ไว้ก่อน
+-- ส่วนการลบร้านทั้งร้าน (cascade) แถวร้านหายไปแล้วตอน trigger ทำงาน จึงปล่อยผ่าน
+create or replace function public.guard_installment_transaction() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(current_setting('jodflow.installment_rpc', true), '') = '1' then
+    return coalesce(new, old);
+  end if;
+  if old.installment_entry_id is null then
+    return coalesce(new, old);
+  end if;
+  if not exists (select 1 from shops where id = old.shop_id) then
+    return coalesce(new, old);
+  end if;
+
+  if tg_op = 'DELETE' then
+    raise exception 'รายการนี้เป็นค่างวดผ่อน ลบจากประวัติไม่ได้ — ให้ย้อนที่งวดในหน้าบัตรและหนี้สิน';
+  end if;
+  if new.amount is distinct from old.amount
+     or new.date is distinct from old.date
+     or new.card_id is distinct from old.card_id
+     or new.method is distinct from old.method then
+    raise exception 'รายการนี้เป็นค่างวดผ่อน แก้ยอด วันที่ หรือช่องทางไม่ได้ — ให้แก้ที่สัญญาผ่อน';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists transactions_installment_guard on transactions;
+create trigger transactions_installment_guard
+  before update or delete on transactions
+  for each row execute function public.guard_installment_transaction();
 
 notify pgrst, 'reload schema';

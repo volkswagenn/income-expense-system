@@ -45,6 +45,7 @@ export default function PayFromPicker({
   const cards = useCreditCardStore((s) => s.cards.filter((c) => c.enabled))
   const getCurrentCycle = useCreditCardStore((s) => s.getCurrentCycle)
   const getStatements = useCreditCardStore((s) => s.getStatements)
+  const isPayableStatement = useCreditCardStore((s) => s.isPayableStatement)
 
   const transferTotal = accounts.reduce((s, a) => s + Number(a.balance || 0), 0)
   const cardTotal = cards.reduce((s, c) => s + Number(c.outstanding || 0), 0)
@@ -239,10 +240,15 @@ export default function PayFromPicker({
 
       {open && draft && (
         <Popup
-      title="จ่ายจาก"
+          title="จ่ายจาก"
           icon="payments"
           width={420}
           onClose={close}
+          // ค้างชำระกับกู้ยืมไม่มีรายการให้กดเลือกเหมือนบัญชีหรือบัตร จึงไม่มีจังหวะไหน
+          // ที่ commit ให้เอง ต้องมีปุ่มยืนยันของตัวเอง ไม่งั้นเลือกแล้วปิดกล่อง draft
+          // ถูกทิ้ง ช่องทางจึงกลับไปเป็นอันเดิมโดยที่ผู้ใช้เห็นว่าเลือกไปแล้ว
+          onConfirm={needsConfirm ? confirm : undefined}
+          confirmLabel={draft.method === 'pending' ? 'ใช้ค้างชำระ' : 'ใช้กู้ยืม'}
         >
             {/* ชั้นที่ 1 วิธี */}
             <div className={`grid gap-1.5 ${METHODS.length >= 5 ? 'grid-cols-5' : METHODS.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
@@ -281,7 +287,7 @@ export default function PayFromPicker({
                 {cards.length === 0
                   ? <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">ยังไม่มีบัตรเครดิต เพิ่มได้ที่หน้ากระเป๋าเงิน</p>
                   : cards.map((c) => {
-                    const bill = getStatements(c.id).find((s) => s.status !== 'paid')
+                    const bill = getStatements(c.id).find((s) => isPayableStatement(s))
                     const cur = bill ? null : getCurrentCycle(c.id)
                     const limit = Number(c.creditLimit) || 0
                     const left = limit > 0 ? limit - Number(c.outstanding || 0) : null

@@ -115,7 +115,8 @@ function InstallmentCard({ installment, onSettle, onCancelInstallment, onPayEntr
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs text-gray-400">คงเหลือ</p>
-          <p className="font-bold tabular-nums text-rose-600">{fmt(progress.remainingAmount)}</p>
+          {/* คงเหลือ = ที่ยังไม่ได้จ่ายจริง รวมงวดที่เข้าบิลแล้วแต่ยังไม่ได้จ่ายบิล */}
+          <p className="font-bold tabular-nums text-rose-600">{fmt(progress.unpaidAmount)}</p>
         </div>
       </div>
 
@@ -244,6 +245,7 @@ export default function InstallmentList({ bare = false }) {
   const { settleInstallment, cancelInstallment, payStatement, payEntry, undoEntry } = useCreditCardStore()
   const deleteInstallment = useCreditCardStore((s) => s.deleteInstallment)
   const getUnpaidStatements = useCreditCardStore((s) => s.getUnpaidStatements)
+  const getInstallmentMonthly = useCreditCardStore((s) => s.getInstallmentMonthly)
   const getCardLabel = useCreditCardStore((s) => s.getCardLabel)
   const getCardShortLabel = useCreditCardStore((s) => s.getCardShortLabel)
   const getCard = useCreditCardStore((s) => s.getCard)
@@ -418,7 +420,9 @@ export default function InstallmentList({ bare = false }) {
     }
   }
 
-  const monthlyTotal = active.reduce((s, i) => s + Number(i.monthlyAmount || 0), 0)
+  // งวดถัดไปจริงของแต่ละสัญญา ไม่ใช่ monthly_amount ที่เก็บไว้ในสัญญา —
+  // สัญญาขั้นบันไดค่างวดไม่เท่ากันทุกงวด ใช้ค่าในสัญญาจะได้คนละตัวกับหน้าอื่น
+  const monthlyTotal = getInstallmentMonthly()
 
   return (
     <div className="space-y-4">

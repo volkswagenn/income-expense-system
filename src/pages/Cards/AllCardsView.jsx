@@ -12,7 +12,7 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
 
 const FILTERS = {
   billed: { label: 'ยอดเรียกเก็บ', desc: 'ยอดที่ธนาคารปิดรอบแล้วและต้องจ่ายตามกำหนด' },
-  pending: { label: 'ยอดรอเรียกเก็บ', desc: 'ยอดที่ใช้หลังวันสรุปยอด จะถูกเรียกเก็บในรอบถัดไป' },
+  pending: { label: 'ยอดรอเรียกเก็บ', desc: 'ยอดที่สะสมอยู่ในรอบที่ยังไม่ปิด รวมค่างวดผ่อนของรอบนี้ — คือยอดที่จะขึ้นบิลใบถัดไป' },
   overdue: { label: 'เกินกำหนดชำระ', desc: 'ยอดที่เลยวันครบกำหนดแล้วยังไม่จ่าย' },
 }
 
@@ -25,7 +25,13 @@ const FILTERS = {
 export default function AllCardsView({ onOpenCard }) {
   const cards = useCreditCardStore((s) => s.cards)
   const statements = useCreditCardStore((s) => s.statements)
+  // ต้องเกาะสองก้อนนี้ไว้ ถึงจะไม่ได้อ่านตรงๆ — getCurrentCycle อ่านค่างวดจากมัน
+  // ถ้าไม่ subscribe ตัวเลขจะไม่ขยับตอนสร้างหรือจ่ายงวดผ่อน
+  const entries = useCreditCardStore((s) => s.entries)
+  const installments = useCreditCardStore((s) => s.installments)
   const getCurrentCycle = useCreditCardStore((s) => s.getCurrentCycle)
+  const isPayableStatement = useCreditCardStore((s) => s.isPayableStatement)
+  const getStatementBreakdown = useCreditCardStore((s) => s.getStatementBreakdown)
   const getUnbilledInstallmentTotal = useCreditCardStore((s) => s.getUnbilledInstallmentTotal)
   const getCardLimitUsage = useCreditCardStore((s) => s.getCardLimitUsage)
   const [filter, setFilter] = useState('billed')
@@ -34,7 +40,7 @@ export default function AllCardsView({ onOpenCard }) {
     const today = localDateStr()
     return cards.map((c) => {
       const unpaid = statements
-        .filter((s) => s.cardId === c.id && s.status !== 'paid')
+        .filter((s) => s.cardId === c.id && isPayableStatement(s))
         .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))
       const left = (s) => Number(s.amount) - Number(s.paidAmount)
       const billed = unpaid.reduce((n, s) => n + left(s), 0)
@@ -42,19 +48,41 @@ export default function AllCardsView({ onOpenCard }) {
       const cycle = getCurrentCycle(c.id)
       const usage = getCardLimitUsage(c.id)
       const nextBill = unpaid[0] ?? null
+
       return {
         card: c,
         billed,
         overdue,
+        // cycle.net รวมค่างวดผ่อนของรอบนี้มาให้แล้ว (ดู getCurrentCycle)
         pending: Math.max(0, cycle?.net ?? 0),
         total: Number(c.outstanding) || 0,
         insReserved: getUnbilledInstallmentTotal(c.id),
         billedDue: nextBill ? `ครบกำหนด ${formatIsoThai(nextBill.dueDate)}` : 'ไม่มีบิลค้าง',
+        // บอกด้วยว่าบิลใบนี้เป็นของรูดเต็มจำนวนเท่าไร ค่างวดเท่าไร — บัตรที่ใช้ผ่อนอย่างเดียว
+        // จะได้ไม่ต้องกดเข้าไปดูว่ายอดที่ต้องจ่ายมาจากไหน
         billedMeta: nextBill
-          ? `รอบ ${nextBill.cycle} · ขั้นต่ำ ${fmt(nextBill.minimumAmount)}`
+          ? (() => {
+              const b = getStatementBreakdown(nextBill.id)
+              return [
+                `รอบ ${nextBill.cycle} · ขั้นต่ำ ${fmt(nextBill.minimumAmount)}`,
+                b?.full > 0 ? `รูดเต็มจำนวน ${fmt(b.full)}` : null,
+                b?.installment > 0 ? `ค่างวดผ่อน ${b.installmentCount} งวด ${fmt(b.installment)}` : null,
+                b?.previous > 0 ? `ยกมา ${fmt(b.previous)}` : null,
+              ].filter(Boolean).join(' · ')
+            })()
           : '',
-        pendingDue: cycle ? `ครบกำหนด ${formatThaiDate(cycle.due)}` : '—',
-        pendingMeta: cycle ? `${cycle.count} รายการในรอบนี้` : '',
+        pendingDue: cycle
+          ? `สรุปยอด ${formatThaiDate(cycle.end)} · ครบกำหนด ${formatThaiDate(cycle.due)}`
+          : '—',
+        // แยกให้เห็นว่ายอดมาจากไหน ค่างวดผ่อนกับยอดรูดคนละเรื่องกันในสายตาผู้ใช้
+        pendingMeta: cycle
+          ? [
+              cycle.count ? `${cycle.count} รายการในรอบนี้` : null,
+              cycle.installmentCount
+                ? `ในนั้นเป็นค่างวดผ่อน ${cycle.installmentCount} งวด ${fmt(cycle.installment)}`
+                : null,
+            ].filter(Boolean).join(' · ')
+          : '',
         cutTxt: `สรุปยอดทุกวันที่ ${c.closingDay} · ครบกำหนดทุกวันที่ ${c.dueDay}`,
         countTxt: unpaid.length > 1 ? `มีบิลค้าง ${unpaid.length} รอบ` : `บิลค้าง ${unpaid.length} รอบ`,
         limitTxt: usage?.limit
@@ -63,7 +91,7 @@ export default function AllCardsView({ onOpenCard }) {
         overdueDays: nextBill && nextBill.dueDate < today ? -daysUntil(new Date(nextBill.dueDate + 'T00:00:00')) : 0,
       }
     })
-  }, [cards, statements, getCurrentCycle, getCardLimitUsage, getUnbilledInstallmentTotal])
+  }, [cards, statements, entries, installments, getCurrentCycle, getCardLimitUsage, getUnbilledInstallmentTotal, getStatementBreakdown])
 
   const pick = (r) => (filter === 'billed' ? r.billed : filter === 'pending' ? r.pending : r.overdue)
   const shown = rows.filter((r) => pick(r) > 0)
@@ -134,6 +162,24 @@ export default function AllCardsView({ onOpenCard }) {
               <div className="text-[12.5px] text-muted">
                 {filter === 'overdue' ? 'ไม่มียอดที่เลยกำหนดชำระ' : filter === 'billed' ? 'ไม่มีบิลที่ปิดรอบรอจ่าย' : 'ยังไม่มียอดสะสมในรอบถัดไป'}
               </div>
+              {/* ตะกร้าที่เปิดอยู่ว่างไม่ได้แปลว่าไม่มีอะไรต้องจ่าย — บอกไปเลยว่ายอดไปอยู่ตะกร้าไหน
+                  ไม่งั้นหน้าจอว่างทั้งหน้าและผู้ใช้สรุปว่าระบบไม่แสดงข้อมูล */}
+              {filter !== 'pending' && pendingTotal > 0 && (
+                <button
+                  onClick={() => setFilter('pending')}
+                  className="mt-2 text-[12px] text-income hover:underline"
+                >
+                  มียอดกำลังสะสมอยู่ในรอบที่ยังไม่ปิด {fmt(pendingTotal)} บาท — ดูยอดรอเรียกเก็บ
+                </button>
+              )}
+              {filter === 'pending' && billedTotal > 0 && (
+                <button
+                  onClick={() => setFilter('billed')}
+                  className="mt-2 text-[12px] text-income hover:underline"
+                >
+                  มีบิลที่ปิดรอบแล้วรอจ่าย {fmt(billedTotal)} บาท — ดูยอดเรียกเก็บ
+                </button>
+              )}
             </div>
           ) : shown.map((r) => (
             <button

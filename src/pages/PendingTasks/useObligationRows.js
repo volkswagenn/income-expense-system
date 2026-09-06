@@ -49,7 +49,8 @@ export default function useObligationRows() {
 
     // ── บิลบัตรที่ปิดรอบแล้วแต่ยังไม่จ่าย ───────────────────────────────────
     for (const s of statements) {
-      if (s.status === 'paid') continue
+      // ใบที่ยอดถูกยกไปรวมในบิลใบถัดไปแล้ว ไม่ใช่ภาระแยกอีกใบ
+      if (s.status === 'paid' || s.carriedTo) continue
       out.push({
         key: `s-${s.id}`, kind: 'card',
         title: `บิลบัตร ${getCardLabel(s.cardId)}`,
@@ -78,11 +79,14 @@ export default function useObligationRows() {
     }
 
     // ── งวดผ่อนผ่านบัตร — จ่ายไม่ได้ตรงนี้ เพราะถูกเรียกเก็บรวมในบิลบัตร ───
+    //
+    // เอาเฉพาะงวดที่ยังไม่เข้าบิล งวดที่เข้าบิลแล้วเงินก้อนนั้นอยู่ในแถวบิลบัตรข้างบน
+    // ถ้านับทั้งสองที่ ยอด "ต้องจ่ายใน 30 วัน" กับ "เดือนนี้เหลือต้องจ่าย" จะบวกซ้ำ
     const activeInst = new Map(installments.filter((i) => i.status === 'active').map((i) => [i.id, i]))
     const seenInst = new Set()
     for (const e of [...instEntries].sort((a, b) => a.seq - b.seq)) {
       const i = activeInst.get(e.installmentId)
-      if (!i || !['pending', 'billed'].includes(e.status) || seenInst.has(i.id)) continue
+      if (!i || e.status !== 'pending' || seenInst.has(i.id)) continue
       seenInst.add(i.id)
       out.push({
         key: `i-${e.id}`, kind: 'installment',
@@ -90,7 +94,7 @@ export default function useObligationRows() {
         meta: `ผ่อนบัตร ${getCardLabel(i.cardId)} · งวดที่ ${e.seq}/${i.months}`,
         amount: num(e.amount), due: e.dueDate,
         action: 'goto', actionLabel: 'ดูสัญญา', goto: '/cards?view=debt',
-        note: e.status === 'billed' ? 'อยู่ในบิลบัตรแล้ว' : 'เรียกเก็บผ่านบิลบัตร',
+        note: 'เรียกเก็บผ่านบิลบัตร',
       })
     }
 

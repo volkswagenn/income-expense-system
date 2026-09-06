@@ -21,6 +21,7 @@ export default function DebtView({ onOpenBill }) {
   const totals = useDebtStore((s) => s.getTotals())
   const installments = useCreditCardStore((s) => s.getActiveInstallments())
   const getInstallmentProgress = useCreditCardStore((s) => s.getInstallmentProgress)
+  const getInstallmentMonthly = useCreditCardStore((s) => s.getInstallmentMonthly)
   const dueTotal = useCreditCardStore((s) => s.getDueTotal())
 
   const buckets = useMemo(() => {
@@ -39,11 +40,7 @@ export default function DebtView({ onOpenBill }) {
       seen.add(d.id)
       monthly += Number(e.amount || 0)
     }
-    for (const i of installments) {
-      const p = getInstallmentProgress(i.id)
-      const next = p?.rows.find((r) => r.status === 'pending' || r.status === 'billed')
-      if (next) monthly += Number(next.amount || 0)
-    }
+    monthly += getInstallmentMonthly()
 
     return {
       short: pendingOf(idsOf((d) => d.direction === 'payable' && d.term !== 'long')),
@@ -51,17 +48,14 @@ export default function DebtView({ onOpenBill }) {
       monthly,
       activeCount: active.length,
     }
-  }, [debts, entries, installments, getInstallmentProgress])
+  }, [debts, entries, installments, getInstallmentMonthly])
 
+  // คงเหลือ = ยังไม่ได้จ่ายจริง (รวมงวดที่เข้าบิลแล้วแต่ยังไม่ได้จ่ายบิล)
   const insRemaining = installments.reduce((s, i) => {
     const p = getInstallmentProgress(i.id)
-    return s + (p?.remainingAmount ?? 0)
+    return s + (p?.unpaidAmount ?? 0)
   }, 0)
-  const insMonthly = installments.reduce((s, i) => {
-    const p = getInstallmentProgress(i.id)
-    const next = p?.rows.find((r) => r.status === 'pending' || r.status === 'billed')
-    return s + Number(next?.amount ?? 0)
-  }, 0)
+  const insMonthly = getInstallmentMonthly()
 
   return (
     <div className="flex flex-col gap-3">

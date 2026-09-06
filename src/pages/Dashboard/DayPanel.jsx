@@ -20,7 +20,8 @@ function notisFor(date, { pendingPayments, pendingIncomes, taxInvoices, recurrin
     }
   }
   for (const s of statements) {
-    if (s.status !== 'paid' && s.dueDate === date) {
+    // ยอดที่ถูกยกไปรวมในบิลใบถัดไปแล้ว ไม่แจ้งเตือนซ้ำที่ใบเก่า
+    if (s.status !== 'paid' && !s.carriedTo && s.dueDate === date) {
       out.push({ icon: 'credit_card', tint: 'bg-expense-soft', fg: 'text-expense', title: `บิลบัตร ${getCardShortLabel(s.cardId)}`, meta: `รอบ ${s.cycle}`, amount: Number(s.amount) - Number(s.paidAmount) })
     }
   }

@@ -68,7 +68,8 @@ export default function ObligationsTab() {
     const out = []
     const month = format(new Date(), 'yyyy-MM')
 
-    for (const s of statements) if (s.status !== 'paid') out.push({
+    // ใบที่ยอดถูกยกไปรวมในบิลใบถัดไปแล้ว (carriedTo) ไม่ใช่ภาระแยกอีกใบ
+    for (const s of statements) if (s.status !== 'paid' && !s.carriedTo) out.push({
       key: `s-${s.id}`, kind: 'card', title: `บิลบัตร ${getCardLabel(s.cardId)}`,
       sub: `รอบ ${s.cycle} · ปิดรอบแล้ว · ขั้นต่ำ ${fmt(s.minimumAmount)}`,
       amount: Number(s.amount) - Number(s.paidAmount), due: s.dueDate, payable: true, data: s,
@@ -94,7 +95,8 @@ export default function ObligationsTab() {
     const seenI = new Set()
     for (const e of [...instEntries].sort((a, b) => a.seq - b.seq)) {
       const i = activeInst.get(e.installmentId)
-      if (!i || !['pending', 'billed'].includes(e.status) || seenI.has(i.id)) continue
+      // งวดที่เข้าบิลแล้วอยู่ในแถวบิลบัตรข้างบนแล้ว ถ้านับตรงนี้อีกจะบวกซ้ำ
+      if (!i || e.status !== 'pending' || seenI.has(i.id)) continue
       seenI.add(i.id)
       const remaining = instEntries.filter((x) => x.installmentId === i.id && x.status === 'pending')
       const done = instEntries.filter((x) => x.installmentId === i.id && !['pending', 'cancelled'].includes(x.status)).length
@@ -102,7 +104,7 @@ export default function ObligationsTab() {
         key: `i-${e.id}`, kind: 'installment', title: i.name,
         sub: `ผ่อนบัตร ${getCardLabel(i.cardId)} · งวดที่ ${e.seq} จาก ${i.months}`,
         amount: Number(e.amount), due: e.dueDate, payable: false,
-        note: e.status === 'billed' ? `อยู่ในบิลบัตรแล้ว` : 'เรียกเก็บผ่านบิลบัตร',
+        note: 'เรียกเก็บผ่านบิลบัตร',
         progress: { pct: (done / i.months) * 100, left: remaining.reduce((s, x) => s + Number(x.amount), 0), count: remaining.length },
       })
     }

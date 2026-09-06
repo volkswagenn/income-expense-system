@@ -17,7 +17,10 @@ const fmt = (n) => Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigit
  */
 export default function CardManage() {
   const cards = useCreditCardStore((s) => s.cards)
-  const { createCard, updateCard, deleteCard, adjustOutstanding, ensureStatements } = useCreditCardStore()
+  const {
+    createCard, updateCard, deleteCard, adjustOutstanding, ensureStatements,
+    getUnpaidStatements, getActiveInstallments,
+  } = useCreditCardStore()
   const { addLog } = useLogStore()
 
   const [formOpen, setFormOpen] = useState(false)
@@ -81,6 +84,29 @@ export default function CardManage() {
     await ensureStatements()
   })
 
+  /**
+   * ลบบัตรได้ก็ต่อเมื่อไม่มีอะไรค้างอยู่กับมัน
+   *
+   * บัตรถูกลบแบบซ่อน (soft delete) แต่ใบแจ้งยอดกับสัญญาผ่อนของมันไม่ได้ถูกซ่อนตาม
+   * ถ้ายอมลบทั้งที่ยังมีบิลค้าง ยอดหนี้รวมจะหายไปทันทีในขณะที่บิลใบนั้นยังโผล่
+   * ในรายการที่ต้องจ่ายและยังกดจ่ายได้ — ตัวเลขสองหน้าจะขัดกันถาวร
+   * ให้จัดการของค้างให้หมดก่อน แล้วค่อยลบ
+   */
+  const requestDelete = (card) => {
+    const bills = getUnpaidStatements().filter((s) => s.cardId === card.id)
+    const ins = getActiveInstallments(card.id)
+    const blockers = [
+      bills.length ? `บิลที่ยังจ่ายไม่ครบ ${bills.length} ใบ` : null,
+      ins.length ? `สัญญาผ่อนที่ยังผ่อนอยู่ ${ins.length} รายการ` : null,
+    ].filter(Boolean)
+    if (blockers.length) {
+      setError(`ลบ "${formatCard(card)}" ยังไม่ได้ — มี${blockers.join(' และ ')} จ่ายหรือยกเลิกให้หมดก่อน แล้วค่อยลบ`)
+      return
+    }
+    setError('')
+    setConfirmDelete(card)
+  }
+
   const handleDelete = () => run(async () => {
     const card = confirmDelete
     await deleteCard(card.id)
@@ -140,7 +166,7 @@ export default function CardManage() {
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <button className="text-xs text-blue-500 hover:text-blue-700 px-1.5 py-1" onClick={() => { setEditing(card); setFormOpen(true) }}>แก้ไข</button>
-                    <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => setConfirmDelete(card)}>ลบ</button>
+                    <button className="text-xs text-red-400 hover:text-red-600 px-1.5 py-1" onClick={() => requestDelete(card)}>ลบ</button>
                   </div>
                 </div>
               </div>

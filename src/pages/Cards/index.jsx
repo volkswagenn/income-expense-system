@@ -5,7 +5,9 @@ import CardDetailView from './CardDetailView'
 import DebtView from './DebtView'
 import Icon from '../../components/shared/Icon'
 import useCreditCardStore from '../../store/useCreditCardStore'
+import useTransactionStore from '../../store/useTransactionStore'
 import useDebtStore from '../../store/useDebtStore'
+import { formatIsoThaiShort } from '../../lib/cardCycle'
 import AppIcon from '../../components/shared/AppIcon'
 import { DEFAULT_ICONS } from '../../lib/defaultIcons'
 
@@ -25,6 +27,11 @@ export default function CardsPage() {
   const [params, setParams] = useSearchParams()
   const cards = useCreditCardStore((s) => s.cards)
   const ensureStatements = useCreditCardStore((s) => s.ensureStatements)
+  const getNextDue = useCreditCardStore((s) => s.getNextDue)
+  // เกาะไว้ให้ชิปคำนวณใหม่เมื่อบิล/รายการ/งวดเปลี่ยน — getNextDue อ่านจากพวกนี้
+  useCreditCardStore((s) => s.statements)
+  useCreditCardStore((s) => s.entries)
+  useTransactionStore((s) => s.transactions)
   const activeDebts = useDebtStore((s) => s.debts.filter((d) => d.status === 'active').length)
 
   // ปิดรอบที่เลยวันสรุปยอดแล้วให้ครบก่อนคำนวณตัวเลขบนชิป
@@ -40,17 +47,30 @@ export default function CardsPage() {
   const isCard = cards.some((c) => c.id === view)
   const currentCard = isCard ? cards.find((c) => c.id === view) : null
 
+  // ชิปบอก "ต้องจ่ายอะไรถัดไป" ไม่ใช่ยอดหนี้คงค้าง — หนี้คงค้างของบัตรที่มีแต่รายการผ่อน
+  // เป็น 0.00 จนกว่ารอบจะปิด ทั้งที่มีค่างวดรออยู่ในบิลใบหน้า ดูแล้วเหมือนไม่มีข้อมูล
+  const nextDues = cards.map((c) => getNextDue(c.id))
+  const nextTotal = nextDues.reduce((n, d) => n + (d?.amount ?? 0), 0)
+  const dueUnit = (d) => {
+    if (!d || d.amount <= 0) return 'ไม่มียอดรอจ่าย'
+    return d.kind === 'closed'
+      ? `บิลครบกำหนด ${formatIsoThaiShort(d.dueDate)}`
+      : `รอบนี้ · จ่าย ${formatIsoThaiShort(d.dueDate)}`
+  }
+
   const tabs = [
     {
       key: 'all', grow: 1, icon: 'credit_card', iconFg: '#16181D',
       label: 'รวมทุกบัตร', kicker: `${cards.length} ใบ`,
-      sub: fmt(cards.reduce((n, c) => n + (Number(c.outstanding) || 0), 0)), unit: 'บาท',
+      sub: fmt(nextTotal), unit: 'ต้องจ่ายถัดไปรวม',
     },
-    ...cards.map((c) => ({
+    ...cards.map((c, i) => ({
       key: c.id, grow: 1.2, cardIcon: c.icon ?? null, isCard: true,
       label: c.last4 ? `${c.bankName || c.name} · ${c.last4}` : (c.name || 'บัตร'),
       kicker: c.name || 'บัตรเครดิต',
-      sub: fmt(Number(c.outstanding) || 0), unit: 'ยอดหนี้คงค้าง',
+      sub: fmt(nextDues[i]?.amount ?? 0), unit: dueUnit(nextDues[i]),
+      // บิลที่ปิดรอบแล้วต้องจ่ายตามกำหนด — ให้ตัวเลขเป็นสีแดงเหมือนหน้าบิล
+      subTone: nextDues[i]?.kind === 'closed' && nextDues[i].amount > 0 ? 'text-[#C03A2D]' : '',
     })),
     {
       key: 'debt', grow: 1, icon: 'receipt_long', iconFg: '#6D4AA8',
@@ -65,7 +85,7 @@ export default function CardsPage() {
           เพราะปุ่มพวกนี้ทำงานกับบัตรที่เลือกอยู่ ไม่ใช่ตัวเลือกบัตร */}
       <div className="flex gap-2 items-center flex-none flex-wrap">
         <span className="flex-1 min-w-0 text-[11.5px] text-faint leading-snug">
-          เลือกบัตรที่จะดู · ตัวเลขบนแต่ละใบคือยอดหนี้คงค้างที่หักรายการที่จ่ายแยกแล้ว
+          เลือกบัตรที่จะดู · ตัวเลขบนแต่ละใบคือยอดที่ต้องจ่ายถัดไป — บิลที่ปิดรอบแล้ว หรือถ้ายังไม่มี ก็เป็นยอดที่สะสมอยู่ในรอบนี้ (รวมค่างวดผ่อน)
         </span>
         {currentCard && (
           <button
@@ -119,7 +139,7 @@ export default function CardsPage() {
                 <span className="block text-[10.5px] text-faint truncate">{t.kicker}</span>
               </span>
               <span className="flex-none text-right">
-                <span className="tabular-nums block text-sm font-bold leading-[1.2]">{t.sub}</span>
+                <span className={`tabular-nums block text-sm font-bold leading-[1.2] ${t.subTone ?? ''}`}>{t.sub}</span>
                 <span className="block text-[10px] text-faint whitespace-nowrap">{t.unit}</span>
               </span>
             </button>

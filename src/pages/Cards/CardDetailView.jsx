@@ -62,11 +62,18 @@ function Meta({ label, value }) {
   )
 }
 
-/** งวดที่จ่ายแล้วเท่านั้นที่นับว่าผ่านไปแล้ว — billed คือเข้าบิลแล้วแต่ยังไม่ได้จ่ายบิลใบนั้น */
+/**
+ * สีป้ายงวด — สามสถานะที่ต้องแยกออกจากกันให้ได้ในแวบเดียว
+ *   จ่ายแล้ว = เขียว · งวดที่กำลังถูกเก็บ = กล่องขาวขอบเข้ม · ยังไม่ถึงรอบ = เทาจาง
+ *
+ * งวดที่กำลังถูกเก็บต้องเป็นกล่องขาว ไม่ใช่เทาแบบเดียวกับงวดที่ยังมาไม่ถึง
+ * เพราะสองอย่างนี้คนละเรื่องกันโดยสิ้นเชิง อันหนึ่งต้องเตรียมเงินไว้เดี๋ยวนี้
+ * อีกอันยังไม่ต้องทำอะไร ถ้าสีเหมือนกันก็ต้องไล่อ่านวันที่ทุกป้ายถึงจะรู้
+ */
 const PIP_TONE = {
   paid:    'bg-lime border-[#A9CF3A] text-ink',
   prepaid: 'bg-lime border-[#A9CF3A] text-ink',
-  billed:  'bg-white border-ink text-ink',
+  current: 'bg-white border-ink text-ink shadow-[0_0_0_1px_#16181D]',
   pending: 'bg-paper border-hairline text-faint',
 }
 const PIP_LABEL = {
@@ -92,15 +99,23 @@ function EntryPips({ rows }) {
   if (list.length === 0) return null
   const shown = list.slice(0, PIP_LIMIT)
   const hidden = list.length - shown.length
+  // งวดที่กำลังถูกเก็บ = งวดแรกที่ยังไม่จ่าย ไม่ว่าจะเข้าบิลแล้วหรือกำลังจะเข้า
+  // (ก่อนตัดรอบสถานะยังเป็น pending เหมือนงวดปีหน้า จึงดูจากลำดับแทนสถานะ)
+  const currentSeq = list.find((r) => r.status !== 'paid' && r.status !== 'prepaid')?.seq ?? null
+  const toneOf = (r) =>
+    r.status === 'paid' || r.status === 'prepaid' ? PIP_TONE[r.status]
+      : r.seq === currentSeq || r.status === 'billed' ? PIP_TONE.current
+        : PIP_TONE.pending
   return (
     <span className="flex flex-wrap items-center gap-1">
       {shown.map((r) => (
         <span
           key={r.seq}
           title={'งวดที่ ' + r.seq + ' จาก ' + list.length + ' · ครบกำหนด ' + formatIsoThai(r.dueDate)
-            + ' · ' + fmt(r.amount) + ' บาท · ' + (PIP_LABEL[r.status] ?? r.status)}
+            + ' · ' + fmt(r.amount) + ' บาท · '
+            + (r.seq === currentSeq && r.status === 'pending' ? 'งวดที่กำลังถูกเก็บ' : (PIP_LABEL[r.status] ?? r.status))}
           className={'inline-flex items-center gap-1 h-[17px] px-1.5 rounded-[5px] border text-[9.5px] leading-none tabular-nums '
-            + (PIP_TONE[r.status] ?? PIP_TONE.pending)}
+            + toneOf(r)}
         >
           <span className="font-bold">{r.seq}</span>
           <span className="w-px h-[9px] bg-current opacity-30" />
@@ -131,6 +146,9 @@ export default function CardDetailView({ cardId }) {
   const markRow = useCreditCardStore((s) => s.markRow)
   const unmarkRow = useCreditCardStore((s) => s.unmarkRow)
   const getInstallmentProgress = useCreditCardStore((s) => s.getInstallmentProgress)
+  const getStatementBreakdown = useCreditCardStore((s) => s.getStatementBreakdown)
+  const isPayableStatement = useCreditCardStore((s) => s.isPayableStatement)
+  const getUncoveredTransactions = useCreditCardStore((s) => s.getUncoveredTransactions)
   const notifyDays = useAppStore((s) => s.notifyDaysBefore)
   const transactions = useTransactionStore((s) => s.transactions)
   const getCategoryName = useCategoryStore((s) => s.getCategoryName)
@@ -172,9 +190,10 @@ export default function CardDetailView({ cardId }) {
   // เผื่อกรณีเปิดหน้านี้ค้างไว้ข้ามวันสรุปยอด — เรียกซ้ำไม่เสียหาย
   useEffect(() => { ensureStatements() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ใบที่ยอดถูกยกไปรวมในบิลใบถัดไปแล้วไม่ใช่ "ยังค้าง" — เงินอยู่ในใบใหม่แล้ว
   const unpaid = useMemo(
-    () => statements.filter((s) => s.status !== 'paid').sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
-    [statements]
+    () => statements.filter((s) => isPayableStatement(s)).sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
+    [statements, isPayableStatement]
   )
   const bill = unpaid[0] ?? null
   const paidHistory = useMemo(
@@ -187,10 +206,10 @@ export default function CardDetailView({ cardId }) {
   const cycleRows = useMemo(() => {
     if (!card) return []
     const p = cyclePeriod(card.closingDay, card.dueDay)
-    const from = toDateString(p.start)
     const to = toDateString(p.end)
-    const rows = transactions
-      .filter((t) => t.cardId === cardId && t.date >= from && t.date <= to)
+    // ทุกรายการที่ยังไม่มีใบไหนครอบ — กฎเดียวกับตอนออกบิลจริง (ดู getUncoveredTransactions)
+    // รายการที่ลงวันที่ย้อนหลังเข้ารอบที่ปิดไปแล้วจึงยังเห็นได้ว่ามันจะไปอยู่บิลใบนี้
+    const rows = getUncoveredTransactions(cardId, to)
       .map((t) => ({
         key: `t-${t.id}`, tx: t, date: t.date, name: t.itemName || '(ไม่ระบุชื่อ)',
         cat: getCategoryName(t.category),
@@ -200,7 +219,7 @@ export default function CardDetailView({ cardId }) {
         amount: t.type === 'income' ? -Number(t.amount || 0) : Number(t.amount || 0),
       }))
     for (const a of advances) {
-      if (a.date < from || a.date > to) continue
+      if (a.statementId || a.date > to) continue
       rows.push({
         key: `a-${a.id}`, tx: null, advance: a, date: a.date, name: 'กดเงินสดจากบัตร',
         cat: Number(a.fee) > 0 ? `ค่าธรรมเนียม ${fmt(a.fee)}` : 'ไม่มีค่าธรรมเนียม',
@@ -214,7 +233,8 @@ export default function CardDetailView({ cardId }) {
     for (const ins of installments) {
       for (const e of allEntries) {
         if (e.installmentId !== ins.id) continue
-        if (e.status !== 'pending' || e.cycle !== p.cycle) continue
+        // รวมงวดตกค้างจากรอบก่อนที่ยังไม่ถูกเก็บด้วย — บิลใบนี้จะกวาดมันมาเก็บ
+        if (e.status !== 'pending' || e.cycle > p.cycle) continue
         if (billedIds.has(e.id)) continue
         rows.push({
           key: `ie-${e.id}`, tx: null, date: to, upcoming: true, installment: ins,
@@ -226,7 +246,7 @@ export default function CardDetailView({ cardId }) {
     }
 
     return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [transactions, advances, card, cardId, getCategoryName, installments, allEntries])
+  }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions])
 
   // สรุปงวดผ่อน: ที่รวมอยู่ในบิลรอบนี้ กับที่เหลือไปรอบถัดๆ ไป
   const installmentOutlook = useMemo(() => {
@@ -266,6 +286,15 @@ export default function CardDetailView({ cardId }) {
   const closing = nextClosingDate(card.closingDay)
   const daysToClosing = daysUntil(closing)
   const billLeft = bill ? Number(bill.amount) - Number(bill.paidAmount) : 0
+  const billBreakdown = bill ? getStatementBreakdown(bill.id) : null
+
+  // กระทบยอดหนี้: บิลที่ยังไม่จ่าย + ของที่ยังไม่เข้าบิล + ส่วนที่ไม่ได้มาจากรายการเลย
+  // ค่างวดผ่อนที่ยังไม่เข้าบิลไม่นับ เพราะยังไม่เคยเป็นหนี้บัตร (ดู close_card_statement)
+  const billedUnpaidTotal = unpaid.reduce((n, s) => n + (Number(s.amount) - Number(s.paidAmount)), 0)
+  const uncoveredCharges = current
+    ? Number(current.spend || 0) + Number(current.advance || 0) - Number(current.credit || 0)
+    : 0
+  const unbilledDebt = Math.round((debt - billedUnpaidTotal - uncoveredCharges) * 100) / 100
   const billDays = bill ? daysUntil(new Date(bill.dueDate + 'T00:00:00')) : null
   const billAlert = billDays == null ? '' : billDays < 0 ? `เกินกำหนด ${-billDays} วัน` : billDays === 0 ? 'ครบกำหนดวันนี้' : `อีก ${billDays} วัน`
 
@@ -516,6 +545,19 @@ export default function CardDetailView({ cardId }) {
           </div>
         )}
 
+        {/* กระทบยอด — พิสูจน์ว่ายอดหนี้มาจากไหนบ้าง
+            ยอดหนี้เพิ่มทุกครั้งที่รูด แต่บิลเก็บเฉพาะของที่อยู่ในรอบ ส่วนต่างที่เหลือคือ
+            ยอดยกมาตอนเพิ่มบัตรกับการปรับยอดด้วยมือ ซึ่งไม่เคยขึ้นบิลเลยและไม่มีที่ไหนบอก
+            ถ้าไม่แสดงไว้ ผู้ใช้จะเจอยอดหนี้ที่จ่ายบิลครบทุกใบแล้วก็ยังไม่เป็นศูนย์ */}
+        {Math.abs(unbilledDebt) >= 0.01 && (
+          <div className="bg-paper border border-hairline rounded-[13px] px-3.5 py-2.5 text-[11.5px] text-muted leading-relaxed">
+            ยอดหนี้ {fmt(debt)} = บิลที่ยังไม่จ่าย <b className="tabular-nums">{fmt(billedUnpaidTotal)}</b>
+            {' '}+ ที่ยังไม่เข้าบิล <b className="tabular-nums">{fmt(uncoveredCharges)}</b>
+            {' '}+ <b className="tabular-nums">{fmt(unbilledDebt)}</b> ที่มาจากยอดยกมาตอนเพิ่มบัตรหรือการปรับยอดด้วยมือ
+            {' '}— ก้อนสุดท้ายจะไม่ถูกเรียกเก็บผ่านบิลใบไหน ต้องจ่ายแล้วปรับยอดเอง
+          </div>
+        )}
+
         {bill && autopayDue > 0 && (
           <div className="bg-transfer-soft border border-[#C9D0F2] rounded-[13px] px-3.5 py-2.5 flex items-center gap-3 flex-wrap">
             <span className="flex-1 min-w-[220px] text-[11.5px] text-[#2E44A6] leading-relaxed">
@@ -569,6 +611,18 @@ export default function CardDetailView({ cardId }) {
                   {Number(bill.previousBalance) > 0 && ` · ยกมา ${fmt(bill.previousBalance)}`}
                   {Number(bill.previousBalance) < 0 && ` · หักเครดิต ${fmt(-bill.previousBalance)}`}
                 </div>
+                {/* บิลใบเดียวมีของสองแบบปนกัน — รูดเต็มจำนวนกับค่างวดผ่อน — ต้องแยกให้เห็น
+                    ไม่งั้นคนที่รู้ว่าเดือนนี้ไม่ได้รูดอะไรเลยจะงงว่ายอดมาจากไหน */}
+                {billBreakdown && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[#7A5B56] mt-1">
+                    {billBreakdown.full > 0 && <span>รูดเต็มจำนวน <b className="tabular-nums">{fmt(billBreakdown.full)}</b></span>}
+                    {billBreakdown.installment > 0 && (
+                      <span>ค่างวดผ่อน {billBreakdown.installmentCount} งวด <b className="tabular-nums">{fmt(billBreakdown.installment)}</b></span>
+                    )}
+                    {billBreakdown.advance > 0 && <span>กดเงินสด <b className="tabular-nums">{fmt(billBreakdown.advance)}</b></span>}
+                    {billBreakdown.credit > 0 && <span>เงินคืน <b className="tabular-nums">−{fmt(billBreakdown.credit)}</b></span>}
+                  </div>
+                )}
               </div>
               <div className="flex flex-col gap-1.5 w-[196px] flex-none">
                 <button
@@ -598,7 +652,11 @@ export default function CardDetailView({ cardId }) {
                   {fmt(current.net)}
                   <span className="text-[11.5px] font-normal text-faint ml-2">
                     {current.count} รายการ
+                    {current.spend > 0 && ` · รูดเต็มจำนวน ${fmt(current.spend)}`}
+                    {current.installmentCount > 0 &&
+                      ` · ค่างวดผ่อน ${current.installmentCount} งวด ${fmt(current.installment)}`}
                     {current.advance > 0 && ` · กดเงินสด ${fmt(current.advance)}`}
+                    {current.credit > 0 && ` · เงินคืน −${fmt(current.credit)}`}
                   </span>
                 </div>
               </div>
@@ -829,12 +887,13 @@ export default function CardDetailView({ cardId }) {
               <div key={i.id} className="border-t border-[#F6F4EF] pt-2.5 mt-2.5">
                 <div className="flex items-baseline gap-2">
                   <span className="flex-1 min-w-0 text-[12.5px] font-medium truncate">{i.name}</span>
-                  <span className="tabular-nums flex-none text-[12.5px] font-semibold text-expense">{fmt(p.remainingAmount)}</span>
+                  {/* คงเหลือ = ที่ยังไม่ได้จ่ายจริง รวมงวดที่เข้าบิลแล้วแต่ยังไม่ได้จ่ายบิล */}
+                  <span className="tabular-nums flex-none text-[12.5px] font-semibold text-expense">{fmt(p.unpaidAmount)}</span>
                   <span className="flex-none self-center">
                     <RowMenu
                       compact
                       title={i.name}
-                      sub={`ผ่อน ${i.months} งวด · เหลือ ${fmt(p.remainingAmount)} บาท`}
+                      sub={`ผ่อน ${i.months} งวด · เหลือ ${fmt(p.unpaidAmount)} บาท`}
                       icon="credit_card"
                       items={[
                         {
@@ -866,8 +925,10 @@ export default function CardDetailView({ cardId }) {
                   <span>งวดละ {fmt(next?.amount ?? 0)}</span>
                   <span className="tabular-nums">งวด {done} จาก {i.months}</span>
                 </div>
-                <div className="h-[5px] bg-paper rounded-[3px] mt-1.5 overflow-hidden">
-                  <div className="h-full bg-[#E48A80] rounded-[3px]" style={{ width: `${(done / i.months) * 100}%` }} />
+                {/* แถบเดียวบอกได้แค่สัดส่วน ซึ่งข้อความ "งวด x จาก y" บรรทัดบนบอกไปแล้ว
+                    ป้ายรายงวดบอกต่อได้ว่างวดไหนครบกำหนดวันไหนและงวดไหนกำลังจะถูกเก็บ */}
+                <div className="mt-1.5">
+                  <EntryPips rows={p.rows} />
                 </div>
                 {next && (
                   <div className="flex items-center gap-2 mt-1.5">

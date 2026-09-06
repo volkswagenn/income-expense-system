@@ -120,6 +120,12 @@ export function describeTxCancelEffects(tx, { pendingPayments = [], taxInvoices 
  * ขยับยอดพร้อมกันอยู่
  */
 export async function cancelTransaction(tx) {
+  // รายจ่ายที่เป็นค่างวดผ่อนถูกสร้างโดยตัวปิดรอบ/ตอนจ่ายค่างวด ถ้าลบจากตรงนี้
+  // หนี้บัตรลดแต่งวดยังค้างเป็น billed และบิลยังเก็บอยู่ — ฐานข้อมูลก็กันไว้อีกชั้น
+  // แต่บอกตั้งแต่ตรงนี้จะได้ไม่ต้องยิงคำสั่งไปล้ม
+  if (tx.installmentEntryId) {
+    throw new Error('รายการนี้เป็นค่างวดผ่อน ยกเลิกจากประวัติไม่ได้ — ให้ย้อนที่งวดในหน้าบัตรและหนี้สิน')
+  }
   const { pendingPayments } = usePendingStore.getState()
   const effect = reverseEffectOf(tx, pendingPayments)
 

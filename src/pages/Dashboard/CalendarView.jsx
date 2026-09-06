@@ -181,6 +181,8 @@ export default function CalendarView({
     }
 
     for (const s of cardStatements) {
+      // ยอดค้างของใบนี้ย้ายไปอยู่ใน previous_balance ของใบถัดไปแล้ว ถ้าโชว์ทั้งสองใบจะเห็นซ้ำ
+      if (s.status !== 'paid' && s.carriedTo) continue
       const remaining = Number(s.amount || 0) - Number(s.paidAmount || 0)
       push(s.dueDate, {
         key: `s-${s.id}`,
