@@ -121,6 +121,14 @@ const dayOf = (v) => {
  *   การลบสัญญาจะคืนเงินซ้ำกับที่จ่ายบิลไปแล้ว) แต่ในสายตาคนใช้มันคือจ่ายแล้ว
  *   ป้ายจึงต้องเป็นสีเดียวกับงวดที่จ่ายแล้ว ไม่งั้นจ่ายบิลไปหน้าจอก็ยังเหมือนเดิม
  */
+/** แถวนี้จ่ายจบแล้วหรือยัง — ใช้จัดลำดับให้ของที่เคลียร์แล้วลงไปอยู่ล่างสุด */
+function rowSettled(r) {
+  const total = Math.abs(Number(r.amount) || 0)
+  if (r.prepaid && r.prepaid.amount >= total - 0.005) return true
+  if (r.paidInBill && r.paidInBill.amount >= total - 0.005) return true
+  return false
+}
+
 function EntryPips({ rows, currentSeq: currentSeqProp = null, closingDay = null, paidViaBill = null }) {
   const list = (rows ?? []).filter((r) => r.status !== 'cancelled')
   if (list.length === 0) return null
@@ -292,6 +300,18 @@ export default function CardDetailView({ cardId }) {
     () => statements.filter((s) => s.status === 'paid').sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1)),
     [statements]
   )
+
+  /**
+   * บิลที่เอารายการมาแสดงในแท็บ "รายการในรอบบิลนี้"
+   *
+   * จ่ายบิลครบแล้วรายการทั้งใบไม่ควรหายไปทันที — ของที่เพิ่งจ่ายคือสิ่งที่คนอยากเห็น
+   * ที่สุดหลังกดจ่าย (ไล่เช็คกับสลิปว่าครบไหม) ให้ค้างไว้ทั้งใบโดยติดเครื่องหมายว่า
+   * จ่ายแล้ว จนกว่าจะตัดรอบใหม่ แล้วบิลใบใหม่ค่อยมาแทนที่
+   *
+   * ใช้กับ "รายการที่แสดง" เท่านั้น ปุ่มจ่าย/ย้ายรอบยังผูกกับ bill (ใบที่ยังค้างจริง)
+   * ตามเดิม — ใบที่จ่ายจบแล้วแก้อะไรไม่ได้อยู่แล้วในฝั่งฐานข้อมูล
+   */
+  const displayBill = bill ?? paidHistory[0] ?? null
   const unbilledAdvances = advances.filter((a) => !a.statementId)
 
   // ยอดที่โอนจ่ายให้รายการทีละรายการไว้ก่อนออกบิล (card.sql ส่วนที่ 16) แยกตามรายการ
@@ -429,7 +449,12 @@ export default function CardDetailView({ cardId }) {
       }
     }
 
-    return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
+    // จ่ายแล้วลงไปอยู่ล่างสุด — ของที่ยังต้องจัดการอยู่ต้องอยู่บนสุดเสมอ
+    // ไม่ใช่ให้ต้องเลื่อนหาในกองที่เคลียร์ไปแล้ว (ในกลุ่มเดียวกันยังเรียงตามวันที่เหมือนเดิม)
+    return rows.sort((x, y) =>
+      (rowSettled(x) ? 1 : 0) - (rowSettled(y) ? 1 : 0)
+      || String(x.date).localeCompare(String(y.date))
+    )
   }, [transactions, statements, advances, card, cardId, getCategoryName, installments, allEntries, getUncoveredTransactions, todayStr, upcomingVisible, prepaidByTx])
 
   /**
@@ -440,12 +465,12 @@ export default function CardDetailView({ cardId }) {
    *   • เงินสดที่กดจากบัตรซึ่งถูกเก็บในใบนี้
    */
   const billRows = useMemo(() => {
-    if (!bill) return []
+    if (!displayBill) return []
     const rows = transactions
       .filter((t) => t.cardId === cardId && (
         t.cardStatementId
-          ? t.cardStatementId === bill.id
-          : (t.date >= bill.periodStart && t.date <= bill.periodEnd)
+          ? t.cardStatementId === displayBill.id
+          : (t.date >= displayBill.periodStart && t.date <= displayBill.periodEnd)
       ))
       .map((t) => ({
         key: `t-${t.id}`, tx: t, date: t.date, name: t.itemName || '(ไม่ระบุชื่อ)',
@@ -461,20 +486,25 @@ export default function CardDetailView({ cardId }) {
         // ในบิลเหมือนรายการอื่น จ่ายเฉพาะบรรทัดนั้นได้ ที่เหลือของบิลยังค้างต่อไป
         prepayable: t.type === 'expense',
         // จ่ายบรรทัดนี้ไปแล้วเท่าไร — จ่ายทั้งใบไปแล้วก็ถือว่าทุกบรรทัดจ่ายครบ
-        paidInBill: bill.status === 'paid'
+        paidInBill: displayBill.status === 'paid'
           ? { amount: Math.abs(Number(t.amount || 0)), whole: true, legs: [] }
           : paidInBillByTx.get(t.id) ?? null,
       }))
     for (const a of advances) {
-      if (a.statementId !== bill.id) continue
+      if (a.statementId !== displayBill.id) continue
       rows.push({
         key: `a-${a.id}`, tx: null, advance: a, date: a.date, name: 'กดเงินสดจากบัตร',
         cat: Number(a.fee) > 0 ? `ค่าธรรมเนียม ${fmt(a.fee)}` : 'ไม่มีค่าธรรมเนียม',
         tag: 'กดเงินสด', amount: Number(a.amount || 0) + Number(a.fee || 0),
       })
     }
-    return rows.sort((x, y) => String(x.date).localeCompare(String(y.date)))
-  }, [bill, transactions, advances, cardId, getCategoryName, paidInBillByTx])
+    // จ่ายแล้วลงไปอยู่ล่างสุด — ของที่ยังต้องจัดการอยู่ต้องอยู่บนสุดเสมอ
+    // ไม่ใช่ให้ต้องเลื่อนหาในกองที่เคลียร์ไปแล้ว (ในกลุ่มเดียวกันยังเรียงตามวันที่เหมือนเดิม)
+    return rows.sort((x, y) =>
+      (rowSettled(x) ? 1 : 0) - (rowSettled(y) ? 1 : 0)
+      || String(x.date).localeCompare(String(y.date))
+    )
+  }, [displayBill, transactions, advances, cardId, getCategoryName, paidInBillByTx])
 
   /**
    * สองแท็บมีเสมอทุกใบ ไม่ว่าจะมีบิลค้างหรือไม่
@@ -490,9 +520,11 @@ export default function CardDetailView({ cardId }) {
   const hasBill = !!bill
   const shownRows = billTab === 'this' ? billRows : cycleRows
 
-  // ไม่มีบิลค้างก็เปิดมาที่แท็บรอบบิลหน้า ซึ่งเป็นก้อนเดียวที่มีของให้ดู
-  // ผูก dependency กับ "มี/ไม่มีบิล" อย่างเดียว กดสลับแท็บเองทีหลังจึงไม่ถูกดีดกลับ
-  useEffect(() => { if (!hasBill) setBillTab('next') }, [hasBill])
+  // ไม่มีบิลให้ดูเลยค่อยเด้งไปแท็บรอบบิลหน้า — บิลที่จ่ายครบแล้วยังมีของให้ไล่เช็ค
+  // จึงยังเปิดค้างที่แท็บนี้ ผูก dependency กับ "มี/ไม่มีบิลให้แสดง" อย่างเดียว
+  // กดสลับแท็บเองทีหลังจึงไม่ถูกดีดกลับ
+  const hasDisplayBill = !!displayBill
+  useEffect(() => { if (!hasDisplayBill) setBillTab('next') }, [hasDisplayBill])
 
   // สรุปงวดผ่อน: ที่รวมอยู่ในบิลรอบนี้ กับที่เหลือไปรอบถัดๆ ไป
   const installmentOutlook = useMemo(() => {
@@ -652,7 +684,10 @@ export default function CardDetailView({ cardId }) {
    */
   const rowMenuItems = (r, ins) => {
     if (r.tx) {
-      const inIssuedBill = hasBill && billTab === 'this'
+      // อยู่ในมุมมองบิลที่ออกแล้ว (รวมใบที่จ่ายจบแล้วซึ่งยังแสดงค้างไว้)
+      // ต้องเช็คด้วย displayBill ไม่ใช่ hasBill ไม่งั้นพอบิลจ่ายครบ รายการในใบจะไปโผล่
+      // เมนู "จ่ายรายการนี้ก่อนออกบิล" ทั้งที่จ่ายผ่านบิลไปแล้ว = จ่ายซ้ำ
+      const inIssuedBill = !!displayBill && billTab === 'this'
       const prepaidLeft = r.prepayable ? Math.abs(r.amount) - (r.prepaid?.amount ?? 0) : 0
       // จ่ายบรรทัดนี้ในบิลไปแล้วเท่าไร เหลือเท่าไร (ใช้ทั้งปุ่มจ่ายและปุ่มทำเครื่องหมาย)
       const paidHereLeft = Math.abs(r.amount) - (r.paidInBill?.amount ?? 0)
@@ -1136,7 +1171,14 @@ export default function CardDetailView({ cardId }) {
               แท็บแบบแฟ้ม: แถบเข้มด้านบน แท็บที่เลือกเป็นสีขาวเชื่อมกับเนื้อหาข้างล่าง */}
           <div className="flex items-end gap-1 px-3 pt-2 bg-ink flex-none">
               {[
-                { k: 'this', t: 'รายการในรอบบิลนี้', s: bill ? `ครบกำหนด ${formatIsoThai(bill.dueDate)} · ออกบิลแล้ว` : 'ไม่มีบิลค้าง', n: billRows.length },
+                { k: 'this',
+                  t: 'รายการในรอบบิลนี้',
+                  s: bill
+                    ? `ครบกำหนด ${formatIsoThai(bill.dueDate)} · ออกบิลแล้ว`
+                    : displayBill
+                      ? `จ่ายครบแล้ว · ครบกำหนด ${formatIsoThai(displayBill.dueDate)}`
+                      : 'ไม่มีบิลค้าง',
+                  n: billRows.length },
                 { k: 'next', t: 'รายการในรอบบิลหน้า', s: current ? `ตัดรอบ ${formatThaiDate(current.end)} · ครบกำหนด ${formatThaiDate(current.due)}` : '', n: cycleRows.length },
               ].map((tab) => {
                 const on = billTab === tab.k
@@ -1163,7 +1205,9 @@ export default function CardDetailView({ cardId }) {
             {billTab === 'this'
               ? (hasBill
                 ? 'รายการที่ธนาคารเก็บในบิลใบนี้ · กด "จ่ายยอดนี้" เพื่อจ่ายบิลเฉพาะรายการนั้น (จ่ายแล้วจะขึ้นถูกสีเขียวหน้าแถว) · จ่ายไปแล้วก่อนหน้านี้แต่ระบบยังไม่รู้ว่าเป็นของบรรทัดไหน กด "ติ๊กว่าจ่ายแล้ว" ได้เลย ไม่ตัดเงินเพิ่ม · รายการที่ย้ายเข้ามาหลังออกบิลมีปุ่ม "ย้ายไปรอบบิลหน้า" ส่วนของเดิมตามวันที่รูดย้ายไม่ได้ · ติ๊กหน้าแถวเองคือทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน)'
-                : 'บัตรใบนี้ไม่มีบิลที่ต้องจ่าย · บิลใบถัดไปจะออกเองตอนสรุปยอด แล้วรายการจากแท็บ "รอบบิลหน้า" จะย้ายมาอยู่ที่นี่')
+                : displayBill
+                  ? 'บิลใบนี้จ่ายครบแล้ว — รายการยังอยู่ให้ไล่เช็คกับสลิปได้ ทุกบรรทัดติดเครื่องหมายว่าจ่ายแล้ว · พอถึงวันสรุปยอดรอบถัดไป รายการจากแท็บ "รอบบิลหน้า" จะมาแทนที่ตรงนี้'
+                  : 'บัตรใบนี้ไม่มีบิลที่ต้องจ่าย · บิลใบถัดไปจะออกเองตอนสรุปยอด แล้วรายการจากแท็บ "รอบบิลหน้า" จะย้ายมาอยู่ที่นี่')
               : (hasBill ? 'รายการที่รูดหลังวันสรุปยอดมาอยู่ที่นี่ จะถูกเรียกเก็บในบิลรอบถัดไป · ถ้าธนาคารเก็บในบิลใบที่ออกแล้ว กด "ย้ายไปรอบบิลนี้" · ' : 'ทุกรายการที่รูดในรอบนี้อยู่ที่นี่ และจะกลายเป็นบิลใบถัดไปตอนสรุปยอด · ')
                 + 'รูดแล้วโอนคืนทันที กด "จ่ายรายการนี้" ยอดจะถูกหักออกจากบิลรอบที่กำลังมาถึง · กดปุ่ม ⋮ ท้ายแถวเพื่อจัดการรายการนั้น · ติ๊กหน้าแถวเพื่อทำเครื่องหมายว่าตรวจกับสลิปแล้ว (ไม่ตัดเงิน) · งวดผ่อนที่ติดป้าย "รอเรียกเก็บ" คือค่างวดของรอบนี้ที่ธนาคารจะรวมมากับบิลใบนี้ตอนสรุปยอด'}
           </div>
@@ -1171,7 +1215,7 @@ export default function CardDetailView({ cardId }) {
             {shownRows.length === 0 ? (
               <p className="text-center text-[12.5px] text-faint py-8">
                 {billTab === 'this'
-                  ? (hasBill
+                  ? (displayBill
                     ? 'บิลใบนี้ไม่มีรายการ'
                     : `ไม่มีบิลที่ต้องจ่าย — บิลใบถัดไปจะออกตอนสรุปยอด${current ? ` ${formatThaiDate(current.end)}` : ''}`)
                   : 'ยังไม่มีรายการในรอบนี้'}
@@ -1195,7 +1239,9 @@ export default function CardDetailView({ cardId }) {
               // จ่ายบรรทัดนี้ในบิลที่ออกแล้วไปเท่าไร เหลือเท่าไร
               const paidInBillLeft = r.paidInBill ? Math.abs(r.amount) - r.paidInBill.amount : null
               const fullyPaidInBill = paidInBillLeft !== null && paidInBillLeft <= 0.005
-              const lastPaidAt = r.paidInBill?.legs?.map((l) => l.paidAt).sort().at(-1) ?? null
+              // จ่ายทั้งใบ = ไม่มีขาที่ผูกกับบรรทัด ใช้วันที่จ่ายบิลของใบนั้นแทน
+              const lastPaidAt = r.paidInBill?.legs?.map((l) => l.paidAt).sort().at(-1)
+                ?? (r.paidInBill?.whole ? displayBill?.paidAt ?? null : null)
               // บรรทัดนี้ "จ่ายแล้ว" จริง ไม่ว่าจะจ่ายก่อนออกบิลหรือจ่ายตอนบิลออกแล้ว
               const rowPaid = fullyPrepaid || fullyPaidInBill
               return (
@@ -1258,11 +1304,14 @@ export default function CardDetailView({ cardId }) {
                         รอบที่ยังไม่ออกบิล = จ่ายล่วงหน้า (ยอดหายจากรอบสะสมทันที)
                         บิลที่ออกแล้ว = จ่ายบิลด้วยยอดของรายการนี้ */}
                     {r.prepayable && (
-                      hasBill && billTab === 'this' ? (
-                        fullyPaidInBill ? (
+                      // ใช้ displayBill ไม่ใช่ hasBill — บิลที่จ่ายจบแล้วยังแสดงรายการค้างไว้
+                      // ถ้าเช็คด้วย hasBill แถวพวกนั้นจะได้ปุ่ม "จ่ายรายการนี้" ของรอบที่ยัง
+                      // ไม่ออกบิล ซึ่งกดแล้วเท่ากับจ่ายซ้ำทั้งที่จ่ายผ่านบิลไปแล้ว
+                      displayBill && billTab === 'this' ? (
+                        fullyPaidInBill || !bill ? (
                           <span
                             className="text-[10px] text-income font-semibold whitespace-nowrap"
-                            title={r.paidInBill.whole
+                            title={r.paidInBill?.whole || !bill
                               ? 'บิลใบนี้จ่ายครบแล้ว ทุกรายการในใบจึงถือว่าจ่ายแล้ว'
                               : 'จ่ายบิลด้วยยอดของรายการนี้ไปแล้ว · ย้อนได้ที่ปุ่มย้อนการจ่ายของบิล'}
                           >
