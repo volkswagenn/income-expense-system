@@ -81,7 +81,6 @@ export default function WalletPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 wide:grid-cols-3 gap-3 items-start">
         <WalletSection
           title="เงินสด"
-          count="ในร้าน"
           hint="กดปุ่ม ⋮ ที่บัญชีเพื่อฝากเข้าบัญชี ถอนออกมา หรือดูความเคลื่อนไหว"
         >
           <div className="flex items-center gap-[11px] py-2.5 border-t border-[#F2F0EA] mt-2">
@@ -89,7 +88,7 @@ export default function WalletPage() {
               สด
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block text-[12.5px] font-semibold truncate">เงินสดในร้าน</span>
+              <span className="block text-[12.5px] font-semibold truncate">เงินสด</span>
               <span className="block text-[11px] text-faint truncate">ยอดที่ระบบบันทึกไว้ ณ ตอนนี้</span>
             </span>
             <span className="tabular-nums flex-none text-sm font-bold text-income">{fmt(cash)}</span>
